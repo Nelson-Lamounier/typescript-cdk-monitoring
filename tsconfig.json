@@ -18,13 +18,23 @@
     "experimentalDecorators": true,
     "strictPropertyInitialization": true,
     "typeRoots": ["./node_modules/@types"],
-    "outDir": "lib",
+    "outDir": "dist",
     "rootDir": ".",
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true
   },
-  "include": ["**/*.ts"],
-  "exclude": ["node_modules", "cdk.out"]
+  "include": [
+    "bin/**/*.ts",
+    "config/**/*.ts",
+    "lib/**/*.ts",
+    "tests/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "cdk.out",
+    "**/*.js",
+    "**/*.d.ts"
+  ]
 }

@@ -1,6 +1,9 @@
 # CDK asset staging directory
 cdk.out
 
+# Compiled output directory
+dist/
+
 # Compiled JavaScript
 *.js
 *.js.map

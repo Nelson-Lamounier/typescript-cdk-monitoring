@@ -409,11 +409,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            lib/**/*.js
-            lib/**/*.js.map
-            lib/**/*.d.ts
-            bin/**/*.js
-            config/**/*.js
+            dist/**/*.js
+            dist/**/*.js.map
+            dist/**/*.d.ts
             cdk.out
             node_modules
           key: ${{ steps.cache-key.outputs.key }}
@@ -426,14 +424,14 @@ jobs:
           yarn build
 
           echo "Build Results:"
-          # TypeScript compiles to lib/ directory (as configured in tsconfig.json)
-          # Check for compiled JavaScript files in lib/ directory
-          JS_FILES=$(find lib bin config -name "*.js" 2>/dev/null | wc -l)
+          # TypeScript compiles to dist/ directory (as configured in tsconfig.json)
+          # Check for compiled JavaScript files in dist/ directory
+          JS_FILES=$(find dist -name "*.js" 2>/dev/null | wc -l)
 
           if [ "$JS_FILES" -gt 0 ]; then
             echo "Build successful: $JS_FILES JavaScript files created"
             echo "Compiled files found in:"
-            find lib bin config -name "*.js" 2>/dev/null | head -10
+            find dist -name "*.js" 2>/dev/null | head -10
           else
             echo "WARNING: No compiled JavaScript files found"
             echo "This may be expected if TypeScript compilation only validates types"

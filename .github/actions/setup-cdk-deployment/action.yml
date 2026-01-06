@@ -37,11 +37,9 @@ runs:
       uses: actions/cache@v4
       with:
         path: |
-          lib/**/*.js
-          lib/**/*.js.map
-          lib/**/*.d.ts
-          bin/**/*.js
-          config/**/*.js
+          dist/**/*.js
+          dist/**/*.js.map
+          dist/**/*.d.ts
           cdk.out
           node_modules
         # Restores build artifacts from build job to avoid recompilation
@@ -121,13 +119,13 @@ runs:
         fi
 
         # Check build artifacts - verifies TypeScript compilation output exists
-        # TypeScript compiles to lib/, bin/, and config/ directories (per tsconfig.json)
-        JS_FILES=$(find lib bin config -name "*.js" 2>/dev/null | wc -l)
+        # TypeScript compiles to dist/ directory (per tsconfig.json)
+        JS_FILES=$(find dist -name "*.js" 2>/dev/null | wc -l)
         
         if [ "$JS_FILES" -gt 0 ]; then
           echo "Build Artifacts: $JS_FILES JavaScript files found"
           echo "Compiled files found in:"
-          find lib bin config -name "*.js" 2>/dev/null | head -5 | sed 's/^/  - /'
+          find dist -name "*.js" 2>/dev/null | head -5 | sed 's/^/  - /'
         else
           echo "Build Artifacts: No compiled JavaScript files found"
           echo ""
@@ -136,11 +134,11 @@ runs:
           # Fallback: build if cache miss - ensures deployment can proceed
           # even when build cache restoration fails
           if yarn build; then
-            JS_FILES=$(find lib bin config -name "*.js" 2>/dev/null | wc -l)
+            JS_FILES=$(find dist -name "*.js" 2>/dev/null | wc -l)
             if [ "$JS_FILES" -gt 0 ]; then
               echo "Fallback Build Successful: $JS_FILES JavaScript files created"
               echo "Compiled files found in:"
-              find lib bin config -name "*.js" 2>/dev/null | head -5 | sed 's/^/  - /'
+              find dist -name "*.js" 2>/dev/null | head -5 | sed 's/^/  - /'
             else
               echo "Fallback Build Failed: No JavaScript files created"
               echo ""
