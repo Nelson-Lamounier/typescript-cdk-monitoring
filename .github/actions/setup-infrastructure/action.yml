@@ -50,7 +50,6 @@ runs:
           .pnp.cjs
           .pnp.loader.mjs
           node_modules
-          infrastructure/node_modules
         # Cache key based on lockfile hash - invalidates when dependencies change
         key: ${{ runner.os }}-deps-${{ hashFiles('**/yarn.lock', '**/package.json') }}
         restore-keys: |

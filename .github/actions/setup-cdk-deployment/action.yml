@@ -37,8 +37,8 @@ runs:
       uses: actions/cache@v4
       with:
         path: |
-          infrastructure/dist
-          infrastructure/cdk.out
+          dist
+          cdk.out
           node_modules
         # Restores build artifacts from build job to avoid recompilation
         key: ${{ inputs.build-cache-key }}
@@ -98,8 +98,7 @@ runs:
         fi
 
         # Check CDK - uses npx to invoke local dependency, avoiding Yarn exec version issues
-        if [ -d "infrastructure" ] && command -v yarn &> /dev/null; then
-          cd infrastructure
+        if command -v yarn &> /dev/null; then
           if CDK_VERSION=$(npx cdk --version 2>/dev/null); then
             echo "CDK: $CDK_VERSION"
           else
@@ -111,45 +110,37 @@ runs:
             echo "  - CDK not included in package.json"
             SETUP_ERRORS=$((SETUP_ERRORS + 1))
           fi
-          cd ..
         else
-          echo "CDK: Cannot verify (infrastructure directory or yarn not available)"
+          echo "CDK: Cannot verify (yarn not available)"
           SETUP_ERRORS=$((SETUP_ERRORS + 1))
         fi
 
         # Check build artifacts - verifies TypeScript compilation output exists
-        if [ -d "infrastructure/dist" ]; then
-          DIST_FILES=$(find infrastructure/dist -name "*.js" | wc -l)
+        if [ -d "dist" ]; then
+          DIST_FILES=$(find dist -name "*.js" | wc -l)
           echo "Build Artifacts: $DIST_FILES JavaScript files found"
         else
           echo "Build Artifacts: dist directory not found"
           echo ""
-          echo "Attempting to build infrastructure..."
+          echo "Attempting to build..."
           
-          # Fallback: build infrastructure if cache miss - ensures deployment can proceed
+          # Fallback: build if cache miss - ensures deployment can proceed
           # even when build cache restoration fails
-          if [ -d "infrastructure" ]; then
-            cd infrastructure
-            if npx turbo build --filter=infrastructure; then
-              if [ -d "dist" ]; then
-                DIST_FILES=$(find dist -name "*.js" | wc -l)
-                echo "Fallback Build Successful: $DIST_FILES JavaScript files created"
-              else
-                echo "Fallback Build Failed: No dist directory created"
-                SETUP_ERRORS=$((SETUP_ERRORS + 1))
-              fi
+          if npx turbo build; then
+            if [ -d "dist" ]; then
+              DIST_FILES=$(find dist -name "*.js" | wc -l)
+              echo "Fallback Build Successful: $DIST_FILES JavaScript files created"
             else
-              echo "Fallback Build Failed: Build command failed"
-              echo ""
-              echo "Possible Issues:"
-              echo "  - TypeScript compilation errors"
-              echo "  - Missing dependencies"
-              echo "  - Build configuration issues"
+              echo "Fallback Build Failed: No dist directory created"
               SETUP_ERRORS=$((SETUP_ERRORS + 1))
             fi
-            cd ..
           else
-            echo "Fallback Build Failed: Infrastructure directory not found"
+            echo "Fallback Build Failed: Build command failed"
+            echo ""
+            echo "Possible Issues:"
+            echo "  - TypeScript compilation errors"
+            echo "  - Missing dependencies"
+            echo "  - Build configuration issues"
             SETUP_ERRORS=$((SETUP_ERRORS + 1))
           fi
         fi
@@ -176,7 +167,7 @@ runs:
           echo "VERIFY DEPENDENCIES:"
           echo "   - Node.js and Yarn installation"
           echo "   - AWS CLI configuration"
-          echo "   - CDK installation in infrastructure package"
+          echo "   - CDK installation in package.json"
           echo ""
           echo "CHECK CREDENTIALS:"
           echo "   - AWS OIDC role configuration"

@@ -139,7 +139,6 @@ runs:
     - name: Deploy Stack
       id: deploy
       shell: bash
-      working-directory: infrastructure
       run: |
         echo "Starting deployment of ${{ inputs.stack-name }}..."
         echo ""
@@ -212,7 +211,7 @@ runs:
           echo "  1. Check if 'setup-cdk-deployment' composite action ran successfully"
           echo "  2. Verify Node.js and dependencies are properly installed"
           echo "  3. Check build cache restoration"
-          echo "  4. Ensure CDK is installed in infrastructure workspace"
+          echo "  4. Ensure CDK is installed in the workspace"
           echo ""
           echo "status=failure" >> $GITHUB_OUTPUT
           exit 1
@@ -269,9 +268,9 @@ runs:
           echo ""
           echo "Quick Fixes:"
           echo "  1. Verify stack name format: [StackName]-${{ inputs.environment }}"
-          echo "  2. Check infrastructure/bin/app.ts for stack definitions"
+          echo "  2. Check bin/app.ts for stack definitions"
           echo "  3. Verify ENVIRONMENT variable is set correctly: ${{ inputs.environment }}"
-          echo "  4. Try running: cd infrastructure && ENVIRONMENT=${{ inputs.environment }} npx cdk list"
+          echo "  4. Try running: ENVIRONMENT=${{ inputs.environment }} npx cdk list"
           echo ""
           
           # Try to synthesize the specific stack to get better error messages
@@ -412,7 +411,7 @@ runs:
             echo "  2. MonitoringEfsStack-pipeline (if applicable)"
             echo "  3. NetworkingStack-pipeline"
             echo ""
-            echo "See: infrastructure/CLOUDFORMATION_EXPORT_DEPENDENCY_FIX.md"
+            echo "See: CLOUDFORMATION_EXPORT_DEPENDENCY_FIX.md"
             echo ""
             echo "status=failure" >> $GITHUB_OUTPUT
             exit $DEPLOY_EXIT_CODE

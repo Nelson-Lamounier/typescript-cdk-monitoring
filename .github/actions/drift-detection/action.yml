@@ -160,7 +160,6 @@ runs:
     - name: CDK Diff Analysis
       id: cdk-diff
       shell: bash
-      working-directory: infrastructure
       run: |
         echo "Performing CDK diff analysis..."
         echo ""
