@@ -296,20 +296,109 @@ runs:
           # Get drift detection results
           echo "Retrieving drift detection results..."
           
-          DRIFT_STATUS=$(aws cloudformation describe-stack-drift-detection-status \
+          # Retrieve stack drift status with error checking
+          # If this command fails, we cannot determine drift status and must fail the step
+          if ! DRIFT_STATUS=$(aws cloudformation describe-stack-drift-detection-status \
             --stack-drift-detection-id "$DRIFT_DETECTION_ID" \
             --query 'StackDriftStatus' \
-            --output text)
+            --output text 2>&1); then
+            echo "CRITICAL ERROR: Failed to retrieve stack drift status"
+            echo ""
+            echo "AWS CLI Error: $DRIFT_STATUS"
+            echo ""
+            echo "POSSIBLE CAUSES:"
+            echo "  1. Network connectivity issues"
+            echo "  2. AWS API throttling or rate limiting"
+            echo "  3. Insufficient CloudFormation permissions"
+            echo "  4. Invalid drift detection ID"
+            echo "  5. AWS service temporarily unavailable"
+            echo ""
+            echo "REQUIRED PERMISSIONS:"
+            echo "  - cloudformation:DescribeStackDriftDetectionStatus"
+            echo ""
+            echo "TROUBLESHOOTING:"
+            echo "  1. Verify AWS credentials are valid"
+            echo "  2. Check network connectivity to AWS"
+            echo "  3. Retry the drift detection after a short delay"
+            echo "  4. Verify IAM permissions include required CloudFormation actions"
+            echo ""
+            exit 1
+          fi
           
-          DRIFTED_RESOURCES=$(aws cloudformation describe-stack-drift-detection-status \
+          # Validate drift status is not empty - empty result indicates API failure
+          if [ -z "$DRIFT_STATUS" ]; then
+            echo "CRITICAL ERROR: Stack drift status is empty"
+            echo ""
+            echo "The AWS API returned an empty response, indicating the query failed silently"
+            echo ""
+            echo "POSSIBLE CAUSES:"
+            echo "  1. Invalid query path or stack drift detection ID"
+            echo "  2. AWS API returned unexpected response format"
+            echo "  3. Stack drift detection was cancelled or expired"
+            echo ""
+            echo "TROUBLESHOOTING:"
+            echo "  1. Verify drift detection ID is valid: $DRIFT_DETECTION_ID"
+            echo "  2. Check CloudFormation console for drift detection status"
+            echo "  3. Retry drift detection from the beginning"
+            echo ""
+            exit 1
+          fi
+          
+          # Retrieve drifted resource count with error checking
+          # If this command fails, we cannot determine drift count and must fail the step
+          if ! DRIFTED_RESOURCES=$(aws cloudformation describe-stack-drift-detection-status \
             --stack-drift-detection-id "$DRIFT_DETECTION_ID" \
             --query 'DriftedStackResourceCount' \
-            --output text)
+            --output text 2>&1); then
+            echo "CRITICAL ERROR: Failed to retrieve drifted resource count"
+            echo ""
+            echo "AWS CLI Error: $DRIFTED_RESOURCES"
+            echo ""
+            echo "POSSIBLE CAUSES:"
+            echo "  1. Network connectivity issues"
+            echo "  2. AWS API throttling or rate limiting"
+            echo "  3. Insufficient CloudFormation permissions"
+            echo "  4. Invalid drift detection ID"
+            echo "  5. AWS service temporarily unavailable"
+            echo ""
+            echo "REQUIRED PERMISSIONS:"
+            echo "  - cloudformation:DescribeStackDriftDetectionStatus"
+            echo ""
+            echo "TROUBLESHOOTING:"
+            echo "  1. Verify AWS credentials are valid"
+            echo "  2. Check network connectivity to AWS"
+            echo "  3. Retry the drift detection after a short delay"
+            echo "  4. Verify IAM permissions include required CloudFormation actions"
+            echo ""
+            exit 1
+          fi
+          
+          # Validate drifted resources count is numeric - non-numeric values indicate API failure
+          # Empty string or non-numeric values would cause incorrect arithmetic in analysis step
+          if [ -z "$DRIFTED_RESOURCES" ] || ! [[ "$DRIFTED_RESOURCES" =~ ^[0-9]+$ ]]; then
+            echo "CRITICAL ERROR: Invalid drifted resource count"
+            echo ""
+            echo "Expected: Non-negative integer (0, 1, 2, etc.)"
+            echo "Received: '$DRIFTED_RESOURCES'"
+            echo ""
+            echo "POSSIBLE CAUSES:"
+            echo "  1. AWS API returned unexpected response format"
+            echo "  2. Query path returned wrong data type"
+            echo "  3. Stack drift detection was cancelled or expired"
+            echo ""
+            echo "TROUBLESHOOTING:"
+            echo "  1. Verify drift detection ID is valid: $DRIFT_DETECTION_ID"
+            echo "  2. Check CloudFormation console for drift detection status"
+            echo "  3. Retry drift detection from the beginning"
+            echo ""
+            exit 1
+          fi
           
           echo "CloudFormation Drift Results:"
           echo "  Stack Drift Status: $DRIFT_STATUS"
           echo "  Drifted Resources: $DRIFTED_RESOURCES"
           
+          # Only set outputs if all validations passed - ensures downstream steps receive valid data
           echo "cf_drift_status=$DRIFT_STATUS" >> $GITHUB_OUTPUT
           echo "cf_drifted_resources=$DRIFTED_RESOURCES" >> $GITHUB_OUTPUT
           
