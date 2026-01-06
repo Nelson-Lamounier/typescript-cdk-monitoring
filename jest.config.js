@@ -2,7 +2,7 @@
 
 module.exports = {
   testEnvironment: "node",
-  roots: ["<rootDir>/test"],
+  roots: ["<rootDir>/tests"],
   testMatch: ["**/*.test.ts"],
   testTimeout: 10000,
   verbose: false,
@@ -10,7 +10,7 @@ module.exports = {
   reporters: ["default"],
   maxWorkers: 1,
   forceExit: true,
-  setupFilesAfterEnv: ["<rootDir>/test/jest-setup.ts"],
+  setupFilesAfterEnv: ["<rootDir>/tests/jest-setup.ts"],
   transform: {
     "^.+\\.(ts|tsx)$": "babel-jest",
   },
