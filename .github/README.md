@@ -5,6 +5,10 @@ This directory contains reusable composite actions for CDK infrastructure deploy
 ## Table of Contents
 
 - [Overview](#overview)
+- [Workflows](#workflows)
+  - [CI Workflow (ci.yml)](#ci-workflow-ciyml)
+  - [CD Workflow (deploy.yml)](#cd-workflow-deployyml)
+  - [Determine Jobs to Run](#determine-jobs-to-run)
 - [Actions](#actions)
   - [setup-infrastructure](#setup-infrastructure)
   - [setup-cdk-deployment](#setup-cdk-deployment)
@@ -28,6 +32,173 @@ All actions include:
 - Detailed troubleshooting guidance
 - Support for cross-account deployments
 - Environment-specific configuration
+
+## Workflows
+
+The repository uses two separate workflows to optimise performance, security, and maintainability:
+
+### CI Workflow (`ci.yml`)
+
+**Purpose**: Provides fast feedback on code quality for every commit and pull request.
+
+**Triggers**:
+- Push to any branch
+- Pull requests to any branch
+- Manual dispatch
+
+**Jobs**:
+1. **determine-jobs** - Determines which CI jobs to run based on inputs
+2. **security-scan** - Validates workflow inputs and scans for secrets in code
+3. **lint-and-quality** - TypeScript linting, type checking, CDK validation, tests, shell/YAML/JSON linting, documentation validation
+4. **build** - Compiles infrastructure code and validates CDK synthesis
+5. **validate-setup** - Read-only AWS environment validation (no deployment permissions)
+
+**Key Features**:
+- **Fast Execution**: Typically completes in < 5 minutes
+- **Minimal Permissions**: Read-only access, no deployment capabilities
+- **Early Feedback**: Runs on every commit to catch issues quickly
+- **No Environment Protection**: Can run on any branch without approval gates
+
+**Usage**:
+```yaml
+# Automatically runs on push/PR
+# Or manually trigger via GitHub Actions UI
+```
+
+**Outputs**:
+- Build cache key for use in CD workflow
+- Test coverage reports
+- Linting reports
+- Validation results
+
+---
+
+### CD Workflow (`deploy.yml`)
+
+**Purpose**: Controlled infrastructure deployments with comprehensive validation and error handling.
+
+**Triggers**:
+- Push to `main` branch (protected)
+- Manual dispatch with stack selection
+
+**Workflow Inputs** (Manual Dispatch):
+- `stack`: Stack to deploy (networking, monitoring-efs, monitoring-infra, monitoring-services, vpc-peering, destroy-all)
+- `jobs_to_run`: Comma-separated job list or 'all' or 'failed'
+- `rerun_failed_from`: Run ID to re-run failed jobs from
+- `enable_drift_detection`: Enable drift detection after deployment
+- `drift_threshold`: Maximum drift count before failing
+- `skip_validation`: Skip pre-deployment validation
+
+**Jobs**:
+1. **determine-jobs** - Determines which deployment jobs to run based on inputs and stack selection
+2. **build** - Compiles infrastructure code (required for deployments)
+3. **validate-setup** - AWS environment setup with deployment permissions
+4. **deploy-networking** - Deploys NetworkingStack
+5. **deploy-monitoring-efs** - Deploys MonitoringEfsStack
+6. **deploy-vpc-peering** - Deploys VpcPeeringStack
+7. **deploy-monitoring-infra** - Deploys MonitoringInfraStack
+8. **deploy-monitoring-services** - Deploys MonitoringServiceStack
+9. **health-checks** - Post-deployment health validation
+10. **drift-detection-*** - Infrastructure drift detection for each stack
+11. **destroy-all** - Stack destruction job (optional)
+
+**Key Features**:
+- **Environment Protection**: Requires approval for production deployments
+- **Deployment Permissions**: Full AWS deployment access via OIDC
+- **Comprehensive Validation**: Pre-deployment checks and post-deployment verification
+- **Error Recovery**: Automatic retry logic and detailed troubleshooting guidance
+- **Selective Execution**: Run specific jobs or re-run failed jobs only
+
+**Usage**:
+```yaml
+# Automatically runs on merge to main
+# Or manually trigger with stack selection:
+# - Select stack to deploy
+# - Optionally specify jobs_to_run
+# - Optionally provide rerun_failed_from run ID
+```
+
+**Dependencies**:
+- Requires successful CI workflow (or can run build/validate-setup internally)
+- Uses build cache from CI when available
+- Validates AWS credentials and account configuration
+
+---
+
+### Determine Jobs to Run
+
+Both workflows include a `determine-jobs` job that intelligently selects which jobs to execute based on various inputs.
+
+#### How It Works
+
+**Three Execution Modes**:
+
+1. **Rerun Failed Jobs** (`rerun_failed_from`)
+   - Fetches failed jobs from a previous workflow run
+   - Uses GitHub CLI to query run information
+   - Automatically enables dependencies
+   - Example: If `deploy-monitoring-infra` failed, it enables `build`, `validate-setup`, `deploy-networking`, `deploy-efs`, and `deploy-infra`
+
+2. **Selective Jobs** (`jobs_to_run`)
+   - Comma-separated list: `"build,deploy-networking"`
+   - Case-insensitive keyword matching
+   - Auto-enables dependencies for deployment jobs
+   - Example: `"deploy-networking"` automatically enables `build` and `validate-setup`
+
+3. **All Jobs** (`jobs_to_run: "all"` or empty)
+   - Runs all standard jobs
+   - Disables `destroy-all` and `rollback` by default (safety)
+   - Respects `enable_drift_detection` input
+
+#### Job Keywords
+
+For selective execution, use these keywords (case-insensitive):
+- `security` → Security scan
+- `lint` → Lint and quality checks
+- `build` → Build infrastructure
+- `validate` or `setup` → Validate and setup
+- `networking` → Deploy networking stack
+- `efs` → Deploy EFS stack
+- `peering` or `vpc` → Deploy VPC peering
+- `infra` → Deploy monitoring infrastructure
+- `services` → Deploy monitoring services
+- `health` → Health checks
+- `destroy` → Destroy all stacks
+- `drift` → Drift detection
+
+#### Stack-Specific Logic
+
+When `stack: "destroy-all"` is selected:
+- Enables `destroy-all` job
+- Disables all deployment jobs
+- Prevents accidental deployments during destruction
+
+#### Usage Examples
+
+```yaml
+# Re-run failed jobs from a previous run
+rerun_failed_from: "1234567890"
+
+# Run specific jobs
+jobs_to_run: "build,deploy-networking"
+
+# Run all jobs (default)
+jobs_to_run: "all"  # or leave empty
+
+# Quick deployment without drift detection
+jobs_to_run: "build,deploy-networking"
+enable_drift_detection: false
+```
+
+#### Error Handling
+
+The `determine-jobs` job includes comprehensive error handling:
+- **Invalid Run ID**: Validates format and provides clear error messages
+- **Run Not Found**: Falls back to running all jobs with helpful guidance
+- **No Failed Jobs**: Handles case where all jobs succeeded
+- **GitHub API Errors**: Graceful degradation with fallback behaviour
+
+---
 
 ## Actions
 
@@ -314,6 +485,29 @@ The action includes a predefined dependency model for common pipeline jobs:
 
 ## Common Usage Patterns
 
+### CI/CD Workflow Integration
+
+The CI and CD workflows work together to provide a complete pipeline:
+
+```yaml
+# CI Workflow (ci.yml) - Runs on every commit/PR
+# Provides fast feedback on code quality
+# Outputs: build cache key, test results, linting reports
+
+# CD Workflow (deploy.yml) - Runs on merge to main
+# Uses CI build cache when available
+# Performs controlled deployments with validation
+```
+
+**Typical Flow**:
+1. Developer pushes code → CI workflow runs
+2. CI validates code quality, runs tests, builds infrastructure
+3. Code is reviewed and merged to `main`
+4. CD workflow runs automatically
+5. CD uses CI build cache (if available) or rebuilds
+6. CD validates AWS environment and deploys stacks
+7. CD runs health checks and drift detection
+
 ### Complete Deployment Workflow
 
 ```yaml
@@ -471,6 +665,17 @@ jobs:
 
 ## Best Practices
 
+### Workflow Best Practices
+
+1. **Keep CI fast and frequent**: CI runs on every commit - optimise for speed
+2. **Protect CD workflows**: Use environment protection for production deployments
+3. **Use selective job execution**: Run only necessary jobs for faster iteration
+4. **Leverage build cache**: CI builds artifacts that CD can reuse
+5. **Re-run failed jobs**: Use `rerun_failed_from` to retry only failed jobs
+6. **Enable drift detection**: Run drift detection after deployments to ensure compliance
+
+### Action Best Practices
+
 1. **Always use setup-infrastructure first**: Ensures consistent environment across all jobs
 2. **Cache build artifacts**: Reduces deployment time by reusing compiled code
 3. **Validate before deploy**: Use `validate-setup` job to verify AWS account and credentials
@@ -482,8 +687,65 @@ jobs:
 
 ---
 
+## Workflow Architecture
+
+### Separation of Concerns
+
+The workflows are split to optimise for different requirements:
+
+| Aspect | CI Workflow | CD Workflow |
+|--------|-------------|-------------|
+| **Frequency** | Every commit/PR | Merge to main or manual |
+| **Speed** | Fast (< 5 min) | Comprehensive (15-30 min) |
+| **Permissions** | Read-only | Deployment access |
+| **Environment** | No protection | Protected (pipeline) |
+| **Purpose** | Code quality feedback | Infrastructure deployment |
+| **Jobs** | Security, lint, build, validate | Build, validate, deploy, health, drift |
+
+### Workflow Dependencies
+
+```
+CI Workflow (ci.yml)
+├── determine-jobs (CI)
+├── security-scan
+├── lint-and-quality
+├── build → outputs cache-key
+└── validate-setup (read-only)
+
+CD Workflow (deploy.yml)
+├── determine-jobs (CD)
+├── build (uses CI cache if available)
+├── validate-setup (with deployment permissions)
+├── deploy-networking
+├── deploy-monitoring-efs
+├── deploy-vpc-peering
+├── deploy-monitoring-infra
+├── deploy-monitoring-services
+├── health-checks
+└── drift-detection-*
+```
+
+### Job Selection Logic
+
+The `determine-jobs` job in both workflows supports:
+
+1. **Automatic Selection**: Based on workflow trigger and inputs
+2. **Selective Execution**: Specify exact jobs to run
+3. **Failed Job Re-run**: Automatically detect and re-run failed jobs
+4. **Dependency Resolution**: Auto-enables required dependencies
+
+This provides flexibility for:
+- Quick iterations (run specific jobs only)
+- Debugging (re-run failed jobs)
+- Full deployments (run all jobs)
+- Selective updates (update single stack)
+
+---
+
 ## Related Documentation
 
 - [AWS CDK Documentation](https://docs.aws.amazon.com/cdk/)
 - [GitHub Actions Composite Actions](https://docs.github.com/en/actions/creating-actions/creating-a-composite-action)
 - [AWS CloudFormation Drift Detection](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-cfn-stack-drift.html)
+- [Workflow Analysis](./WORKFLOW_ANALYSIS.md) - Detailed analysis of workflow structure
+- [Split Workflows Summary](./SPLIT_WORKFLOWS_SUMMARY.md) - Migration guide for workflow split
