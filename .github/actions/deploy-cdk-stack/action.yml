@@ -129,6 +129,109 @@ runs:
         echo "  Dev Account: ${{ inputs.dev-account-id != '' && '***MASKED***' || 'Not configured' }}"
         echo ""
 
+    - name: Verify CDK Bootstrap
+      shell: bash
+      run: |
+        echo "Verifying CDK bootstrap stack version..."
+        echo ""
+        
+        # Check if bootstrap stack exists and get its version
+        # CDK requires bootstrap version 30 or later for modern features
+        BOOTSTRAP_STACK_NAME="CDKToolkit"
+        REGION="${{ inputs.aws-region }}"
+        BOOTSTRAP_CHECK_FAILED=0
+        
+        # Try to get bootstrap stack version
+        BOOTSTRAP_OUTPUT=$(aws cloudformation describe-stacks \
+          --stack-name "$BOOTSTRAP_STACK_NAME" \
+          --region "$REGION" \
+          --query 'Stacks[0].Parameters[?ParameterKey==`BootstrapVersion`].ParameterValue' \
+          --output text 2>&1)
+        
+        BOOTSTRAP_ERROR_CODE=$?
+        
+        # Check if the error is due to stack not existing vs permission issues
+        if echo "$BOOTSTRAP_OUTPUT" | grep -q "does not exist"; then
+          echo "Bootstrap stack not found"
+          echo ""
+          echo "SOLUTION: Bootstrap the environment"
+          echo ""
+          echo "The CDK bootstrap stack does not exist in this account/region."
+          echo "Run the following command to bootstrap:"
+          echo ""
+          echo "  npx cdk bootstrap aws://${{ inputs.aws-account-id }}/${{ inputs.aws-region }} \\"
+          echo "    --context environment=${{ inputs.environment }}"
+          echo ""
+          echo "Bootstrap creates the CDKToolkit stack with:"
+          echo "  - S3 bucket for staging assets"
+          echo "  - IAM roles for deployment"
+          echo "  - ECR repository for Docker images (if needed)"
+          echo ""
+          echo "Note: Bootstrap requires appropriate IAM permissions."
+          echo ""
+          BOOTSTRAP_CHECK_FAILED=1
+        elif [ $BOOTSTRAP_ERROR_CODE -ne 0 ]; then
+          # Permission error or other issue - warn but don't fail
+          echo "WARNING: Could not verify bootstrap version"
+          echo ""
+          echo "Error: $BOOTSTRAP_OUTPUT"
+          echo ""
+          echo "This may be due to insufficient permissions to describe the stack."
+          echo "The deployment will proceed, but may fail if bootstrap is outdated."
+          echo ""
+          echo "If deployment fails with bootstrap version errors, run:"
+          echo "  npx cdk bootstrap aws://${{ inputs.aws-account-id }}/${{ inputs.aws-region }} \\"
+          echo "    --context environment=${{ inputs.environment }}"
+          echo ""
+        else
+          # Successfully retrieved version
+          BOOTSTRAP_VERSION=$(echo "$BOOTSTRAP_OUTPUT" | tr -d '[:space:]')
+          
+          if [ -n "$BOOTSTRAP_VERSION" ] && [ "$BOOTSTRAP_VERSION" != "None" ]; then
+            echo "Current bootstrap version: $BOOTSTRAP_VERSION"
+            echo "Required version: 30 or later"
+            echo ""
+            
+            # Compare version (handle both numeric and string comparisons)
+            if [ "$BOOTSTRAP_VERSION" -lt 30 ] 2>/dev/null; then
+              echo "BOOTSTRAP VERSION OUTDATED"
+              echo ""
+              echo "The CDK bootstrap stack version ($BOOTSTRAP_VERSION) is older than required (30+)."
+              echo "This will cause deployment failures with modern CDK features."
+              echo ""
+              echo "SOLUTION: Re-bootstrap the environment"
+              echo ""
+              echo "Run the following command to update the bootstrap stack:"
+              echo ""
+              echo "  npx cdk bootstrap aws://${{ inputs.aws-account-id }}/${{ inputs.aws-region }} \\"
+              echo "    --context environment=${{ inputs.environment }}"
+              echo ""
+              echo "Or from your local machine:"
+              echo ""
+              echo "  export CDK_ENVIRONMENT=${{ inputs.environment }}"
+              echo "  export AWS_ACCOUNT_ID_${{ inputs.environment }}=${{ inputs.aws-account-id }}"
+              echo "  export AWS_REGION=${{ inputs.aws-region }}"
+              echo "  npx cdk bootstrap aws://${{ inputs.aws-account-id }}/${{ inputs.aws-region }} \\"
+              echo "    --context environment=${{ inputs.environment }}"
+              echo ""
+              echo "Note: Bootstrap requires appropriate IAM permissions in the target account."
+              echo "The bootstrap process creates/updates the CDKToolkit stack with required resources."
+              echo ""
+              BOOTSTRAP_CHECK_FAILED=1
+            else
+              echo "Bootstrap version is up to date (version $BOOTSTRAP_VERSION)"
+            fi
+          else
+            echo "WARNING: Could not determine bootstrap version"
+            echo "The deployment will proceed, but may fail if bootstrap is outdated."
+            echo ""
+          fi
+        fi
+        
+        if [ $BOOTSTRAP_CHECK_FAILED -eq 1 ]; then
+          exit 1
+        fi
+
     # Handles the actual CDK deployment with multiple safety mechanisms
     # Verifies the stack exists in the CDK application
     # Cleans up any existing change sets to avoid conflicts
