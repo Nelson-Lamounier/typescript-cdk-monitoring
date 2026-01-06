@@ -56,7 +56,7 @@ runs:
     - name: Verify Environment Setup
       shell: bash
       run: |
-        echo "🔍 Verifying CDK deployment environment setup..."
+        echo "Verifying CDK deployment environment setup..."
         echo ""
 
         SETUP_ERRORS=0

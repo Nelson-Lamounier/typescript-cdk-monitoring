@@ -29,9 +29,10 @@ env:
   TURBO_TEAM: ${{ vars.TURBO_TEAM }}
 
 permissions:
+  id-token: write  # Required for OIDC authentication to AWS
   contents: read
   actions: read
-  # CI jobs only need read permissions - no deployment access required
+  # CI jobs need id-token: write for OIDC authentication when validating AWS resources
 
 jobs:
   # ============================================================================
@@ -460,7 +461,8 @@ jobs:
       always() &&
       needs.determine-jobs.outputs.run_validate_setup == 'true' &&
       (needs.lint-and-quality.result == 'success' || needs.lint-and-quality.result == 'skipped')
-    # Note: CI version doesn't use environment protection - read-only validation only
+    # Use pipeline environment to access environment secrets
+    environment: pipeline
     outputs:
       pipeline_account_id: ${{ steps.setup.outputs.pipeline_account_id }}
       dev_vpc_id: ${{ steps.dev-info.outputs.vpc_id || 'NOT_FOUND' }}
@@ -469,11 +471,39 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify OIDC Configuration
+        run: |
+          echo "Verifying OIDC configuration..."
+          echo ""
+          
+          # Check if AWS_OIDC_ROLE secret is available
+          if [ -z "${{ secrets.AWS_OIDC_ROLE }}" ]; then
+            echo "WARNING: AWS_OIDC_ROLE secret is empty or not found"
+            echo "Attempting to use DEPLOYMENT_ROLE as fallback..."
+            if [ -z "${{ secrets.DEPLOYMENT_ROLE }}" ]; then
+              echo "ERROR: Both AWS_OIDC_ROLE and DEPLOYMENT_ROLE secrets are missing"
+              echo ""
+              echo "Troubleshooting Steps:"
+              echo "  1. Verify the secret is configured in GitHub repository settings"
+              echo "  2. Check that the secret name matches exactly: AWS_OIDC_ROLE"
+              echo "  3. Ensure the secret is added to the 'pipeline' environment"
+              echo "  4. Verify the secret contains the full IAM role ARN (e.g., arn:aws:iam::123456789012:role/GitHubActionsRole)"
+              exit 1
+            else
+              echo "Using DEPLOYMENT_ROLE as fallback"
+            fi
+          else
+            echo "AWS_OIDC_ROLE secret is available"
+            echo "Role ARN format: ${{ secrets.AWS_OIDC_ROLE != '' && 'Present' || 'Missing' }}"
+          fi
+          echo ""
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE }}
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE || secrets.DEPLOYMENT_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
 
       - name: Setup Environment Variables
         id: setup

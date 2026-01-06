@@ -3,7 +3,7 @@
 name: "Deploy CDK Stack"
 description: "Deploys a CDK stack with environment validation and error handling"
 
-# Provides a reusable, battle-tested deployment workflow for CDK stacks with validation, 
+# Provides a reusable, battle-tested deployment workflow for CDK stacks with validation,
 # error detection, and troubleshooting guidance.
 
 inputs:
@@ -129,12 +129,12 @@ runs:
         echo "  Dev Account: ${{ inputs.dev-account-id != '' && '***MASKED***' || 'Not configured' }}"
         echo ""
 
-# Handles the actual CDK deployment with multiple safety mechanisms
-# Verifies the stack exists in the CDK application
-# Cleans up any existing change sets to avoid conflicts
-# Deploys the stack with enhanced error handling
-# Checks if the deployment was successful
-# Outputs the deployment status to the GitHub Actions output
+    # Handles the actual CDK deployment with multiple safety mechanisms
+    # Verifies the stack exists in the CDK application
+    # Cleans up any existing change sets to avoid conflicts
+    # Deploys the stack with enhanced error handling
+    # Checks if the deployment was successful
+    # Outputs the deployment status to the GitHub Actions output
 
     - name: Deploy Stack
       id: deploy
