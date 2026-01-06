@@ -200,55 +200,39 @@ jobs:
       - name: TypeScript Linting
         run: |
           echo "Running TypeScript/ESLint checks..."
-          cd infrastructure
-          npx eslint lib/stacks/monitoring/ lib/constructs/monitoring/ test/unit/monitoring/ --max-warnings 50 || echo "Linting completed with warnings"
+          npx eslint lib/ bin/ tests/ --max-warnings 50 || echo "Linting completed with warnings"
 
       - name: Type Checking
         run: |
           echo "Running TypeScript type checking..."
-          cd infrastructure
           yarn typecheck || echo "Type checking completed with warnings (non-blocking)"
 
       - name: CDK Validation
         run: |
           echo "Validating CDK configuration..."
-          cd infrastructure
           # Validate CDK synthesis - exit code 1 is expected due to CDK Nag warnings
-          ENVIRONMENT=pipeline yarn cdk synth MonitoringEfsStack-pipeline MonitoringInfraStack-pipeline MonitoringServiceStack-pipeline VpcPeeringStack-pipeline --quiet > /dev/null 2>&1 || echo "CDK synthesis completed with warnings (expected)"
-          echo "CDK validation completed - stacks can be synthesized"
+          # Only validate NetworkingStack as other stacks are not yet implemented
+          CDK_ENVIRONMENT=pipeline yarn cdk synth NetworkingStack-pipeline --context environment=pipeline --quiet > /dev/null 2>&1 || echo "CDK synthesis completed with warnings (expected)"
+          echo "CDK validation completed - NetworkingStack can be synthesized"
         env:
           AWS_REGION: ${{ env.AWS_REGION }}
-          ENVIRONMENT: pipeline
+          CDK_ENVIRONMENT: pipeline
           AWS_PIPELINE_ACCOUNT_ID: "123456789012" # Dummy account ID for validation
 
-      - name: Monitoring Pipeline Tests
+      - name: Run Tests
         run: |
-          echo "Running monitoring pipeline tests..."
-          cd infrastructure
-          yarn test:monitoring-pipeline
-
-      - name: Security Compliance Tests
-        run: |
-          echo "Running security compliance tests..."
-          cd infrastructure
-          yarn test:security
-
-      - name: Comprehensive Monitoring Tests
-        run: |
-          echo "Running comprehensive monitoring tests..."
-          cd infrastructure
-          yarn test:comprehensive
+          echo "Running tests..."
+          yarn test:ci
 
       - name: Generate Test Coverage Report
         if: always()
         run: |
           echo "Generating test coverage report..."
-          cd infrastructure
 
           # Generate coverage summary if tests ran
           if [ -f "coverage/coverage-summary.json" ]; then
-            echo "## Test Coverage Summary" >> ../test-coverage-report.md
-            echo "" >> ../test-coverage-report.md
+            echo "## Test Coverage Summary" >> test-coverage-report.md
+            echo "" >> test-coverage-report.md
             
             # Extract coverage percentages using node
             node -e "
@@ -263,11 +247,11 @@ jobs:
               } catch (e) {
                 console.log('- Coverage data not available');
               }
-            " >> ../test-coverage-report.md
-            echo "" >> ../test-coverage-report.md
+            " >> test-coverage-report.md
+            echo "" >> test-coverage-report.md
           else
-            echo "## Test Coverage Summary" >> ../test-coverage-report.md
-            echo "- Coverage data not available" >> ../test-coverage-report.md
+            echo "## Test Coverage Summary" >> test-coverage-report.md
+            echo "- Coverage data not available" >> test-coverage-report.md
           fi
 
       - name: Upload Test Results
@@ -276,8 +260,8 @@ jobs:
         with:
           name: test-results-${{ github.run_number }}
           path: |
-            infrastructure/coverage/
-            infrastructure/test-results/
+            coverage/
+            test-results/
             test-coverage-report.md
           retention-days: 30
 
@@ -412,7 +396,7 @@ jobs:
       - name: Generate Cache Key
         id: cache-key
         run: |
-          HASH=$(find infrastructure -name "*.ts" -o -name "*.js" -o -name "*.json" | xargs cat | sha256sum | cut -d' ' -f1)
+          HASH=$(find lib bin config tests -name "*.ts" -o -name "*.js" -o -name "*.json" 2>/dev/null | xargs cat 2>/dev/null | sha256sum | cut -d' ' -f1)
           echo "key=build-${{ runner.os }}-$HASH" >> $GITHUB_OUTPUT
 
       - name: Setup Infrastructure Environment
@@ -424,46 +408,44 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            infrastructure/dist
-            infrastructure/cdk.out
+            dist
+            cdk.out
             node_modules
           key: ${{ steps.cache-key.outputs.key }}
           restore-keys: |
             build-${{ runner.os }}-
 
-      - name: Build with Turbo
+      - name: Build TypeScript
         run: |
-          echo "Building infrastructure with Turbo..."
-          # Use npx to run turbo (avoids Yarn script lookup issues)
-          npx turbo build --filter=infrastructure
+          echo "Building TypeScript code..."
+          yarn build
 
           echo "Build Results:"
-          if [ -d "infrastructure/dist" ]; then
-            DIST_FILES=$(find infrastructure/dist -name "*.js" | wc -l)
+          if [ -d "dist" ]; then
+            DIST_FILES=$(find dist -name "*.js" | wc -l)
             echo "Build successful: $DIST_FILES JavaScript files created"
             echo "Dist directory contents:"
-            ls -la infrastructure/dist/
+            ls -la dist/
           else
             echo "Build failed: No dist directory created"
-            echo "Infrastructure directory contents:"
-            ls -la infrastructure/
+            echo "Root directory contents:"
+            ls -la
             exit 1
           fi
 
       - name: CDK Synth for Validation
         run: |
-          cd infrastructure
           # First list available stacks to debug
           echo "Available CDK stacks:"
-          ENVIRONMENT=pipeline npx cdk list
+          CDK_ENVIRONMENT=pipeline npx cdk list --context environment=pipeline
           echo ""
 
-          # Only synthesize pipeline stacks for build validation
-          echo "Synthesizing monitoring stacks..."
-          ENVIRONMENT=pipeline npx cdk synth MonitoringEfsStack-pipeline MonitoringInfraStack-pipeline MonitoringServiceStack-pipeline VpcPeeringStack-pipeline --quiet || echo "CDK synthesis completed with warnings (expected)"
+          # Synthesize NetworkingStack for build validation
+          echo "Synthesizing NetworkingStack..."
+          CDK_ENVIRONMENT=pipeline npx cdk synth NetworkingStack-pipeline --context environment=pipeline --quiet || echo "CDK synthesis completed with warnings (expected)"
         env:
           AWS_REGION: ${{ env.AWS_REGION }}
-          ENVIRONMENT: pipeline
+          CDK_ENVIRONMENT: pipeline
           AWS_PIPELINE_ACCOUNT_ID: "123456789012" # Dummy account ID for validation
           AWS_ACCOUNT_ID_DEV: ${{ vars.AWS_ACCOUNT_ID_DEV || '123456789012' }} # Use actual dev account or dummy for validation
 
