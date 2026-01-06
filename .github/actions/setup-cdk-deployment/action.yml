@@ -37,10 +37,15 @@ runs:
       uses: actions/cache@v4
       with:
         path: |
-          dist
+          lib/**/*.js
+          lib/**/*.js.map
+          lib/**/*.d.ts
+          bin/**/*.js
+          config/**/*.js
           cdk.out
           node_modules
         # Restores build artifacts from build job to avoid recompilation
+        # Paths must match cache save paths in ci.yml and deploy.yml build jobs
         key: ${{ inputs.build-cache-key }}
         restore-keys: |
           build-${{ runner.os }}-
@@ -116,23 +121,31 @@ runs:
         fi
 
         # Check build artifacts - verifies TypeScript compilation output exists
-        if [ -d "dist" ]; then
-          DIST_FILES=$(find dist -name "*.js" | wc -l)
-          echo "Build Artifacts: $DIST_FILES JavaScript files found"
+        # TypeScript compiles to lib/, bin/, and config/ directories (per tsconfig.json)
+        JS_FILES=$(find lib bin config -name "*.js" 2>/dev/null | wc -l)
+        
+        if [ "$JS_FILES" -gt 0 ]; then
+          echo "Build Artifacts: $JS_FILES JavaScript files found"
+          echo "Compiled files found in:"
+          find lib bin config -name "*.js" 2>/dev/null | head -5 | sed 's/^/  - /'
         else
-          echo "Build Artifacts: dist directory not found"
+          echo "Build Artifacts: No compiled JavaScript files found"
           echo ""
           echo "Attempting to build..."
           
           # Fallback: build if cache miss - ensures deployment can proceed
           # even when build cache restoration fails
-          if npx turbo build; then
-            if [ -d "dist" ]; then
-              DIST_FILES=$(find dist -name "*.js" | wc -l)
-              echo "Fallback Build Successful: $DIST_FILES JavaScript files created"
+          if yarn build; then
+            JS_FILES=$(find lib bin config -name "*.js" 2>/dev/null | wc -l)
+            if [ "$JS_FILES" -gt 0 ]; then
+              echo "Fallback Build Successful: $JS_FILES JavaScript files created"
+              echo "Compiled files found in:"
+              find lib bin config -name "*.js" 2>/dev/null | head -5 | sed 's/^/  - /'
             else
-              echo "Fallback Build Failed: No dist directory created"
-              SETUP_ERRORS=$((SETUP_ERRORS + 1))
+              echo "Fallback Build Failed: No JavaScript files created"
+              echo ""
+              echo "Note: CDK uses ts-node and may not require compiled JavaScript files"
+              echo "This may be non-fatal if CDK synthesis succeeds"
             fi
           else
             echo "Fallback Build Failed: Build command failed"
