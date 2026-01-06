@@ -7,6 +7,7 @@ import * as cdk from "aws-cdk-lib";
 
 import { NetworkingStack } from "../lib/stacks/networking-stack";
 import { LoadBalancerStack } from "../lib/stacks/elb-stack";
+import { LaunchTemplateStack } from "../lib/stacks/compute/launch-template-stack";
 import { environments, EnvironmentConfig } from "../config/environments";
 
 // ============================================================================
@@ -143,6 +144,26 @@ const loadBalancerStack = new LoadBalancerStack(
 loadBalancerStack.addDependency(networkingStack);
 
 // ============================================================================
+// LAUNCH TEMPLATE STACK
+// ============================================================================
+
+// LaunchTemplateStack depends on NetworkingStack for VPC
+// Creates EC2 Launch Template for ECS container instances
+const launchTemplateStack = new LaunchTemplateStack(
+  app,
+  `LaunchTemplateStack-${config.envName}`,
+  {
+    ...stackProps,
+    envName: config.envName,
+    vpc: networkingStack.vpc,
+    // keyPairName: optional - provide if SSH access is needed
+  }
+);
+
+// Explicit dependency ensures NetworkingStack is deployed first
+launchTemplateStack.addDependency(networkingStack);
+
+// ============================================================================
 // ADDITIONAL STACKS
 // ============================================================================
 
@@ -150,6 +171,7 @@ loadBalancerStack.addDependency(networkingStack);
 // Available stacks:
 // - networkingStack: VPC, subnets, security groups
 // - loadBalancerStack: ALB, listeners, target groups
+// - launchTemplateStack: EC2 Launch Template for ECS container instances
 //
 // Example:
 // const monitoringInfraStack = new MonitoringInfraStack(
@@ -159,6 +181,7 @@ loadBalancerStack.addDependency(networkingStack);
 //     ...stackProps,
 //     vpc: networkingStack.vpc,
 //     alb: loadBalancerStack.getLoadBalancer(),
+//     launchTemplate: launchTemplateStack.launchTemplate,
 //     envName: config.envName,
 //   }
 // );
