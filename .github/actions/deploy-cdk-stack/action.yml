@@ -1,0 +1,482 @@
+# @format
+
+name: "Deploy CDK Stack"
+description: "Deploys a CDK stack with environment validation and error handling"
+
+# Provides a reusable, battle-tested deployment workflow for CDK stacks with validation, 
+# error detection, and troubleshooting guidance.
+
+inputs:
+  stack-name:
+    description: "Name of the CDK stack to deploy"
+    required: true
+  environment:
+    description: "Environment name (e.g., pipeline, development, production)"
+    required: true
+  aws-account-id:
+    description: "AWS Account ID for deployment"
+    required: true
+  aws-region:
+    description: "AWS Region for deployment"
+    required: true
+  dev-vpc-id:
+    description: "Development VPC ID (optional)"
+    required: false
+    default: ""
+  dev-account-id:
+    description: "Development Account ID (optional)"
+    required: false
+    default: ""
+  additional-args:
+    description: "Additional CDK deploy arguments"
+    required: false
+    default: "--require-approval never"
+
+outputs:
+  deployment-status:
+    description: "Status of the deployment (success/failure)"
+    value: ${{ steps.deploy.outputs.status }}
+
+# Validates all required deployment parameters before attempting deployment
+# Checks if the CDK CLI is available and if the stack exists in the CDK application
+# Cleans up any existing change sets to avoid conflicts
+# Deploys the stack with enhanced error handling
+# Checks if the deployment was successful
+# Outputs the deployment status to the GitHub Actions output
+
+runs:
+  using: "composite"
+  steps:
+    - name: Validate Environment Variables
+      shell: bash
+      run: |
+        echo "Validating deployment environment for ${{ inputs.stack-name }}..."
+        echo ""
+
+        # Track validation errors - accumulates all validation failures before exiting
+        VALIDATION_ERRORS=0
+
+        # Verify required environment variables - ensures deployment prerequisites are met
+        if [ -z "${{ inputs.aws-account-id }}" ]; then
+          echo "CRITICAL ERROR: AWS Account ID is not set"
+          echo ""
+          echo "Troubleshooting Steps:"
+          echo "  1. Check if the 'validate-setup' job completed successfully"
+          echo "  2. Verify AWS OIDC role configuration in repository secrets"
+          echo "  3. Ensure AWS credentials are properly configured"
+          echo "  4. Check if 'determine-jobs' enabled validate-setup job"
+          echo ""
+          echo "Related Jobs to Check:"
+          echo "  - determine-jobs: Job selection logic"
+          echo "  - validate-setup: AWS account ID retrieval"
+          echo ""
+          VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
+        fi
+
+        if [ -z "${{ inputs.environment }}" ]; then
+          echo "CRITICAL ERROR: Environment is not set"
+          echo ""
+          echo "Expected Values: pipeline, development, staging, production"
+          echo "Check: Composite action input parameters"
+          echo ""
+          VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
+        fi
+
+        if [ -z "${{ inputs.stack-name }}" ]; then
+          echo "CRITICAL ERROR: Stack name is not set"
+          echo ""
+          echo "Expected Format: [StackName]-[environment]"
+          echo "Check: Composite action input parameters"
+          echo ""
+          VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
+        fi
+
+        if [ -z "${{ inputs.aws-region }}" ]; then
+          echo "CRITICAL ERROR: AWS Region is not set"
+          echo ""
+          echo "Expected Values: eu-west-1, us-east-1, etc."
+          echo "Check: Environment variables and repository settings"
+          echo ""
+          VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
+        fi
+
+        # Exit if validation errors found
+        if [ $VALIDATION_ERRORS -gt 0 ]; then
+          echo ""
+          echo "DEPLOYMENT BLOCKED: $VALIDATION_ERRORS validation error(s) found"
+          echo ""
+          echo "IMMEDIATE ACTIONS REQUIRED:"
+          echo "  1. Review the error messages above"
+          echo "  2. Check the 'validate-setup' job logs"
+          echo "  3. Verify repository secrets and variables"
+          echo "  4. Ensure proper job dependencies in workflow"
+          echo ""
+          echo "Need Help?"
+          echo "  - Check docs/troubleshooting/ for common issues"
+          echo "  - Review previous successful runs for comparison"
+          echo "  - Verify AWS account permissions and OIDC configuration"
+          exit 1
+        fi
+
+        echo "Environment validation passed successfully"
+        echo ""
+        echo "Deployment Configuration:"
+        echo "  Stack Name: ${{ inputs.stack-name }}"
+        echo "  Environment: ${{ inputs.environment }}"
+        echo "  AWS Region: ${{ inputs.aws-region }}"
+        echo "  Account ID: ***MASKED*** (${#AWS_ACCOUNT_ID} characters)"
+        echo "  Dev VPC ID: ${{ inputs.dev-vpc-id != '' && '***MASKED***' || 'Not configured' }}"
+        echo "  Dev Account: ${{ inputs.dev-account-id != '' && '***MASKED***' || 'Not configured' }}"
+        echo ""
+
+# Handles the actual CDK deployment with multiple safety mechanisms
+# Verifies the stack exists in the CDK application
+# Cleans up any existing change sets to avoid conflicts
+# Deploys the stack with enhanced error handling
+# Checks if the deployment was successful
+# Outputs the deployment status to the GitHub Actions output
+
+    - name: Deploy Stack
+      id: deploy
+      shell: bash
+      working-directory: infrastructure
+      run: |
+        echo "Starting deployment of ${{ inputs.stack-name }}..."
+        echo ""
+
+        # Set environment variables for CDK
+        export ENVIRONMENT="${{ inputs.environment }}"
+        export AWS_PIPELINE_ACCOUNT_ID="${{ inputs.aws-account-id }}"
+        export AWS_REGION="${{ inputs.aws-region }}"
+
+        # Set optional environment variables - supports cross-account VPC peering scenarios
+        if [ -n "${{ inputs.dev-vpc-id }}" ]; then
+          export DEV_VPC_ID="${{ inputs.dev-vpc-id }}"
+          echo "Cross-account VPC configured: ***MASKED***"
+        fi
+
+        if [ -n "${{ inputs.dev-account-id }}" ]; then
+          export AWS_ACCOUNT_ID_DEV="${{ inputs.dev-account-id }}"
+          echo "Dev account configured: ***MASKED***"
+        fi
+
+        echo ""
+        echo "CDK Deployment Command:"
+        echo "  npx cdk deploy ${{ inputs.stack-name }} ${{ inputs.additional-args }}"
+        echo ""
+
+        # Pre-deployment checks
+        echo "Pre-deployment validation..."
+
+        # Verify ENVIRONMENT variable is set correctly
+        echo "Environment Configuration:"
+        echo "  ENVIRONMENT=$ENVIRONMENT"
+        echo "  Expected stack name: NetworkingStack-$ENVIRONMENT"
+        echo ""
+
+        if [ "$ENVIRONMENT" != "${{ inputs.environment }}" ]; then
+          echo "WARNING: ENVIRONMENT variable mismatch"
+          echo "  Input: ${{ inputs.environment }}"
+          echo "  Actual: $ENVIRONMENT"
+          echo ""
+        fi
+
+        # Check if CDK is available - uses npx to invoke local dependency, avoiding global install issues
+        if ! npx cdk --version &> /dev/null; then
+          echo "CDK CLI not found via npx"
+          echo ""
+          echo "DEPLOYMENT FAILED: CDK CLI Missing"
+          echo ""
+          echo "Troubleshooting Steps:"
+          echo "  1. Check if 'setup-cdk-deployment' composite action ran successfully"
+          echo "  2. Verify Node.js and dependencies are properly installed"
+          echo "  3. Check build cache restoration"
+          echo "  4. Ensure CDK is installed in infrastructure workspace"
+          echo ""
+          echo "status=failure" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+        # Check if stack exists in CDK app - validates stack name before deployment attempt
+        echo "Checking if stack exists in CDK application..."
+
+        # Use a temporary file to capture CDK list output and handle EPIPE errors
+        # EPIPE can occur when CDK output is piped to closed streams
+        CDK_LIST_OUTPUT="/tmp/cdk-list-output-$$.log"
+
+        # Run cdk list with error handling - redirect stderr and handle EPIPE gracefully
+        # EPIPE errors are common with CDK when output streams are redirected
+        set +e  # Don't exit on error - allows graceful handling of EPIPE
+        npx cdk list 2>&1 | tee "$CDK_LIST_OUTPUT" || true
+        CDK_LIST_EXIT=$?
+        set -e  # Re-enable exit on error
+
+        # Check if we got valid output
+        if [ $CDK_LIST_EXIT -ne 0 ] || [ ! -s "$CDK_LIST_OUTPUT" ]; then
+          echo "CDK list command had issues (exit code: $CDK_LIST_EXIT)"
+          echo "This may be due to SSM parameter lookups during synthesis or EPIPE errors"
+          echo "Attempting to verify stack by synthesizing it directly..."
+          echo ""
+          
+          # Try to synthesize the specific stack to verify it exists - fallback when
+          # cdk list fails due to SSM parameter lookups or EPIPE errors
+          if npx cdk synth "${{ inputs.stack-name }}" >/dev/null 2>&1; then
+            echo "Stack can be synthesized - continuing with deployment"
+            rm -f "$CDK_LIST_OUTPUT" 2>/dev/null || true
+          else
+            echo "Stack synthesis also failed - stack may not exist or has errors"
+            echo ""
+            echo "Attempting to get synthesis errors..."
+            npx cdk synth "${{ inputs.stack-name }}" 2>&1 | head -100 || true
+            rm -f "$CDK_LIST_OUTPUT" 2>/dev/null || true
+            echo "status=failure" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+        elif ! grep -q "${{ inputs.stack-name }}" "$CDK_LIST_OUTPUT" 2>/dev/null; then
+          echo "Stack '${{ inputs.stack-name }}' not found in CDK application"
+          echo ""
+          echo "DEPLOYMENT FAILED: Stack Not Found"
+          echo ""
+          echo "Available Stacks:"
+          cat "$CDK_LIST_OUTPUT" 2>/dev/null | sed 's/^/    /' || echo "    (Could not retrieve stack list)"
+          echo ""
+          echo "Possible Issues:"
+          echo "  1. Stack name mismatch (check environment suffix)"
+          echo "  2. Stack not properly exported in CDK app"
+          echo "  3. Environment configuration issues"
+          echo "  4. CDK synthesis errors (SSM lookups, etc.)"
+          echo ""
+          echo "Quick Fixes:"
+          echo "  1. Verify stack name format: [StackName]-${{ inputs.environment }}"
+          echo "  2. Check infrastructure/bin/app.ts for stack definitions"
+          echo "  3. Verify ENVIRONMENT variable is set correctly: ${{ inputs.environment }}"
+          echo "  4. Try running: cd infrastructure && ENVIRONMENT=${{ inputs.environment }} npx cdk list"
+          echo ""
+          
+          # Try to synthesize the specific stack to get better error messages
+          echo "Attempting to synthesize stack for better error details..."
+          if ! npx cdk synth "${{ inputs.stack-name }}" 2>&1 | head -50; then
+            echo ""
+            echo "Synthesis failed - check errors above"
+          fi
+          
+          rm -f "$CDK_LIST_OUTPUT" 2>/dev/null || true
+          echo "status=failure" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+        echo "Stack found in CDK application"
+        rm -f "$CDK_LIST_OUTPUT" 2>/dev/null || true
+
+        echo "Stack found in CDK application"
+        echo ""
+
+        # Clean up any existing change sets to avoid conflicts - prevents deployment failures
+        # from orphaned change sets from previous failed deployments
+        echo "Cleaning up existing change sets..."
+        STACK_NAME="${{ inputs.stack-name }}"
+
+        # Check if stack exists before trying to list change sets - avoids errors on first deployment
+        STACK_EXISTS=$(aws cloudformation describe-stacks \
+          --stack-name "$STACK_NAME" \
+          --query 'Stacks[0].StackName' \
+          --output text 2>/dev/null || echo "")
+
+        if [ -n "$STACK_EXISTS" ]; then
+          # List all change sets (including pending, in-progress, failed, and ready)
+          EXISTING_CHANGE_SETS=$(aws cloudformation list-change-sets \
+            --stack-name "$STACK_NAME" \
+            --query 'Summaries[].ChangeSetName' \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -n "$EXISTING_CHANGE_SETS" ]; then
+            echo "Found existing change sets, cleaning up..."
+            for change_set in $EXISTING_CHANGE_SETS; do
+              echo "  Deleting change set: $change_set"
+              # Delete change set - ignores errors for idempotency (may already be deleted)
+              aws cloudformation delete-change-set \
+                --stack-name "$STACK_NAME" \
+                --change-set-name "$change_set" \
+                --no-cli-pager 2>/dev/null || true
+            done
+            # Wait a moment for deletions to complete - ensures AWS API consistency
+            sleep 2
+            echo "Change set cleanup completed"
+            echo ""
+          else
+            echo "No existing change sets found"
+            echo ""
+          fi
+        else
+          echo "Stack does not exist yet, skipping change set cleanup"
+          echo ""
+        fi
+
+        # Deploy the stack with enhanced error handling
+        echo "Executing CDK deployment..."
+        echo "Started at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo ""
+
+        # Capture deployment output for error analysis - saves output for detailed error parsing
+        DEPLOY_OUTPUT_FILE="/tmp/cdk-deploy-output-$$.log"
+
+        # Deploy with proper error handling for EPIPE and other stream errors
+        # Redirects to file first to avoid EPIPE when GitHub Actions pipes output
+        set +e  # Don't exit on error immediately - allows error analysis before failing
+
+        # Run deployment and capture output, handling EPIPE gracefully
+        npx cdk deploy "${{ inputs.stack-name }}" ${{ inputs.additional-args }} > "$DEPLOY_OUTPUT_FILE" 2>&1
+        DEPLOY_EXIT_CODE=$?
+
+        # Display the output (this won't cause EPIPE since we're not piping)
+        cat "$DEPLOY_OUTPUT_FILE"
+
+        set -e  # Re-enable exit on error
+
+        # Check if deployment was successful
+        if [ $DEPLOY_EXIT_CODE -eq 0 ]; then
+          echo ""
+          echo "DEPLOYMENT SUCCESSFUL"
+          echo "⏱Completed at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "Stack: ${{ inputs.stack-name }}"
+          echo "Environment: ${{ inputs.environment }}"
+          echo "Region: ${{ inputs.aws-region }}"
+          echo ""
+          echo "status=success" >> $GITHUB_OUTPUT
+          # Clean up temp file
+          rm -f "$DEPLOY_OUTPUT_FILE" 2>/dev/null || true
+        else
+          DEPLOY_OUTPUT=$(cat "$DEPLOY_OUTPUT_FILE" 2>/dev/null || echo "")
+          
+          # Check if the error was an EPIPE (broken pipe) - common GitHub Actions issue
+          # when CDK output is piped to closed streams, retry without piping
+          if echo "$DEPLOY_OUTPUT" | grep -qi "EPIPE\|broken pipe"; then
+            echo "EPIPE (broken pipe) error detected"
+            echo "This usually means output was redirected to a closed pipe"
+            echo "Attempting to retry deployment without tee..."
+            echo ""
+            
+            # Retry without tee to avoid pipe issues - direct output prevents EPIPE
+            if npx cdk deploy "${{ inputs.stack-name }}" ${{ inputs.additional-args }} 2>&1 > "$DEPLOY_OUTPUT_FILE"; then
+              echo ""
+              echo "DEPLOYMENT SUCCESSFUL (after EPIPE retry)"
+              echo "⏱Completed at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+              echo "status=success" >> $GITHUB_OUTPUT
+              rm -f "$DEPLOY_OUTPUT_FILE" 2>/dev/null || true
+              exit 0
+            else
+              DEPLOY_EXIT_CODE=$?
+              DEPLOY_OUTPUT=$(cat "$DEPLOY_OUTPUT_FILE" 2>/dev/null || echo "")
+            fi
+          fi
+          
+          echo ""
+          echo "DEPLOYMENT FAILED"
+          echo "Failed at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "Exit Code: $DEPLOY_EXIT_CODE"
+          echo ""
+          
+          # Check for export deletion error - CloudFormation prevents deleting exports
+          # that are still imported by other stacks, requires ordered deployment
+          if echo "$DEPLOY_OUTPUT" | grep -qi "Cannot delete export.*as it is in use"; then
+            echo "CLOUDFORMATION EXPORT DEPENDENCY ERROR DETECTED"
+            echo ""
+            echo "This error occurs when a stack tries to delete an export that is still"
+            echo "being imported by another stack."
+            echo ""
+            echo "SOLUTION: Update dependent stacks first, then update this stack."
+            echo ""
+            echo "For NetworkingStack, update in this order:"
+            echo "  1. MonitoringInfraStack-pipeline"
+            echo "  2. MonitoringEfsStack-pipeline (if applicable)"
+            echo "  3. NetworkingStack-pipeline"
+            echo ""
+            echo "See: infrastructure/CLOUDFORMATION_EXPORT_DEPENDENCY_FIX.md"
+            echo ""
+            echo "status=failure" >> $GITHUB_OUTPUT
+            exit $DEPLOY_EXIT_CODE
+          fi
+          
+          # Check for specific change set error - handles race conditions when multiple
+          # deployments attempt to create change sets simultaneously
+          if echo "$DEPLOY_OUTPUT" | grep -qi "AlreadyExistsException.*ChangeSet.*ClientToken" || \
+             echo "$DEPLOY_OUTPUT" | grep -qi "cdk-deploy-change-set"; then
+            echo "CHANGE SET CONFLICT DETECTED"
+            echo ""
+            echo "This error occurs when a previous deployment left a change set in place."
+            echo "Attempting to clean up and retry..."
+            echo ""
+            
+            # Try to clean up the specific change set - removes conflicting change set before retry
+            STACK_NAME="${{ inputs.stack-name }}"
+            aws cloudformation delete-change-set \
+              --stack-name "$STACK_NAME" \
+              --change-set-name "cdk-deploy-change-set" \
+              --no-cli-pager 2>/dev/null || true
+            
+            # Wait for cleanup
+            sleep 3
+            
+            echo "Retrying deployment..."
+            # Retry without tee to avoid EPIPE issues
+            if npx cdk deploy "${{ inputs.stack-name }}" ${{ inputs.additional-args }} > "$DEPLOY_OUTPUT_FILE" 2>&1; then
+              cat "$DEPLOY_OUTPUT_FILE"
+              echo ""
+              echo "DEPLOYMENT SUCCESSFUL (after retry)"
+              echo "⏱Completed at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+              echo "status=success" >> $GITHUB_OUTPUT
+              # Clean up temp file
+              rm -f "$DEPLOY_OUTPUT_FILE" 2>/dev/null || true
+              exit 0
+            else
+              echo ""
+              echo "Retry also failed. Manual intervention may be required."
+              echo ""
+            fi
+          fi
+          
+          echo "COMMON DEPLOYMENT FAILURE CAUSES:"
+          echo ""
+          echo "RESOURCE CONFLICTS:"
+          echo "   - Duplicate resource names"
+          echo "   - CloudFormation export conflicts"
+          echo "   - Resource limits exceeded"
+          echo ""
+          echo "PERMISSION ISSUES:"
+          echo "   - Insufficient IAM permissions"
+          echo "   - Cross-account access problems"
+          echo "   - Service-linked role missing"
+          echo ""
+          echo "CONFIGURATION ERRORS:"
+          echo "   - Invalid parameter values"
+          echo "   - Missing dependencies"
+          echo "   - Environment variable issues"
+          echo ""
+          echo "INFRASTRUCTURE LIMITS:"
+          echo "   - VPC limits reached"
+          echo "   - EIP allocation failures"
+          echo "   - Service quotas exceeded"
+          echo ""
+          echo "IMMEDIATE TROUBLESHOOTING STEPS:"
+          echo ""
+          echo "1. Check CloudFormation console for detailed error messages"
+          echo "2. Review CDK diff to see what changes are being applied"
+          echo "3. Verify all required resources exist and are accessible"
+          echo "4. Check AWS service health dashboard"
+          echo "5. Review previous successful deployments for differences"
+          echo ""
+          echo "DEBUGGING COMMANDS:"
+          echo "   npx cdk diff ${{ inputs.stack-name }}  # See changes"
+          echo "   npx cdk synth ${{ inputs.stack-name }} # Test synthesis"
+          echo "   aws cloudformation describe-stack-events --stack-name ${{ inputs.stack-name }}"
+          echo ""
+          echo "NEED HELP?"
+          echo "   - Check docs/troubleshooting/DEPLOYMENT_ISSUES.md"
+          echo "   - Review CloudFormation events in AWS Console"
+          echo "   - Compare with previous successful runs"
+          echo ""
+          echo "status=failure" >> $GITHUB_OUTPUT
+          # Clean up temp file
+          rm -f "$DEPLOY_OUTPUT_FILE" 2>/dev/null || true
+          exit $DEPLOY_EXIT_CODE
+        fi

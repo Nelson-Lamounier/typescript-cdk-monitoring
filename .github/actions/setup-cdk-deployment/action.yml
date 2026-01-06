@@ -1,0 +1,201 @@
+# @format
+
+name: "Setup CDK Deployment Environment"
+description: "Sets up complete environment for CDK deployment including AWS credentials and build cache"
+
+inputs:
+  node-version:
+    description: "Node.js version to use"
+    required: false
+    default: "22"
+  aws-role:
+    description: "AWS IAM role ARN for OIDC authentication"
+    required: true
+  aws-region:
+    description: "AWS region for deployment"
+    required: true
+  build-cache-key:
+    description: "Build cache key from build job"
+    required: true
+  environment-name:
+    description: "Environment name for deployment"
+    required: false
+    default: "pipeline"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Setup Infrastructure Environment
+      uses: ./.github/actions/setup-infrastructure
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Restore Build Cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          infrastructure/dist
+          infrastructure/cdk.out
+          node_modules
+        # Restores build artifacts from build job to avoid recompilation
+        key: ${{ inputs.build-cache-key }}
+        restore-keys: |
+          build-${{ runner.os }}-
+        fail-on-cache-miss: false
+        # Allows deployment to proceed even if cache is missing (will rebuild)
+
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ inputs.aws-role }}
+        aws-region: ${{ inputs.aws-region }}
+
+    - name: Verify Environment Setup
+      shell: bash
+      run: |
+        echo "🔍 Verifying CDK deployment environment setup..."
+        echo ""
+
+        SETUP_ERRORS=0
+
+        # Check Node.js
+        if command -v node &> /dev/null; then
+          NODE_VERSION=$(node --version)
+          echo "Node.js: $NODE_VERSION"
+        else
+          echo "Node.js: Not found"
+          SETUP_ERRORS=$((SETUP_ERRORS + 1))
+        fi
+
+        # Check Yarn
+        if command -v yarn &> /dev/null; then
+          YARN_VERSION=$(yarn --version)
+          echo "Yarn: $YARN_VERSION"
+        else
+          echo "Yarn: Not found"
+          SETUP_ERRORS=$((SETUP_ERRORS + 1))
+        fi
+
+        # Check AWS CLI
+        if command -v aws &> /dev/null; then
+          AWS_VERSION=$(aws --version 2>&1 | head -n1)
+          echo "AWS CLI: $AWS_VERSION"
+          
+          # Check AWS credentials
+          if aws sts get-caller-identity &> /dev/null; then
+            ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+            echo "AWS Credentials: Active (Account: ***${ACCOUNT_ID: -4})"
+          else
+            echo "AWS Credentials: Not configured or invalid"
+            SETUP_ERRORS=$((SETUP_ERRORS + 1))
+          fi
+        else
+          echo "AWS CLI: Not found"
+          SETUP_ERRORS=$((SETUP_ERRORS + 1))
+        fi
+
+        # Check CDK - uses npx to invoke local dependency, avoiding Yarn exec version issues
+        if [ -d "infrastructure" ] && command -v yarn &> /dev/null; then
+          cd infrastructure
+          if CDK_VERSION=$(npx cdk --version 2>/dev/null); then
+            echo "CDK: $CDK_VERSION"
+          else
+            echo "CDK: Not available or not installed"
+            echo ""
+            echo "Possible Issues:"
+            echo "  - Dependencies not installed properly"
+            echo "  - Build cache restoration failed"
+            echo "  - CDK not included in package.json"
+            SETUP_ERRORS=$((SETUP_ERRORS + 1))
+          fi
+          cd ..
+        else
+          echo "CDK: Cannot verify (infrastructure directory or yarn not available)"
+          SETUP_ERRORS=$((SETUP_ERRORS + 1))
+        fi
+
+        # Check build artifacts - verifies TypeScript compilation output exists
+        if [ -d "infrastructure/dist" ]; then
+          DIST_FILES=$(find infrastructure/dist -name "*.js" | wc -l)
+          echo "Build Artifacts: $DIST_FILES JavaScript files found"
+        else
+          echo "Build Artifacts: dist directory not found"
+          echo ""
+          echo "Attempting to build infrastructure..."
+          
+          # Fallback: build infrastructure if cache miss - ensures deployment can proceed
+          # even when build cache restoration fails
+          if [ -d "infrastructure" ]; then
+            cd infrastructure
+            if npx turbo build --filter=infrastructure; then
+              if [ -d "dist" ]; then
+                DIST_FILES=$(find dist -name "*.js" | wc -l)
+                echo "Fallback Build Successful: $DIST_FILES JavaScript files created"
+              else
+                echo "Fallback Build Failed: No dist directory created"
+                SETUP_ERRORS=$((SETUP_ERRORS + 1))
+              fi
+            else
+              echo "Fallback Build Failed: Build command failed"
+              echo ""
+              echo "Possible Issues:"
+              echo "  - TypeScript compilation errors"
+              echo "  - Missing dependencies"
+              echo "  - Build configuration issues"
+              SETUP_ERRORS=$((SETUP_ERRORS + 1))
+            fi
+            cd ..
+          else
+            echo "Fallback Build Failed: Infrastructure directory not found"
+            SETUP_ERRORS=$((SETUP_ERRORS + 1))
+          fi
+        fi
+
+        echo ""
+        echo "Environment Summary:"
+        echo "  Environment: ${{ inputs.environment-name }}"
+        echo "  AWS Region: ${{ inputs.aws-region }}"
+        echo "  Setup Errors: $SETUP_ERRORS"
+
+        if [ $SETUP_ERRORS -gt 0 ]; then
+          echo ""
+          echo "ENVIRONMENT SETUP FAILED"
+          echo ""
+          echo "$SETUP_ERRORS critical issue(s) detected that will prevent deployment"
+          echo ""
+          echo "TROUBLESHOOTING STEPS:"
+          echo ""
+          echo "CHECK PREVIOUS JOBS:"
+          echo "   - Verify 'setup-infrastructure' composite action succeeded"
+          echo "   - Check 'build' job completed successfully"
+          echo "   - Ensure cache restoration worked properly"
+          echo ""
+          echo "VERIFY DEPENDENCIES:"
+          echo "   - Node.js and Yarn installation"
+          echo "   - AWS CLI configuration"
+          echo "   - CDK installation in infrastructure package"
+          echo ""
+          echo "CHECK CREDENTIALS:"
+          echo "   - AWS OIDC role configuration"
+          echo "   - Repository secrets and variables"
+          echo "   - IAM permissions for deployment"
+          echo ""
+          echo "VALIDATE BUILD ARTIFACTS:"
+          echo "   - Build job logs for compilation errors"
+          echo "   - Cache key consistency across jobs"
+          echo "   - TypeScript compilation success"
+          echo ""
+          echo "NEED HELP?"
+          echo "   - Review setup-infrastructure composite action logs"
+          echo "   - Check build job artifacts and cache"
+          echo "   - Verify repository configuration"
+          echo ""
+          exit 1
+        fi
+
+        echo ""
+        echo "ENVIRONMENT SETUP COMPLETE"
+        echo "Ready for CDK deployment operations"
