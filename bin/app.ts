@@ -6,6 +6,7 @@ import "source-map-support/register";
 import * as cdk from "aws-cdk-lib";
 
 import { NetworkingStack } from "../lib/stacks/networking-stack";
+import { LoadBalancerStack } from "../lib/stacks/elb-stack";
 import { environments, EnvironmentConfig } from "../config/environments";
 
 // ============================================================================
@@ -119,11 +120,37 @@ const networkingStack = new NetworkingStack(
 );
 
 // ============================================================================
+// LOAD BALANCER STACK
+// ============================================================================
+
+// LoadBalancerStack depends on NetworkingStack for VPC
+// Creates Application Load Balancer with HTTP/HTTPS listeners
+const loadBalancerStack = new LoadBalancerStack(
+  app,
+  `LoadBalancerStack-${config.envName}`,
+  {
+    ...stackProps,
+    envName: config.envName,
+    vpc: networkingStack.vpc,
+    internetFacing: true,
+    enableHttps: false, // Set to true and provide certificateArn for HTTPS
+    deletionProtection: config.envName === "production",
+    accessLogEnabled: true,
+  }
+);
+
+// Explicit dependency ensures NetworkingStack is deployed first
+loadBalancerStack.addDependency(networkingStack);
+
+// ============================================================================
 // ADDITIONAL STACKS
 // ============================================================================
 
 // Additional stacks can be added here as dependencies are created
-// The networkingStack variable is available for use by dependent stacks
+// Available stacks:
+// - networkingStack: VPC, subnets, security groups
+// - loadBalancerStack: ALB, listeners, target groups
+//
 // Example:
 // const monitoringInfraStack = new MonitoringInfraStack(
 //   app,
@@ -131,12 +158,10 @@ const networkingStack = new NetworkingStack(
 //   {
 //     ...stackProps,
 //     vpc: networkingStack.vpc,
+//     alb: loadBalancerStack.getLoadBalancer(),
 //     envName: config.envName,
 //   }
 // );
-
-// Reference networkingStack to satisfy linter (will be used by future stacks)
-void networkingStack;
 
 // ============================================================================
 // TAGS
