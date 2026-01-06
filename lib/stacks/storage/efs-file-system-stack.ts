@@ -5,8 +5,12 @@ import * as cdk from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as efs from "aws-cdk-lib/aws-efs";
 import * as ssm from "aws-cdk-lib/aws-ssm";
+import * as iam from "aws-cdk-lib/aws-iam";
+import * as customResources from "aws-cdk-lib/custom-resources";
+import { NagSuppressions } from "cdk-nag";
 
 import { SuppressionManager } from "../../cdk-nag/suppression-manager";
+import { LambdaFunctionConstruct } from "../compute/lambda-stack";
 
 // ============================================================================
 // CROSS-ACCOUNT TARGET TYPE
@@ -457,6 +461,89 @@ export class MonitoringEfsStack extends cdk.Stack {
     // SSM PARAMETERS FOR CONFIGURATION
     // ========================================================================
     this.createConfigurationParameters(envName, crossAccountTargets);
+
+    // ========================================================================
+    // EFS INITIALIZATION LAMBDA
+    // ========================================================================
+    // Lambda function that initializes EFS configuration by creating enhanced
+    // YAML configuration files and setup scripts in SSM parameters
+    // This runs after SSM parameters are created to enhance them with YAML versions
+    const efsInitLambda = new LambdaFunctionConstruct(this, "EfsInitLambda", {
+      envName,
+      functionName: "efs-initialisation",
+      entry: "handlers/efs-initialisation.ts",
+      handler: "handler",
+      timeout: cdk.Duration.minutes(5),
+      memorySize: 256,
+      environment: {
+        AWS_REGION: cdk.Stack.of(this).region || "eu-west-1",
+      },
+      initialPolicy: [
+        // Allow reading SSM parameters created by the stack
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["ssm:GetParameter", "ssm:GetParameters"],
+          resources: [
+            `arn:aws:ssm:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:parameter/monitoring/${envName}/*`,
+          ],
+        }),
+        // Allow writing enhanced YAML configuration files to SSM
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: [
+            "ssm:PutParameter",
+            "ssm:GetParameter",
+            "ssm:DeleteParameter",
+          ],
+          resources: [
+            `arn:aws:ssm:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:parameter/monitoring/${envName}/*`,
+          ],
+        }),
+      ],
+    });
+
+    // Apply CDK Nag suppressions for EFS custom resource Lambda
+    NagSuppressions.addResourceSuppressions(
+      efsInitLambda.function,
+      SuppressionManager.getEfsCustomResourceSuppressions(),
+      true
+    );
+
+    // Create CloudFormation Custom Resource to invoke the Lambda
+    // This ensures the Lambda runs after EFS and SSM parameters are created
+    const efsInitProvider = new customResources.Provider(
+      this,
+      "EfsInitProvider",
+      {
+        onEventHandler: efsInitLambda.function,
+        logRetention: cdk.aws_logs.RetentionDays.ONE_WEEK,
+      }
+    );
+
+    // Invoke the Lambda as a Custom Resource with EFS details
+    const efsInitResource = new cdk.CustomResource(this, "EfsInitResource", {
+      serviceToken: efsInitProvider.serviceToken,
+      properties: {
+        FileSystemId: this.fileSystem.fileSystemId,
+        AccessPointId: this.accessPoint.accessPointId,
+        Environment: envName,
+      },
+    });
+
+    // Ensure the Custom Resource runs after EFS resources and SSM parameters are created
+    // The Lambda reads from SSM parameters and needs EFS details, so they must exist first
+    efsInitResource.node.addDependency(this.fileSystem);
+    efsInitResource.node.addDependency(this.accessPoint);
+
+    // Add dependencies on all SSM parameters created by createConfigurationParameters
+    // Note: createConfigurationParameters creates SSM parameters synchronously,
+    // but we add this dependency to be explicit about the order
+    const ssmParameters = this.node.findAll().filter((node) => {
+      return node instanceof ssm.StringParameter;
+    }) as ssm.StringParameter[];
+    ssmParameters.forEach((param) => {
+      efsInitResource.node.addDependency(param);
+    });
 
     // ========================================================================
     // CDK NAG SUPPRESSIONS & TAGS
