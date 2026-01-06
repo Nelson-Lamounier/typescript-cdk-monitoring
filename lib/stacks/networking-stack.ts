@@ -64,17 +64,17 @@ export interface NetworkingStackProps extends cdk.StackProps {
 
 /**
  * Helper class for creating standard subnet configurations
- * 
+ *
  * Provides factory methods for common subnet patterns used in VPC creation.
  * Supports public, private, and isolated subnet types with configurable CIDR masks.
  */
 export class SubnetConfigurationHelper {
   /**
    * Create a standard public subnet configuration
-   * 
+   *
    * Public subnets have direct internet access via Internet Gateway
    * and automatically assign public IP addresses to launched instances.
-   * 
+   *
    * @param cidrMask - CIDR mask for subnet (default: 24)
    * @returns Subnet configuration for public subnet
    */
@@ -89,11 +89,11 @@ export class SubnetConfigurationHelper {
 
   /**
    * Create a standard private subnet configuration with NAT
-   * 
+   *
    * Private subnets have internet access via NAT Gateway but instances
    * do not receive public IP addresses. Suitable for application servers
    * that need outbound internet access but should not be directly accessible.
-   * 
+   *
    * @param cidrMask - CIDR mask for subnet (default: 24)
    * @returns Subnet configuration for private subnet with egress
    */
@@ -107,11 +107,11 @@ export class SubnetConfigurationHelper {
 
   /**
    * Create an isolated subnet configuration (no internet access)
-   * 
+   *
    * Isolated subnets have no internet gateway or NAT gateway access.
    * Suitable for databases and other resources that should not have
    * any internet connectivity for security purposes.
-   * 
+   *
    * @param cidrMask - CIDR mask for subnet (default: 24)
    * @returns Subnet configuration for isolated subnet
    */
@@ -125,10 +125,10 @@ export class SubnetConfigurationHelper {
 
   /**
    * Create a standard 3-tier subnet configuration
-   * 
+   *
    * Returns public, private, and isolated subnet configurations.
    * Useful for applications requiring multiple security tiers.
-   * 
+   *
    * @returns Array of subnet configurations for 3-tier architecture
    */
   static threeTierConfiguration(): SubnetConfiguration[] {
@@ -141,10 +141,10 @@ export class SubnetConfigurationHelper {
 
   /**
    * Create a simple 2-tier subnet configuration (public + private)
-   * 
+   *
    * Most common configuration for standard web applications.
    * Public subnets for load balancers, private subnets for application servers.
-   * 
+   *
    * @returns Array of subnet configurations for 2-tier architecture
    */
   static twoTierConfiguration(): SubnetConfiguration[] {
@@ -158,13 +158,13 @@ export class SubnetConfigurationHelper {
 
 /**
  * Enhanced VPC Construct with additional features
- * 
+ *
  * This construct extends the basic VPC with:
  * - Custom CIDR configuration
  * - Flexible subnet configuration
  * - DNS settings
  * - Better tagging
- * 
+ *
  * Features:
  * - Configurable CIDR block
  * - Multiple availability zones
@@ -254,11 +254,11 @@ export class VpcConstruct extends Construct {
 
   /**
    * Add interface VPC endpoint
-   * 
+   *
    * Interface endpoints provide private connectivity to AWS services
    * using PrivateLink. They have hourly costs but provide better security
    * and performance than public endpoints.
-   * 
+   *
    * @param id - Logical ID for the endpoint
    * @param service - VPC endpoint service to connect to
    * @param subnets - Subnet selection for endpoint placement
@@ -277,11 +277,11 @@ export class VpcConstruct extends Construct {
 
   /**
    * Add gateway VPC endpoint
-   * 
+   *
    * Gateway endpoints are free and provide private connectivity to
    * S3 and DynamoDB. They are implemented as route table entries
    * rather than network interfaces.
-   * 
+   *
    * @param id - Logical ID for the endpoint
    * @param service - Gateway endpoint service (S3 or DynamoDB)
    * @param subnets - Subnet selection for endpoint routes
@@ -305,17 +305,17 @@ export class VpcConstruct extends Construct {
 
 /**
  * VPC Flow Logs Construct
- * 
+ *
  * Creates VPC Flow Logs for network traffic monitoring and security analysis.
  * Flow logs capture information about IP traffic going to and from network
  * interfaces in the VPC.
- * 
+ *
  * Features:
  * - Configurable traffic type (ALL, ACCEPT, REJECT)
  * - CloudWatch Logs integration
  * - Configurable log retention
  * - Automatic IAM role creation
- * 
+ *
  * CDK Nag Compliance:
  * - AwsSolutions-VPC7: VPC Flow Logs enabled for security monitoring
  */
@@ -334,12 +334,33 @@ export class VpcFlowLogsConstruct extends Construct {
       retentionDays = 7,
     } = props;
 
+    // Map retention days to RetentionDays enum
+    // Maps common retention periods to CDK RetentionDays enum values
+    const getRetentionDays = (days: number): logs.RetentionDays => {
+      if (days <= 1) return logs.RetentionDays.ONE_DAY;
+      if (days <= 3) return logs.RetentionDays.THREE_DAYS;
+      if (days <= 7) return logs.RetentionDays.ONE_WEEK;
+      if (days <= 14) return logs.RetentionDays.TWO_WEEKS;
+      if (days <= 30) return logs.RetentionDays.ONE_MONTH;
+      if (days <= 60) return logs.RetentionDays.TWO_MONTHS;
+      if (days <= 90) return logs.RetentionDays.THREE_MONTHS;
+      if (days <= 120) return logs.RetentionDays.FOUR_MONTHS;
+      if (days <= 150) return logs.RetentionDays.FIVE_MONTHS;
+      if (days <= 180) return logs.RetentionDays.SIX_MONTHS;
+      if (days <= 365) return logs.RetentionDays.ONE_YEAR;
+      if (days <= 400) return logs.RetentionDays.THIRTEEN_MONTHS;
+      if (days <= 545) return logs.RetentionDays.EIGHTEEN_MONTHS;
+      if (days <= 731) return logs.RetentionDays.TWO_YEARS;
+      if (days <= 1827) return logs.RetentionDays.FIVE_YEARS;
+      return logs.RetentionDays.INFINITE;
+    };
+
     // Create CloudWatch Log Group for flow logs
-    // Cost Optimisation: 7-day retention balances cost with compliance requirements
-    // Increase retention for production environments with compliance needs
+    // Cost Optimisation: Configurable retention balances cost with compliance requirements
+    // Default 7-day retention for non-production, increase for production environments
     this.logGroup = new logs.LogGroup(this, "FlowLogsLogGroup", {
       logGroupName,
-      retention: logs.RetentionDays.ONE_WEEK,
+      retention: getRetentionDays(retentionDays),
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
@@ -358,7 +379,10 @@ export class VpcFlowLogsConstruct extends Construct {
     // Create VPC Flow Log
     new ec2.FlowLog(this, "VpcFlowLog", {
       resourceType: ec2.FlowLogResourceType.fromVpc(vpc),
-      destination: ec2.FlowLogDestination.toCloudWatchLogs(this.logGroup, flowLogsRole),
+      destination: ec2.FlowLogDestination.toCloudWatchLogs(
+        this.logGroup,
+        flowLogsRole
+      ),
       trafficType,
     });
 
@@ -374,7 +398,7 @@ export class VpcFlowLogsConstruct extends Construct {
 
 /**
  * NetworkingStack - Provisions core networking infrastructure
- * 
+ *
  * This stack creates:
  * - VPC with public and private subnets across 2 AZs
  * - NAT Gateway for private subnet internet access (optional)
@@ -382,10 +406,10 @@ export class VpcFlowLogsConstruct extends Construct {
  * - VPC endpoints for AWS services (S3, DynamoDB - cost-optimised)
  * - CloudFormation exports for cross-stack references
  * - SSM parameters for cross-account discovery
- * 
+ *
  * Dependencies:
  * - None (foundational stack)
- * 
+ *
  * Exported Resources:
  * - VPC ID (export: `${envName}-vpc-id`)
  * - VPC CIDR (export: `${envName}-vpc-cidr`)
@@ -393,16 +417,16 @@ export class VpcFlowLogsConstruct extends Construct {
  * - Public Subnet IDs (export: `${envName}-public-subnet-{n}-id`)
  * - Private Subnet IDs (export: `${envName}-private-subnet-{n}-id`)
  * - Flow Logs Log Group (export: `${envName}-flow-logs-log-group`)
- * 
+ *
  * SSM Parameters:
  * - `/networking/${envName}/vpc-id` - VPC ID for cross-stack/cross-account access
  * - `/networking/${envName}/vpc-cidr` - VPC CIDR for network planning
- * 
+ *
  * Cost Optimisation:
  * - Single NAT Gateway (not HA for non-production) - saves ~£30/month
  * - Gateway endpoints only (S3, DynamoDB - free) - avoids interface endpoint costs
  * - Flow logs with 7-day retention - balances compliance with cost
- * 
+ *
  * CDK Nag Compliance:
  * - AwsSolutions-VPC7: VPC Flow Logs enabled (when enableVpcFlowLogs=true)
  */
@@ -563,7 +587,7 @@ export class NetworkingStack extends cdk.Stack {
 
   /**
    * Get public subnets
-   * 
+   *
    * Public subnets have direct internet access via Internet Gateway.
    * Suitable for load balancers, NAT gateways, and bastion hosts.
    */
@@ -573,7 +597,7 @@ export class NetworkingStack extends cdk.Stack {
 
   /**
    * Get private subnets
-   * 
+   *
    * Private subnets have internet access via NAT Gateway but instances
    * do not receive public IP addresses. Suitable for application servers.
    */
@@ -583,7 +607,7 @@ export class NetworkingStack extends cdk.Stack {
 
   /**
    * Get isolated subnets
-   * 
+   *
    * Isolated subnets have no internet gateway or NAT gateway access.
    * Suitable for databases and other resources requiring maximum security.
    */
