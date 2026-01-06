@@ -192,8 +192,8 @@ runs:
         else
           # Adaptive: intelligent scheduling based on dependencies and resources
           # balances critical path with parallel execution opportunities
-          CRITICAL_PATH=$(jq -r '[.jobs | to_entries | select(.value.critical == true) | .value.duration] | add' job-dependencies.json)
-          PARALLEL_SAVINGS=$(jq -r '[.jobs | to_entries | select(.value.critical == false) | .value.duration] | max // 0' job-dependencies.json)
+          CRITICAL_PATH=$(jq -r '[.jobs | to_entries[] | select(.value.critical == true) | .value.duration] | add' job-dependencies.json)
+          PARALLEL_SAVINGS=$(jq -r '[.jobs | to_entries[] | select(.value.critical == false) | .value.duration] | max // 0' job-dependencies.json)
           TOTAL_DURATION=$((CRITICAL_PATH + PARALLEL_SAVINGS / 2))
           echo "Adaptive Execution: $TOTAL_DURATION minutes estimated"
         fi
@@ -257,7 +257,7 @@ runs:
         # Validate critical path - ensures critical jobs are properly sequenced
         # critical jobs must succeed for pipeline to continue
         echo "Validating critical path dependencies..."
-        CRITICAL_JOBS=$(jq -r '.jobs | to_entries | select(.value.critical == true) | .key' job-dependencies.json)
+        CRITICAL_JOBS=$(jq -r '.jobs | to_entries[] | select(.value.critical == true) | .key' job-dependencies.json)
         echo "Critical jobs identified: $(echo "$CRITICAL_JOBS" | wc -l)"
 
         echo ""

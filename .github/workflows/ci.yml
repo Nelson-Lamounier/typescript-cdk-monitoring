@@ -5,10 +5,10 @@ name: Continuous Integration
 on:
   push:
     branches:
-      - '**'  # Run on all branches
+      - "**" # Run on all branches
   pull_request:
     branches:
-      - '**'  # Run on PRs to any branch
+      - "**" # Run on PRs to any branch
   workflow_dispatch:
     inputs:
       jobs_to_run:
@@ -29,7 +29,7 @@ env:
   TURBO_TEAM: ${{ vars.TURBO_TEAM }}
 
 permissions:
-  id-token: write  # Required for OIDC authentication to AWS
+  id-token: write # Required for OIDC authentication to AWS
   contents: read
   actions: read
   # CI jobs need id-token: write for OIDC authentication when validating AWS resources
@@ -429,7 +429,7 @@ jobs:
           # TypeScript compiles to lib/ directory (as configured in tsconfig.json)
           # Check for compiled JavaScript files in lib/ directory
           JS_FILES=$(find lib bin config -name "*.js" 2>/dev/null | wc -l)
-          
+
           if [ "$JS_FILES" -gt 0 ]; then
             echo "Build successful: $JS_FILES JavaScript files created"
             echo "Compiled files found in:"
@@ -490,7 +490,7 @@ jobs:
         run: |
           echo "Verifying OIDC configuration..."
           echo ""
-          
+
           # Check if AWS_OIDC_ROLE secret is available
           if [ -z "${{ secrets.AWS_OIDC_ROLE }}" ]; then
             echo "WARNING: AWS_OIDC_ROLE secret is empty or not found"
