@@ -146,8 +146,32 @@ runs:
 
         # Set environment variables for CDK
         export ENVIRONMENT="${{ inputs.environment }}"
+        export CDK_ENVIRONMENT="${{ inputs.environment }}"
         export AWS_PIPELINE_ACCOUNT_ID="${{ inputs.aws-account-id }}"
         export AWS_REGION="${{ inputs.aws-region }}"
+
+        # Set environment-specific account ID variables based on environment
+        # These are used by config/environments.ts to determine the target AWS account
+        case "${{ inputs.environment }}" in
+          pipeline)
+            export AWS_PIPELINE_ACCOUNT_ID="${{ inputs.aws-account-id }}"
+            ;;
+          development)
+            if [ -n "${{ inputs.dev-account-id }}" ]; then
+              export AWS_ACCOUNT_ID_DEV="${{ inputs.dev-account-id }}"
+            fi
+            ;;
+          staging)
+            if [ -n "${{ inputs.staging-account-id }}" ]; then
+              export AWS_ACCOUNT_ID_STAGING="${{ inputs.staging-account-id }}"
+            fi
+            ;;
+          production)
+            if [ -n "${{ inputs.prod-account-id }}" ]; then
+              export AWS_ACCOUNT_ID_PROD="${{ inputs.prod-account-id }}"
+            fi
+            ;;
+        esac
 
         # Set optional environment variables - supports cross-account VPC peering scenarios
         if [ -n "${{ inputs.dev-vpc-id }}" ]; then
@@ -155,22 +179,19 @@ runs:
           echo "Cross-account VPC configured: ***MASKED***"
         fi
 
-        if [ -n "${{ inputs.dev-account-id }}" ]; then
-          export AWS_ACCOUNT_ID_DEV="${{ inputs.dev-account-id }}"
-          echo "Dev account configured: ***MASKED***"
-        fi
-
         echo ""
         echo "CDK Deployment Command:"
-        echo "  npx cdk deploy ${{ inputs.stack-name }} ${{ inputs.additional-args }}"
+        echo "  npx cdk deploy ${{ inputs.stack-name }} --context environment=${{ inputs.environment }} ${{ inputs.additional-args }}"
         echo ""
 
         # Pre-deployment checks
         echo "Pre-deployment validation..."
 
-        # Verify ENVIRONMENT variable is set correctly
+        # Verify environment variables are set correctly
         echo "Environment Configuration:"
         echo "  ENVIRONMENT=$ENVIRONMENT"
+        echo "  CDK_ENVIRONMENT=$CDK_ENVIRONMENT"
+        echo "  AWS_REGION=$AWS_REGION"
         echo "  Expected stack name: NetworkingStack-$ENVIRONMENT"
         echo ""
 
@@ -207,7 +228,7 @@ runs:
         # Run cdk list with error handling - redirect stderr and handle EPIPE gracefully
         # EPIPE errors are common with CDK when output streams are redirected
         set +e  # Don't exit on error - allows graceful handling of EPIPE
-        npx cdk list 2>&1 | tee "$CDK_LIST_OUTPUT" || true
+        npx cdk list --context environment="${{ inputs.environment }}" 2>&1 | tee "$CDK_LIST_OUTPUT" || true
         CDK_LIST_EXIT=$?
         set -e  # Re-enable exit on error
 
@@ -220,14 +241,14 @@ runs:
           
           # Try to synthesize the specific stack to verify it exists - fallback when
           # cdk list fails due to SSM parameter lookups or EPIPE errors
-          if npx cdk synth "${{ inputs.stack-name }}" >/dev/null 2>&1; then
+          if npx cdk synth "${{ inputs.stack-name }}" --context environment="${{ inputs.environment }}" >/dev/null 2>&1; then
             echo "Stack can be synthesized - continuing with deployment"
             rm -f "$CDK_LIST_OUTPUT" 2>/dev/null || true
           else
             echo "Stack synthesis also failed - stack may not exist or has errors"
             echo ""
             echo "Attempting to get synthesis errors..."
-            npx cdk synth "${{ inputs.stack-name }}" 2>&1 | head -100 || true
+            npx cdk synth "${{ inputs.stack-name }}" --context environment="${{ inputs.environment }}" 2>&1 | head -100 || true
             rm -f "$CDK_LIST_OUTPUT" 2>/dev/null || true
             echo "status=failure" >> $GITHUB_OUTPUT
             exit 1
@@ -255,7 +276,7 @@ runs:
           
           # Try to synthesize the specific stack to get better error messages
           echo "Attempting to synthesize stack for better error details..."
-          if ! npx cdk synth "${{ inputs.stack-name }}" 2>&1 | head -50; then
+          if ! npx cdk synth "${{ inputs.stack-name }}" --context environment="${{ inputs.environment }}" 2>&1 | head -50; then
             echo ""
             echo "Synthesis failed - check errors above"
           fi
@@ -325,7 +346,7 @@ runs:
         set +e  # Don't exit on error immediately - allows error analysis before failing
 
         # Run deployment and capture output, handling EPIPE gracefully
-        npx cdk deploy "${{ inputs.stack-name }}" ${{ inputs.additional-args }} > "$DEPLOY_OUTPUT_FILE" 2>&1
+        npx cdk deploy "${{ inputs.stack-name }}" --context environment="${{ inputs.environment }}" ${{ inputs.additional-args }} > "$DEPLOY_OUTPUT_FILE" 2>&1
         DEPLOY_EXIT_CODE=$?
 
         # Display the output (this won't cause EPIPE since we're not piping)
@@ -357,7 +378,7 @@ runs:
             echo ""
             
             # Retry without tee to avoid pipe issues - direct output prevents EPIPE
-            if npx cdk deploy "${{ inputs.stack-name }}" ${{ inputs.additional-args }} 2>&1 > "$DEPLOY_OUTPUT_FILE"; then
+            if npx cdk deploy "${{ inputs.stack-name }}" --context environment="${{ inputs.environment }}" ${{ inputs.additional-args }} 2>&1 > "$DEPLOY_OUTPUT_FILE"; then
               echo ""
               echo "DEPLOYMENT SUCCESSFUL (after EPIPE retry)"
               echo "⏱Completed at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
@@ -419,7 +440,7 @@ runs:
             
             echo "Retrying deployment..."
             # Retry without tee to avoid EPIPE issues
-            if npx cdk deploy "${{ inputs.stack-name }}" ${{ inputs.additional-args }} > "$DEPLOY_OUTPUT_FILE" 2>&1; then
+            if npx cdk deploy "${{ inputs.stack-name }}" --context environment="${{ inputs.environment }}" ${{ inputs.additional-args }} > "$DEPLOY_OUTPUT_FILE" 2>&1; then
               cat "$DEPLOY_OUTPUT_FILE"
               echo ""
               echo "DEPLOYMENT SUCCESSFUL (after retry)"
