@@ -570,7 +570,7 @@ export class NetworkingStack extends cdk.Stack {
     // Flow logs output - exported for monitoring and compliance dashboards
     if (this.flowLogs) {
       new cdk.CfnOutput(this, "FlowLogsLogGroup", {
-        value: this.flowLogs.logGroupName,
+        value: this.flowLogs.logGroup.logGroupName,
         description: "VPC Flow Logs CloudWatch Log Group",
         exportName: `${envName}-flow-logs-log-group`,
       });
