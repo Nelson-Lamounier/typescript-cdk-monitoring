@@ -266,11 +266,30 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
   # ============================================================================
-  # JOB 1: Build & Cache (Required for deployments)
+  # JOB 1: Bootstrap CDK Environment (Required before deployments)
+  # ============================================================================
+  bootstrap:
+    name: Bootstrap CDK Environment
+    needs: [determine-jobs]
+    runs-on: ubuntu-latest
+    # Always run, but will skip bootstrap if no deployments needed
+    if: needs.determine-jobs.outputs.run_build == 'true' || needs.determine-jobs.outputs.run_validate_setup == 'true'
+    steps:
+      - name: Bootstrap Pipeline Environment
+        uses: ./.github/actions/bootstrap-cdk
+        with:
+          aws-role: ${{ secrets.AWS_ROLE_PIPELINE }}
+          aws-region: ${{ env.AWS_REGION }}
+          aws-account-id: ${{ secrets.AWS_ACCOUNT_ID_PIPELINE }}
+          environment: pipeline
+          force: false
+
+  # ============================================================================
+  # JOB 2: Build & Cache (Required for deployments)
   # ============================================================================
   build:
     name: Build Infrastructure
-    needs: [determine-jobs]
+    needs: [determine-jobs, bootstrap]
     runs-on: ubuntu-latest
     if: needs.determine-jobs.outputs.run_build == 'true'
     outputs:

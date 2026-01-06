@@ -1,0 +1,170 @@
+# @format
+
+name: "Bootstrap CDK Environment"
+description: "Bootstraps the CDK environment to ensure the bootstrap stack is up to date (version 30+)"
+
+inputs:
+  aws-role:
+    description: "AWS IAM role ARN for OIDC authentication"
+    required: true
+  aws-region:
+    description: "AWS region for bootstrap"
+    required: true
+  aws-account-id:
+    description: "AWS Account ID for bootstrap"
+    required: true
+  environment:
+    description: "Environment name (e.g., pipeline, development, production)"
+    required: true
+  force:
+    description: "Force bootstrap even if already bootstrapped"
+    required: false
+    default: "false"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Setup Infrastructure Environment
+      uses: ./.github/actions/setup-infrastructure
+      with:
+        node-version: "22"
+
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ inputs.aws-role }}
+        aws-region: ${{ inputs.aws-region }}
+
+    - name: Check Bootstrap Status
+      id: bootstrap-check
+      shell: bash
+      run: |
+        echo "Checking CDK bootstrap status..."
+        echo ""
+        echo "Account: ${{ inputs.aws-account-id }}"
+        echo "Region: ${{ inputs.aws-region }}"
+        echo "Environment: ${{ inputs.environment }}"
+        echo ""
+        
+        BOOTSTRAP_STACK_NAME="CDKToolkit"
+        REGION="${{ inputs.aws-region }}"
+        NEEDS_BOOTSTRAP=0
+        
+        # Try to get bootstrap stack version
+        # CDK stores bootstrap version in stack parameters
+        BOOTSTRAP_OUTPUT=$(aws cloudformation describe-stacks \
+          --stack-name "$BOOTSTRAP_STACK_NAME" \
+          --region "$REGION" \
+          --query 'Stacks[0].Parameters[?ParameterKey==`BootstrapVersion`].ParameterValue' \
+          --output text 2>&1)
+        
+        BOOTSTRAP_ERROR_CODE=$?
+        
+        if echo "$BOOTSTRAP_OUTPUT" | grep -q "does not exist"; then
+          echo "Bootstrap stack not found - needs bootstrap"
+          NEEDS_BOOTSTRAP=1
+        elif [ $BOOTSTRAP_ERROR_CODE -ne 0 ]; then
+          echo "WARNING: Could not check bootstrap status"
+          echo "Error: $BOOTSTRAP_OUTPUT"
+          echo ""
+          echo "The bootstrap stack may exist but we cannot verify its version."
+          echo "Proceeding with bootstrap attempt (will update if needed)..."
+          NEEDS_BOOTSTRAP=1
+        else
+          BOOTSTRAP_VERSION=$(echo "$BOOTSTRAP_OUTPUT" | tr -d '[:space:]')
+          
+          if [ -n "$BOOTSTRAP_VERSION" ] && [ "$BOOTSTRAP_VERSION" != "None" ]; then
+            echo "Current bootstrap version: $BOOTSTRAP_VERSION"
+            echo "Required version: 30 or later"
+            echo ""
+            
+            if [ "$BOOTSTRAP_VERSION" -lt 30 ] 2>/dev/null; then
+              echo "Bootstrap version is outdated (version $BOOTSTRAP_VERSION < 30)"
+              echo "The existing bootstrap stack will be updated to version 30+"
+              echo "This is safe - CDK bootstrap updates existing stacks automatically"
+              NEEDS_BOOTSTRAP=1
+            else
+              echo "Bootstrap version is up to date (version $BOOTSTRAP_VERSION)"
+              if [ "${{ inputs.force }}" != "true" ]; then
+                echo "Skipping bootstrap (use force=true to re-bootstrap)"
+                NEEDS_BOOTSTRAP=0
+              else
+                echo "Force flag set - will re-bootstrap"
+                NEEDS_BOOTSTRAP=1
+              fi
+            fi
+          else
+            echo "Could not determine bootstrap version from stack parameters"
+            echo "This may indicate an older bootstrap format"
+            echo "Proceeding with bootstrap to ensure compatibility..."
+            NEEDS_BOOTSTRAP=1
+          fi
+        fi
+        
+        echo "needs-bootstrap=$NEEDS_BOOTSTRAP" >> $GITHUB_OUTPUT
+
+    - name: Bootstrap CDK Environment
+      if: steps.bootstrap-check.outputs.needs-bootstrap == '1'
+      shell: bash
+      run: |
+        echo "Bootstrapping/updating CDK environment..."
+        echo ""
+        echo "Account: ${{ inputs.aws-account-id }}"
+        echo "Region: ${{ inputs.aws-region }}"
+        echo "Environment: ${{ inputs.environment }}"
+        echo ""
+        echo "Note: If a bootstrap stack already exists, CDK will update it automatically."
+        echo "This is safe and will upgrade the bootstrap version to 30+ if needed."
+        echo ""
+        
+        # Set environment variables for CDK
+        export CDK_ENVIRONMENT="${{ inputs.environment }}"
+        export AWS_REGION="${{ inputs.aws-region }}"
+        export AWS_PIPELINE_ACCOUNT_ID="${{ inputs.aws-account-id }}"
+        
+        # Set environment-specific account ID variable
+        case "${{ inputs.environment }}" in
+          pipeline)
+            export AWS_PIPELINE_ACCOUNT_ID="${{ inputs.aws-account-id }}"
+            ;;
+          development)
+            export AWS_ACCOUNT_ID_DEV="${{ inputs.aws-account-id }}"
+            ;;
+          staging)
+            export AWS_ACCOUNT_ID_STAGING="${{ inputs.aws-account-id }}"
+            ;;
+          production)
+            export AWS_ACCOUNT_ID_PROD="${{ inputs.aws-account-id }}"
+            ;;
+        esac
+        
+        # Run CDK bootstrap
+        echo "Running: npx cdk bootstrap aws://${{ inputs.aws-account-id }}/${{ inputs.aws-region }} --context environment=${{ inputs.environment }}"
+        echo ""
+        
+        if npx cdk bootstrap \
+          "aws://${{ inputs.aws-account-id }}/${{ inputs.aws-region }}" \
+          --context "environment=${{ inputs.environment }}"; then
+          echo ""
+          echo "Bootstrap completed successfully"
+          echo ""
+          echo "The CDK bootstrap stack has been created/updated with:"
+          echo "  - S3 bucket for staging assets"
+          echo "  - IAM roles for deployment"
+          echo "  - ECR repository for Docker images (if needed)"
+          echo "  - Bootstrap version 30+"
+        else
+          echo ""
+          echo "Bootstrap failed"
+          echo ""
+          echo "Troubleshooting Steps:"
+          echo "  1. Verify AWS credentials have sufficient permissions"
+          echo "  2. Check IAM role permissions for CloudFormation, S3, IAM, and ECR"
+          echo "  3. Ensure the account ID and region are correct"
+          echo "  4. Review CloudFormation events for the CDKToolkit stack"
+          echo ""
+          exit 1
+        fi
