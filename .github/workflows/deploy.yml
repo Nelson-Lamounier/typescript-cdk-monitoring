@@ -6,7 +6,7 @@ on:
   push:
     branches:
       - main
-      - feature/testing-pipeline # Remove after testing
+      - develop # Remove after testing
   workflow_dispatch:
     inputs:
       stack:
@@ -315,7 +315,7 @@ jobs:
           # TypeScript compiles to lib/ directory (as configured in tsconfig.json)
           # Check for compiled JavaScript files in lib/ directory
           JS_FILES=$(find lib bin config -name "*.js" 2>/dev/null | wc -l)
-          
+
           if [ "$JS_FILES" -gt 0 ]; then
             echo "Build successful: $JS_FILES JavaScript files created"
             echo "Compiled files found in:"
