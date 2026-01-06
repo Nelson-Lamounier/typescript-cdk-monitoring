@@ -4,10 +4,12 @@
 import "source-map-support/register";
 
 import * as cdk from "aws-cdk-lib";
+import * as efs from "aws-cdk-lib/aws-efs";
 
 import { NetworkingStack } from "../lib/stacks/networking-stack";
 import { LoadBalancerStack } from "../lib/stacks/elb-stack";
 import { LaunchTemplateStack } from "../lib/stacks/compute/launch-template-stack";
+import { MonitoringEfsStack } from "../lib/stacks/storage/efs-file-system-stack";
 import { environments, EnvironmentConfig } from "../config/environments";
 
 // ============================================================================
@@ -164,6 +166,28 @@ const launchTemplateStack = new LaunchTemplateStack(
 launchTemplateStack.addDependency(networkingStack);
 
 // ============================================================================
+// MONITORING EFS STACK
+// ============================================================================
+
+// MonitoringEfsStack depends on NetworkingStack for VPC
+// Creates EFS file system for persistent monitoring data storage
+const monitoringEfsStack = new MonitoringEfsStack(
+  app,
+  `MonitoringEfsStack-${config.envName}`,
+  {
+    ...stackProps,
+    envName: config.envName,
+    vpc: networkingStack.vpc,
+    enableEncryption: true,
+    lifecyclePolicy: efs.LifecyclePolicy.AFTER_30_DAYS,
+    // crossAccountTargets: optional - provide for cross-account monitoring
+  }
+);
+
+// Explicit dependency ensures NetworkingStack is deployed first
+monitoringEfsStack.addDependency(networkingStack);
+
+// ============================================================================
 // ADDITIONAL STACKS
 // ============================================================================
 
@@ -172,6 +196,7 @@ launchTemplateStack.addDependency(networkingStack);
 // - networkingStack: VPC, subnets, security groups
 // - loadBalancerStack: ALB, listeners, target groups
 // - launchTemplateStack: EC2 Launch Template for ECS container instances
+// - monitoringEfsStack: EFS file system for persistent monitoring data storage
 //
 // Example:
 // const monitoringInfraStack = new MonitoringInfraStack(
@@ -182,6 +207,8 @@ launchTemplateStack.addDependency(networkingStack);
 //     vpc: networkingStack.vpc,
 //     alb: loadBalancerStack.getLoadBalancer(),
 //     launchTemplate: launchTemplateStack.launchTemplate,
+//     efsFileSystem: monitoringEfsStack.fileSystem,
+//     efsAccessPoint: monitoringEfsStack.accessPoint,
 //     envName: config.envName,
 //   }
 // );
