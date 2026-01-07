@@ -397,5 +397,17 @@ cdk.Tags.of(app).add("ProjectType", projectConfig.type);
 cdk.Tags.of(app).add("Environment", config.envName);
 cdk.Tags.of(app).add("ManagedBy", "CDK");
 if (projectConfig.description) {
-  cdk.Tags.of(app).add("Description", projectConfig.description);
+  // Sanitize description for IAM tag constraints
+  // IAM tags only allow: letters, spaces, numbers, and: _ . : / = + - @
+  // Remove or replace invalid characters like parentheses, commas, etc.
+  const sanitizedDescription = projectConfig.description
+    .replace(/[()]/g, "") // Remove parentheses
+    .replace(/,/g, " ") // Replace commas with spaces
+    .replace(/[^\p{L}\p{Z}\p{N}_.:/=+\-@]/gu, "") // Remove any other invalid characters
+    .trim()
+    .substring(0, 256); // IAM tag values have a 256 character limit
+
+  if (sanitizedDescription) {
+    cdk.Tags.of(app).add("Description", sanitizedDescription);
+  }
 }
