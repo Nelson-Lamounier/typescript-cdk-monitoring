@@ -13,6 +13,10 @@ inputs:
   environment:
     description: "Environment name (e.g., pipeline, development, production)"
     required: true
+  project-name:
+    description: "Project name (e.g., monitoring, webapp) for multi-project infrastructure pattern"
+    required: false
+    default: "monitoring"
   aws-account-id:
     description: "AWS Account ID for deployment"
     required: true
@@ -85,7 +89,13 @@ runs:
         if [ -z "${{ inputs.stack-name }}" ]; then
           echo "CRITICAL ERROR: Stack name is not set"
           echo ""
-          echo "Expected Format: [StackName]-[environment]"
+          if [ -n "${{ inputs.project-name }}" ] && [ "${{ inputs.project-name }}" != "monitoring" ]; then
+            echo "Expected Format: [StackName]-[project]-[environment]"
+            echo "Example: NetworkingStack-monitoring-pipeline"
+          else
+            echo "Expected Format: [StackName]-[environment] or [StackName]-[project]-[environment]"
+            echo "Example: NetworkingStack-pipeline or NetworkingStack-monitoring-pipeline"
+          fi
           echo "Check: Composite action input parameters"
           echo ""
           VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
@@ -159,8 +169,14 @@ runs:
           echo "The CDK bootstrap stack does not exist in this account/region."
           echo "Run the following command to bootstrap:"
           echo ""
-          echo "  npx cdk bootstrap aws://${{ inputs.aws-account-id }}/${{ inputs.aws-region }} \\"
-          echo "    --context environment=${{ inputs.environment }}"
+          if [ -n "${{ inputs.project-name }}" ] && [ "${{ inputs.project-name }}" != "monitoring" ]; then
+            echo "  npx cdk bootstrap aws://${{ inputs.aws-account-id }}/${{ inputs.aws-region }} \\"
+            echo "    --context environment=${{ inputs.environment }} \\"
+            echo "    --context project=${{ inputs.project-name }}"
+          else
+            echo "  npx cdk bootstrap aws://${{ inputs.aws-account-id }}/${{ inputs.aws-region }} \\"
+            echo "    --context environment=${{ inputs.environment }}"
+          fi
           echo ""
           echo "Bootstrap creates the CDKToolkit stack with:"
           echo "  - S3 bucket for staging assets"
@@ -180,8 +196,14 @@ runs:
           echo "The deployment will proceed, but may fail if bootstrap is outdated."
           echo ""
           echo "If deployment fails with bootstrap version errors, run:"
-          echo "  npx cdk bootstrap aws://${{ inputs.aws-account-id }}/${{ inputs.aws-region }} \\"
-          echo "    --context environment=${{ inputs.environment }}"
+          if [ -n "${{ inputs.project-name }}" ] && [ "${{ inputs.project-name }}" != "monitoring" ]; then
+            echo "  npx cdk bootstrap aws://${{ inputs.aws-account-id }}/${{ inputs.aws-region }} \\"
+            echo "    --context environment=${{ inputs.environment }} \\"
+            echo "    --context project=${{ inputs.project-name }}"
+          else
+            echo "  npx cdk bootstrap aws://${{ inputs.aws-account-id }}/${{ inputs.aws-region }} \\"
+            echo "    --context environment=${{ inputs.environment }}"
+          fi
           echo ""
         else
           # Successfully retrieved version
@@ -203,16 +225,31 @@ runs:
               echo ""
               echo "Run the following command to update the bootstrap stack:"
               echo ""
-              echo "  npx cdk bootstrap aws://${{ inputs.aws-account-id }}/${{ inputs.aws-region }} \\"
-              echo "    --context environment=${{ inputs.environment }}"
+              if [ -n "${{ inputs.project-name }}" ] && [ "${{ inputs.project-name }}" != "monitoring" ]; then
+                echo "  npx cdk bootstrap aws://${{ inputs.aws-account-id }}/${{ inputs.aws-region }} \\"
+                echo "    --context environment=${{ inputs.environment }} \\"
+                echo "    --context project=${{ inputs.project-name }}"
+              else
+                echo "  npx cdk bootstrap aws://${{ inputs.aws-account-id }}/${{ inputs.aws-region }} \\"
+                echo "    --context environment=${{ inputs.environment }}"
+              fi
               echo ""
               echo "Or from your local machine:"
               echo ""
               echo "  export CDK_ENVIRONMENT=${{ inputs.environment }}"
+              if [ -n "${{ inputs.project-name }}" ] && [ "${{ inputs.project-name }}" != "monitoring" ]; then
+                echo "  export PROJECT_NAME=${{ inputs.project-name }}"
+              fi
               echo "  export AWS_ACCOUNT_ID_${{ inputs.environment }}=${{ inputs.aws-account-id }}"
               echo "  export AWS_REGION=${{ inputs.aws-region }}"
-              echo "  npx cdk bootstrap aws://${{ inputs.aws-account-id }}/${{ inputs.aws-region }} \\"
-              echo "    --context environment=${{ inputs.environment }}"
+              if [ -n "${{ inputs.project-name }}" ] && [ "${{ inputs.project-name }}" != "monitoring" ]; then
+                echo "  npx cdk bootstrap aws://${{ inputs.aws-account-id }}/${{ inputs.aws-region }} \\"
+                echo "    --context environment=${{ inputs.environment }} \\"
+                echo "    --context project=${{ inputs.project-name }}"
+              else
+                echo "  npx cdk bootstrap aws://${{ inputs.aws-account-id }}/${{ inputs.aws-region }} \\"
+                echo "    --context environment=${{ inputs.environment }}"
+              fi
               echo ""
               echo "Note: Bootstrap requires appropriate IAM permissions in the target account."
               echo "The bootstrap process creates/updates the CDKToolkit stack with required resources."
@@ -249,6 +286,7 @@ runs:
         # Set environment variables for CDK
         export ENVIRONMENT="${{ inputs.environment }}"
         export CDK_ENVIRONMENT="${{ inputs.environment }}"
+        export PROJECT_NAME="${{ inputs.project-name }}"
         export AWS_PIPELINE_ACCOUNT_ID="${{ inputs.aws-account-id }}"
         export AWS_REGION="${{ inputs.aws-region }}"
 
@@ -283,7 +321,11 @@ runs:
 
         echo ""
         echo "CDK Deployment Command:"
-        echo "  npx cdk deploy ${{ inputs.stack-name }} --context environment=${{ inputs.environment }} ${{ inputs.additional-args }}"
+        if [ -n "${{ inputs.project-name }}" ] && [ "${{ inputs.project-name }}" != "monitoring" ]; then
+          echo "  npx cdk deploy ${{ inputs.stack-name }} --context environment=${{ inputs.environment }} --context project=${{ inputs.project-name }} ${{ inputs.additional-args }}"
+        else
+          echo "  npx cdk deploy ${{ inputs.stack-name }} --context environment=${{ inputs.environment }} ${{ inputs.additional-args }}"
+        fi
         echo ""
 
         # Pre-deployment checks
@@ -293,8 +335,9 @@ runs:
         echo "Environment Configuration:"
         echo "  ENVIRONMENT=$ENVIRONMENT"
         echo "  CDK_ENVIRONMENT=$CDK_ENVIRONMENT"
+        echo "  PROJECT_NAME=$PROJECT_NAME"
         echo "  AWS_REGION=$AWS_REGION"
-        echo "  Expected stack name: NetworkingStack-$ENVIRONMENT"
+        echo "  Expected stack name: ${{ inputs.stack-name }}"
         echo ""
 
         if [ "$ENVIRONMENT" != "${{ inputs.environment }}" ]; then
@@ -330,7 +373,11 @@ runs:
         # Run cdk list with error handling - redirect stderr and handle EPIPE gracefully
         # EPIPE errors are common with CDK when output streams are redirected
         set +e  # Don't exit on error - allows graceful handling of EPIPE
-        npx cdk list --context environment="${{ inputs.environment }}" 2>&1 | tee "$CDK_LIST_OUTPUT" || true
+        if [ -n "${{ inputs.project-name }}" ] && [ "${{ inputs.project-name }}" != "monitoring" ]; then
+          npx cdk list --context environment="${{ inputs.environment }}" --context project="${{ inputs.project-name }}" 2>&1 | tee "$CDK_LIST_OUTPUT" || true
+        else
+          npx cdk list --context environment="${{ inputs.environment }}" 2>&1 | tee "$CDK_LIST_OUTPUT" || true
+        fi
         CDK_LIST_EXIT=$?
         set -e  # Re-enable exit on error
 
@@ -343,14 +390,20 @@ runs:
           
           # Try to synthesize the specific stack to verify it exists - fallback when
           # cdk list fails due to SSM parameter lookups or EPIPE errors
-          if npx cdk synth "${{ inputs.stack-name }}" --context environment="${{ inputs.environment }}" >/dev/null 2>&1; then
+          if [ -n "${{ inputs.project-name }}" ] && [ "${{ inputs.project-name }}" != "monitoring" ]; then
+            SYNTH_CMD="npx cdk synth \"${{ inputs.stack-name }}\" --context environment=\"${{ inputs.environment }}\" --context project=\"${{ inputs.project-name }}\""
+          else
+            SYNTH_CMD="npx cdk synth \"${{ inputs.stack-name }}\" --context environment=\"${{ inputs.environment }}\""
+          fi
+          
+          if eval "$SYNTH_CMD" >/dev/null 2>&1; then
             echo "Stack can be synthesized - continuing with deployment"
             rm -f "$CDK_LIST_OUTPUT" 2>/dev/null || true
           else
             echo "Stack synthesis also failed - stack may not exist or has errors"
             echo ""
             echo "Attempting to get synthesis errors..."
-            npx cdk synth "${{ inputs.stack-name }}" --context environment="${{ inputs.environment }}" 2>&1 | head -100 || true
+            eval "$SYNTH_CMD" 2>&1 | head -100 || true
             rm -f "$CDK_LIST_OUTPUT" 2>/dev/null || true
             echo "status=failure" >> $GITHUB_OUTPUT
             exit 1
@@ -370,15 +423,28 @@ runs:
           echo "  4. CDK synthesis errors (SSM lookups, etc.)"
           echo ""
           echo "Quick Fixes:"
-          echo "  1. Verify stack name format: [StackName]-${{ inputs.environment }}"
-          echo "  2. Check bin/app.ts for stack definitions"
-          echo "  3. Verify ENVIRONMENT variable is set correctly: ${{ inputs.environment }}"
-          echo "  4. Try running: ENVIRONMENT=${{ inputs.environment }} npx cdk list"
+          if [ -n "${{ inputs.project-name }}" ] && [ "${{ inputs.project-name }}" != "monitoring" ]; then
+            echo "  1. Verify stack name format: [StackName]-${{ inputs.project-name }}-${{ inputs.environment }}"
+            echo "  2. Check bin/app.ts for stack definitions"
+            echo "  3. Verify ENVIRONMENT and PROJECT_NAME variables are set correctly"
+            echo "  4. Try running: ENVIRONMENT=${{ inputs.environment }} PROJECT_NAME=${{ inputs.project-name }} npx cdk list"
+          else
+            echo "  1. Verify stack name format: [StackName]-${{ inputs.environment }}"
+            echo "  2. Check bin/app.ts for stack definitions"
+            echo "  3. Verify ENVIRONMENT variable is set correctly: ${{ inputs.environment }}"
+            echo "  4. Try running: ENVIRONMENT=${{ inputs.environment }} npx cdk list"
+          fi
           echo ""
           
           # Try to synthesize the specific stack to get better error messages
           echo "Attempting to synthesize stack for better error details..."
-          if ! npx cdk synth "${{ inputs.stack-name }}" --context environment="${{ inputs.environment }}" 2>&1 | head -50; then
+          if [ -n "${{ inputs.project-name }}" ] && [ "${{ inputs.project-name }}" != "monitoring" ]; then
+            SYNTH_CMD="npx cdk synth \"${{ inputs.stack-name }}\" --context environment=\"${{ inputs.environment }}\" --context project=\"${{ inputs.project-name }}\""
+          else
+            SYNTH_CMD="npx cdk synth \"${{ inputs.stack-name }}\" --context environment=\"${{ inputs.environment }}\""
+          fi
+          
+          if ! eval "$SYNTH_CMD" 2>&1 | head -50; then
             echo ""
             echo "Synthesis failed - check errors above"
           fi
@@ -448,7 +514,11 @@ runs:
         set +e  # Don't exit on error immediately - allows error analysis before failing
 
         # Run deployment and capture output, handling EPIPE gracefully
-        npx cdk deploy "${{ inputs.stack-name }}" --context environment="${{ inputs.environment }}" ${{ inputs.additional-args }} > "$DEPLOY_OUTPUT_FILE" 2>&1
+        if [ -n "${{ inputs.project-name }}" ] && [ "${{ inputs.project-name }}" != "monitoring" ]; then
+          npx cdk deploy "${{ inputs.stack-name }}" --context environment="${{ inputs.environment }}" --context project="${{ inputs.project-name }}" ${{ inputs.additional-args }} > "$DEPLOY_OUTPUT_FILE" 2>&1
+        else
+          npx cdk deploy "${{ inputs.stack-name }}" --context environment="${{ inputs.environment }}" ${{ inputs.additional-args }} > "$DEPLOY_OUTPUT_FILE" 2>&1
+        fi
         DEPLOY_EXIT_CODE=$?
 
         # Display the output (this won't cause EPIPE since we're not piping)
@@ -480,7 +550,13 @@ runs:
             echo ""
             
             # Retry without tee to avoid pipe issues - direct output prevents EPIPE
-            if npx cdk deploy "${{ inputs.stack-name }}" --context environment="${{ inputs.environment }}" ${{ inputs.additional-args }} 2>&1 > "$DEPLOY_OUTPUT_FILE"; then
+            if [ -n "${{ inputs.project-name }}" ] && [ "${{ inputs.project-name }}" != "monitoring" ]; then
+              RETRY_CMD="npx cdk deploy \"${{ inputs.stack-name }}\" --context environment=\"${{ inputs.environment }}\" --context project=\"${{ inputs.project-name }}\" ${{ inputs.additional-args }}"
+            else
+              RETRY_CMD="npx cdk deploy \"${{ inputs.stack-name }}\" --context environment=\"${{ inputs.environment }}\" ${{ inputs.additional-args }}"
+            fi
+            
+            if eval "$RETRY_CMD" 2>&1 > "$DEPLOY_OUTPUT_FILE"; then
               echo ""
               echo "DEPLOYMENT SUCCESSFUL (after EPIPE retry)"
               echo "⏱Completed at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
@@ -509,10 +585,16 @@ runs:
             echo ""
             echo "SOLUTION: Update dependent stacks first, then update this stack."
             echo ""
-            echo "For NetworkingStack, update in this order:"
-            echo "  1. MonitoringInfraStack-pipeline"
-            echo "  2. MonitoringEfsStack-pipeline (if applicable)"
-            echo "  3. NetworkingStack-pipeline"
+            echo "For NetworkingStack, update dependent stacks first:"
+            if [ -n "${{ inputs.project-name }}" ] && [ "${{ inputs.project-name }}" != "monitoring" ]; then
+              echo "  1. EbsStorageStack-${{ inputs.project-name }}-${{ inputs.environment }}"
+              echo "  2. EcsStack-${{ inputs.project-name }}-${{ inputs.environment }}"
+              echo "  3. NetworkingStack-${{ inputs.project-name }}-${{ inputs.environment }}"
+            else
+              echo "  1. EbsStorageStack-${{ inputs.environment }}"
+              echo "  2. EcsStack-${{ inputs.environment }}"
+              echo "  3. NetworkingStack-${{ inputs.environment }}"
+            fi
             echo ""
             echo "See: CLOUDFORMATION_EXPORT_DEPENDENCY_FIX.md"
             echo ""
@@ -542,7 +624,13 @@ runs:
             
             echo "Retrying deployment..."
             # Retry without tee to avoid EPIPE issues
-            if npx cdk deploy "${{ inputs.stack-name }}" --context environment="${{ inputs.environment }}" ${{ inputs.additional-args }} > "$DEPLOY_OUTPUT_FILE" 2>&1; then
+            if [ -n "${{ inputs.project-name }}" ] && [ "${{ inputs.project-name }}" != "monitoring" ]; then
+              RETRY_CMD="npx cdk deploy \"${{ inputs.stack-name }}\" --context environment=\"${{ inputs.environment }}\" --context project=\"${{ inputs.project-name }}\" ${{ inputs.additional-args }}"
+            else
+              RETRY_CMD="npx cdk deploy \"${{ inputs.stack-name }}\" --context environment=\"${{ inputs.environment }}\" ${{ inputs.additional-args }}"
+            fi
+            
+            if eval "$RETRY_CMD" > "$DEPLOY_OUTPUT_FILE" 2>&1; then
               cat "$DEPLOY_OUTPUT_FILE"
               echo ""
               echo "DEPLOYMENT SUCCESSFUL (after retry)"
@@ -589,8 +677,13 @@ runs:
           echo "5. Review previous successful deployments for differences"
           echo ""
           echo "DEBUGGING COMMANDS:"
-          echo "   npx cdk diff ${{ inputs.stack-name }}  # See changes"
-          echo "   npx cdk synth ${{ inputs.stack-name }} # Test synthesis"
+          if [ -n "${{ inputs.project-name }}" ] && [ "${{ inputs.project-name }}" != "monitoring" ]; then
+            echo "   npx cdk diff ${{ inputs.stack-name }} --context environment=${{ inputs.environment }} --context project=${{ inputs.project-name }}  # See changes"
+            echo "   npx cdk synth ${{ inputs.stack-name }} --context environment=${{ inputs.environment }} --context project=${{ inputs.project-name }} # Test synthesis"
+          else
+            echo "   npx cdk diff ${{ inputs.stack-name }} --context environment=${{ inputs.environment }}  # See changes"
+            echo "   npx cdk synth ${{ inputs.stack-name }} --context environment=${{ inputs.environment }} # Test synthesis"
+          fi
           echo "   aws cloudformation describe-stack-events --stack-name ${{ inputs.stack-name }}"
           echo ""
           echo "NEED HELP?"

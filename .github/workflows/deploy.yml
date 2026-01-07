@@ -19,6 +19,11 @@ on:
           - development
           - staging
           - production
+      project:
+        description: "Project name (e.g., monitoring, webapp)"
+        required: false
+        type: string
+        default: "monitoring"
       stack:
         description: "Stack to deploy"
         required: true
@@ -65,6 +70,8 @@ env:
   TURBO_TEAM: ${{ vars.TURBO_TEAM }}
   # Environment is determined from workflow input or defaults to pipeline
   DEPLOY_ENVIRONMENT: ${{ github.event.inputs.environment || 'pipeline' }}
+  # Project name is determined from workflow input or defaults to monitoring
+  PROJECT_NAME: ${{ github.event.inputs.project || 'monitoring' }}
 
 permissions:
   id-token: write
@@ -81,6 +88,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       environment: ${{ steps.decide.outputs.environment }}
+      project_name: ${{ steps.decide.outputs.project_name }}
       run_build: ${{ steps.decide.outputs.run_build }}
       run_validate_setup: ${{ steps.decide.outputs.run_validate_setup }}
       run_deploy_networking: ${{ steps.decide.outputs.run_deploy_networking }}
@@ -112,9 +120,13 @@ jobs:
           RERUN_FROM="${{ github.event.inputs.rerun_failed_from }}"
           STACK_INPUT="${{ github.event.inputs.stack }}"
           ENVIRONMENT="${{ env.DEPLOY_ENVIRONMENT }}"
+          PROJECT_NAME="${{ env.PROJECT_NAME }}"
           
-          echo "Deployment Environment: $ENVIRONMENT"
+          echo "Deployment Configuration:"
+          echo "  Environment: $ENVIRONMENT"
+          echo "  Project: $PROJECT_NAME"
           echo "environment=$ENVIRONMENT" >> $GITHUB_OUTPUT
+          echo "project_name=$PROJECT_NAME" >> $GITHUB_OUTPUT
 
           echo "Input parameters:"
           echo "  Jobs to run: $JOBS_INPUT"
@@ -364,16 +376,19 @@ jobs:
           ENVIRONMENT="${{ needs.determine-jobs.outputs.environment }}"
           
           # First list available stacks to debug
-          echo "Available CDK stacks for environment: $ENVIRONMENT"
-          CDK_ENVIRONMENT="$ENVIRONMENT" npx cdk list --context environment="$ENVIRONMENT"
+          PROJECT_NAME="${{ needs.determine-jobs.outputs.project_name }}"
+          echo "Available CDK stacks for environment: $ENVIRONMENT, project: $PROJECT_NAME"
+          CDK_ENVIRONMENT="$ENVIRONMENT" PROJECT_NAME="$PROJECT_NAME" npx cdk list --context environment="$ENVIRONMENT" --context project="$PROJECT_NAME"
           echo ""
 
           # Synthesize NetworkingStack for build validation
-          echo "Synthesizing NetworkingStack-$ENVIRONMENT..."
-          CDK_ENVIRONMENT="$ENVIRONMENT" npx cdk synth "NetworkingStack-$ENVIRONMENT" --context environment="$ENVIRONMENT" --quiet || echo "CDK synthesis completed with warnings (expected)"
+          STACK_NAME="NetworkingStack-${PROJECT_NAME}-${ENVIRONMENT}"
+          echo "Synthesizing $STACK_NAME..."
+          CDK_ENVIRONMENT="$ENVIRONMENT" PROJECT_NAME="$PROJECT_NAME" npx cdk synth "$STACK_NAME" --context environment="$ENVIRONMENT" --context project="$PROJECT_NAME" --quiet || echo "CDK synthesis completed with warnings (expected)"
         env:
           AWS_REGION: ${{ env.AWS_REGION }}
           CDK_ENVIRONMENT: ${{ needs.determine-jobs.outputs.environment }}
+          PROJECT_NAME: ${{ needs.determine-jobs.outputs.project_name }}
           AWS_PIPELINE_ACCOUNT_ID: "123456789012" # Dummy account ID for validation
 
   # ============================================================================
@@ -549,12 +564,14 @@ jobs:
         shell: bash
         run: |
           ENVIRONMENT="${{ needs.determine-jobs.outputs.environment }}"
+          PROJECT_NAME="${{ needs.determine-jobs.outputs.project_name }}"
           
           echo "Checking for CloudFormation export dependencies..."
           echo "Environment: $ENVIRONMENT"
+          echo "Project: $PROJECT_NAME"
           echo ""
 
-          STACK_NAME="NetworkingStack-$ENVIRONMENT"
+          STACK_NAME="NetworkingStack-${PROJECT_NAME}-${ENVIRONMENT}"
           STACK_EXISTS=$(aws cloudformation describe-stacks \
             --stack-name "$STACK_NAME" \
             --query 'Stacks[0].StackName' \
@@ -563,8 +580,10 @@ jobs:
           if [ -n "$STACK_EXISTS" ]; then
             echo "NetworkingStack exists, checking for export dependencies..."
             
+            # Project-specific export prefix
+            EXPORT_PREFIX="${ENVIRONMENT}-${PROJECT_NAME}"
             EXPORTS=$(aws cloudformation list-exports \
-              --query "Exports[?starts_with(Name, '${STACK_NAME}')].Name" \
+              --query "Exports[?starts_with(Name, '${EXPORT_PREFIX}')].Name" \
               --output text 2>/dev/null || echo "")
             
             if [ -n "$EXPORTS" ]; then
@@ -573,7 +592,7 @@ jobs:
               echo ""
               
               # Update dependent stacks first if they exist
-              EBS_STORAGE_STACK="EbsStorageStack-$ENVIRONMENT"
+              EBS_STORAGE_STACK="EbsStorageStack-${PROJECT_NAME}-${ENVIRONMENT}"
               EBS_STORAGE_EXISTS=$(aws cloudformation describe-stacks \
                 --stack-name "$EBS_STORAGE_STACK" \
                 --query 'Stacks[0].StackName' \
@@ -581,10 +600,10 @@ jobs:
               
               if [ -n "$EBS_STORAGE_EXISTS" ]; then
                 echo "Updating EbsStorageStack first to handle export changes..."
-                CDK_ENVIRONMENT="$ENVIRONMENT" yarn cdk deploy "$EBS_STORAGE_STACK" --context environment="$ENVIRONMENT" --require-approval never 2>&1 || echo "EbsStorageStack update completed"
+                CDK_ENVIRONMENT="$ENVIRONMENT" PROJECT_NAME="$PROJECT_NAME" yarn cdk deploy "$EBS_STORAGE_STACK" --context environment="$ENVIRONMENT" --context project="$PROJECT_NAME" --require-approval never 2>&1 || echo "EbsStorageStack update completed"
               fi
               
-              ECS_STACK="EcsStack-$ENVIRONMENT"
+              ECS_STACK="EcsStack-${PROJECT_NAME}-${ENVIRONMENT}"
               ECS_EXISTS=$(aws cloudformation describe-stacks \
                 --stack-name "$ECS_STACK" \
                 --query 'Stacks[0].StackName' \
@@ -592,7 +611,7 @@ jobs:
               
               if [ -n "$ECS_EXISTS" ]; then
                 echo "Updating EcsStack first to handle export changes..."
-                CDK_ENVIRONMENT="$ENVIRONMENT" yarn cdk deploy "$ECS_STACK" --context environment="$ENVIRONMENT" --require-approval never 2>&1 || echo "EcsStack update completed"
+                CDK_ENVIRONMENT="$ENVIRONMENT" PROJECT_NAME="$PROJECT_NAME" yarn cdk deploy "$ECS_STACK" --context environment="$ENVIRONMENT" --context project="$PROJECT_NAME" --require-approval never 2>&1 || echo "EcsStack update completed"
               fi
               
               echo "Dependent stacks updated (if needed)"
@@ -602,8 +621,9 @@ jobs:
       - name: Deploy NetworkingStack
         uses: ./.github/actions/deploy-cdk-stack
         with:
-          stack-name: "NetworkingStack-${{ needs.determine-jobs.outputs.environment }}"
+          stack-name: "NetworkingStack-${{ needs.determine-jobs.outputs.project_name }}-${{ needs.determine-jobs.outputs.environment }}"
           environment: ${{ needs.determine-jobs.outputs.environment }}
+          project-name: ${{ needs.determine-jobs.outputs.project_name }}
           aws-account-id: ${{ needs.validate-setup.outputs.pipeline_account_id }}
           aws-region: ${{ env.AWS_REGION }}
           dev-vpc-id: ${{ needs.validate-setup.outputs.dev_vpc_id }}
@@ -641,8 +661,9 @@ jobs:
       - name: Deploy EbsStorageStack
         uses: ./.github/actions/deploy-cdk-stack
         with:
-          stack-name: "EbsStorageStack-${{ needs.determine-jobs.outputs.environment }}"
+          stack-name: "EbsStorageStack-${{ needs.determine-jobs.outputs.project_name }}-${{ needs.determine-jobs.outputs.environment }}"
           environment: ${{ needs.determine-jobs.outputs.environment }}
+          project-name: ${{ needs.determine-jobs.outputs.project_name }}
           aws-account-id: ${{ needs.validate-setup.outputs.pipeline_account_id }}
           aws-region: ${{ env.AWS_REGION }}
           dev-vpc-id: ${{ needs.validate-setup.outputs.dev_vpc_id }}
@@ -651,44 +672,63 @@ jobs:
       - name: Validate SSM Parameters
         run: |
           ENVIRONMENT="${{ needs.determine-jobs.outputs.environment }}"
+          PROJECT_NAME="${{ needs.determine-jobs.outputs.project_name }}"
           echo "Validating SSM parameters created by EbsStorageStack..."
+          echo "Environment: $ENVIRONMENT"
+          echo "Project: $PROJECT_NAME"
+          echo ""
           
-          # Check for Prometheus config parameter
+          # Project-specific SSM parameter prefix
+          SSM_PREFIX="/${PROJECT_NAME}/${ENVIRONMENT}"
+          
+          # Check for Prometheus config parameter (monitoring projects only)
           PROMETHEUS_CONFIG=$(aws ssm get-parameter \
-            --name "/monitoring/$ENVIRONMENT/prometheus-config" \
+            --name "${SSM_PREFIX}/prometheus-config" \
             --query 'Parameter.Value' \
             --output text 2>/dev/null || echo "")
           
           if [ -n "$PROMETHEUS_CONFIG" ]; then
             echo "✓ Prometheus config parameter exists"
           else
-            echo "WARNING: Prometheus config parameter not found"
+            echo "INFO: Prometheus config parameter not found (expected for non-monitoring projects)"
           fi
           
-          # Check for Grafana datasource config parameter
+          # Check for Grafana datasource config parameter (monitoring projects only)
           GRAFANA_DATASOURCE=$(aws ssm get-parameter \
-            --name "/monitoring/$ENVIRONMENT/grafana-datasource-config" \
+            --name "${SSM_PREFIX}/grafana-datasource-config" \
             --query 'Parameter.Value' \
             --output text 2>/dev/null || echo "")
           
           if [ -n "$GRAFANA_DATASOURCE" ]; then
             echo "✓ Grafana datasource config parameter exists"
           else
-            echo "WARNING: Grafana datasource config parameter not found"
+            echo "INFO: Grafana datasource config parameter not found (expected for non-monitoring projects)"
           fi
           
-          # Check for EBS volume configuration parameters
+          # Check for EBS volume configuration parameters (all projects)
           PROMETHEUS_VOLUME_SIZE=$(aws ssm get-parameter \
-            --name "/monitoring/$ENVIRONMENT/ebs/prometheus-volume-size" \
+            --name "${SSM_PREFIX}/ebs/prometheus-volume-size" \
             --query 'Parameter.Value' \
             --output text 2>/dev/null || echo "")
           
           if [ -n "$PROMETHEUS_VOLUME_SIZE" ]; then
             echo "✓ Prometheus volume size parameter: ${PROMETHEUS_VOLUME_SIZE}GB"
           else
-            echo "WARNING: Prometheus volume size parameter not found"
+            echo "INFO: Prometheus volume size parameter not found (may use generic volumes array)"
           fi
           
+          # Check for generic volume parameters (if using volumes array)
+          VOLUME_PARAMS=$(aws ssm describe-parameters \
+            --parameter-filters "Key=Name,Values=${SSM_PREFIX}/ebs" \
+            --query 'Parameters[].Name' \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -n "$VOLUME_PARAMS" ]; then
+            echo "✓ Found volume configuration parameters:"
+            echo "$VOLUME_PARAMS" | tr '\t' '\n' | sed 's/^/    /'
+          fi
+          
+          echo ""
           echo "SUCCESS: EBS Storage Stack deployment validated"
 
   # ============================================================================
@@ -724,8 +764,9 @@ jobs:
       - name: Deploy EcsStack
         uses: ./.github/actions/deploy-cdk-stack
         with:
-          stack-name: "EcsStack-${{ needs.determine-jobs.outputs.environment }}"
+          stack-name: "EcsStack-${{ needs.determine-jobs.outputs.project_name }}-${{ needs.determine-jobs.outputs.environment }}"
           environment: ${{ needs.determine-jobs.outputs.environment }}
+          project-name: ${{ needs.determine-jobs.outputs.project_name }}
           aws-account-id: ${{ needs.validate-setup.outputs.pipeline_account_id }}
           aws-region: ${{ env.AWS_REGION }}
           dev-vpc-id: ${{ needs.validate-setup.outputs.dev_vpc_id }}
