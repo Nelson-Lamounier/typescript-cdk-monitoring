@@ -484,7 +484,9 @@ export class MonitoringEfsStack extends cdk.Stack {
           effect: iam.Effect.ALLOW,
           actions: ["ssm:GetParameter", "ssm:GetParameters"],
           resources: [
-            `arn:aws:ssm:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:parameter/monitoring/${envName}/*`,
+            `arn:aws:ssm:${cdk.Stack.of(this).region}:${
+              cdk.Stack.of(this).account
+            }:parameter/monitoring/${envName}/*`,
           ],
         }),
         // Allow writing enhanced YAML configuration files to SSM
@@ -496,7 +498,9 @@ export class MonitoringEfsStack extends cdk.Stack {
             "ssm:DeleteParameter",
           ],
           resources: [
-            `arn:aws:ssm:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:parameter/monitoring/${envName}/*`,
+            `arn:aws:ssm:${cdk.Stack.of(this).region}:${
+              cdk.Stack.of(this).account
+            }:parameter/monitoring/${envName}/*`,
           ],
         }),
       ],
@@ -678,20 +682,19 @@ export class MonitoringEfsStack extends cdk.Stack {
     // Add cross-account targets using EC2 service discovery or static configs
     if (crossAccountTargets && crossAccountTargets.length > 0) {
       // Group targets by environment and type
-      const targetsByEnv = crossAccountTargets.reduce(
-        (acc, target) => {
-          const key = `${target.envName}-${target.targetType}`;
-          if (!acc[key]) {
-            acc[key] = [];
-          }
-          acc[key].push(target);
-          return acc;
-        },
-        {} as Record<string, CrossAccountTarget[]>
-      );
+      const targetsByEnv = crossAccountTargets.reduce((acc, target) => {
+        const key = `${target.envName}-${target.targetType}`;
+        if (!acc[key]) {
+          acc[key] = [];
+        }
+        acc[key].push(target);
+        return acc;
+      }, {} as Record<string, CrossAccountTarget[]>);
 
       // Generate scrape configs for each environment/type combination
-      for (const targets of Object.values(targetsByEnv) as CrossAccountTarget[][]) {
+      for (const targets of Object.values(
+        targetsByEnv
+      ) as CrossAccountTarget[][]) {
         const firstTarget = targets[0];
         const useEc2Sd =
           firstTarget.useEc2ServiceDiscovery !== false &&
@@ -758,7 +761,9 @@ export class MonitoringEfsStack extends cdk.Stack {
             job_name: `${firstTarget.targetType}-${firstTarget.envName}`,
             static_configs: [
               {
-                targets: targets.map((t: CrossAccountTarget) => `${t.privateIp}:${t.port}`),
+                targets: targets.map(
+                  (t: CrossAccountTarget) => `${t.privateIp}:${t.port}`
+                ),
                 labels: {
                   environment: firstTarget.envName,
                   service: firstTarget.targetType,

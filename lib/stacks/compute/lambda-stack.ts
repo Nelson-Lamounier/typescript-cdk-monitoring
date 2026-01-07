@@ -193,4 +193,3 @@ export class LambdaFunctionConstruct extends Construct {
     cdk.Tags.of(this).add("Function", props.functionName);
   }
 }
-

@@ -32,9 +32,7 @@ const app = new cdk.App();
 // Usage: cdk deploy --context project=monitoring --context environment=development
 // Or: PROJECT_NAME=monitoring ENVIRONMENT=development cdk deploy
 const projectName =
-  app.node.tryGetContext("project") ||
-  process.env.PROJECT_NAME ||
-  "monitoring"; // Default to monitoring for backward compatibility
+  app.node.tryGetContext("project") || process.env.PROJECT_NAME || "monitoring"; // Default to monitoring for backward compatibility
 
 // ============================================================================
 // ENVIRONMENT CONFIGURATION
@@ -162,10 +160,8 @@ const networkingStack = new NetworkingStack(
     vpcCidr: vpcCidr,
     maxAzs: projectConfig.networking?.maxAzs ?? 2,
     natGateways: natGateways,
-    enableVpcFlowLogs:
-      projectConfig.networking?.enableVpcFlowLogs ?? true,
-    enableVpcEndpoints:
-      projectConfig.networking?.enableVpcEndpoints ?? true,
+    enableVpcFlowLogs: projectConfig.networking?.enableVpcFlowLogs ?? true,
+    enableVpcEndpoints: projectConfig.networking?.enableVpcEndpoints ?? true,
   }
 );
 
@@ -218,8 +214,9 @@ const launchTemplateStack = new LaunchTemplateStack(
           const instanceClass = parts[0].toUpperCase();
           const instanceSize = parts[1]?.toUpperCase() || "MICRO";
           return ec2.InstanceType.of(
-            (ec2.InstanceClass[instanceClass as keyof typeof ec2.InstanceClass] ||
-              ec2.InstanceClass.T3) as ec2.InstanceClass,
+            (ec2.InstanceClass[
+              instanceClass as keyof typeof ec2.InstanceClass
+            ] || ec2.InstanceClass.T3) as ec2.InstanceClass,
             (ec2.InstanceSize[instanceSize as keyof typeof ec2.InstanceSize] ||
               ec2.InstanceSize.MICRO) as ec2.InstanceSize
           );
@@ -242,13 +239,16 @@ launchTemplateStack.addDependency(networkingStack);
 // Uses project-agnostic naming: EbsStorageStack-{project}-{environment}
 // Only create if project has storage configuration
 let ebsStorageStack: EbsStorageStack | undefined;
-if (projectConfig.storage?.ebsVolumes && projectConfig.storage.ebsVolumes.length > 0) {
+if (
+  projectConfig.storage?.ebsVolumes &&
+  projectConfig.storage.ebsVolumes.length > 0
+) {
   // Extract volume sizes from project config (for monitoring projects)
-  const prometheusVolume = projectConfig.storage.ebsVolumes.find(
-    (v) => v.mountPath.includes("prometheus")
+  const prometheusVolume = projectConfig.storage.ebsVolumes.find((v) =>
+    v.mountPath.includes("prometheus")
   );
-  const grafanaVolume = projectConfig.storage.ebsVolumes.find(
-    (v) => v.mountPath.includes("grafana")
+  const grafanaVolume = projectConfig.storage.ebsVolumes.find((v) =>
+    v.mountPath.includes("grafana")
   );
 
   ebsStorageStack = new EbsStorageStack(
@@ -262,7 +262,8 @@ if (projectConfig.storage?.ebsVolumes && projectConfig.storage.ebsVolumes.length
       vpc: networkingStack.vpc,
       // Use generic volumes array if available, otherwise fall back to legacy Prometheus/Grafana
       volumes: projectConfig.storage.ebsVolumes?.map((vol) => ({
-        name: vol.mountPath.split("/").pop() || vol.deviceName.replace("/dev/", ""),
+        name:
+          vol.mountPath.split("/").pop() || vol.deviceName.replace("/dev/", ""),
         sizeGB: vol.sizeGB,
         volumeType:
           vol.volumeType === "gp3"
@@ -307,10 +308,16 @@ let ecsApplicationConfig;
 if (projectConfig.type === "monitoring") {
   ecsApplicationConfig = createMonitoringApplicationConfig(config.envName);
 } else if (projectConfig.type === "webapp") {
-  ecsApplicationConfig = createNextJsApplicationConfig(config.envName, "latest");
+  ecsApplicationConfig = createNextJsApplicationConfig(
+    config.envName,
+    "latest"
+  );
 } else {
   // Generic application - can be extended for other project types
-  ecsApplicationConfig = createNextJsApplicationConfig(config.envName, "latest");
+  ecsApplicationConfig = createNextJsApplicationConfig(
+    config.envName,
+    "latest"
+  );
 }
 
 // Override EBS volumes from project config if provided
@@ -331,8 +338,7 @@ if (projectConfig.compute) {
   if (projectConfig.compute.enableContainerInsights !== undefined) {
     ecsApplicationConfig.cluster = {
       ...ecsApplicationConfig.cluster,
-      enableContainerInsights:
-        projectConfig.compute.enableContainerInsights,
+      enableContainerInsights: projectConfig.compute.enableContainerInsights,
     };
   }
 }

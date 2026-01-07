@@ -154,7 +154,7 @@ describe("LaunchTemplateConstruct", () => {
 
       const sshRule = ingressRules.find(
         (rule: Record<string, unknown>) =>
-          (rule.FromPort === 22 || rule.ToPort === 22)
+          rule.FromPort === 22 || rule.ToPort === 22
       );
       expect(sshRule).toBeUndefined();
     });
@@ -173,7 +173,7 @@ describe("LaunchTemplateConstruct", () => {
 
       const httpRule = ingressRules.find(
         (rule: Record<string, unknown>) =>
-          (rule.FromPort === 80 || rule.ToPort === 80)
+          rule.FromPort === 80 || rule.ToPort === 80
       );
       expect(httpRule).toBeUndefined();
     });
@@ -331,8 +331,7 @@ describe("LaunchTemplateConstruct", () => {
       // If NetworkInterfaces is not specified, public IP association defaults to false
       if (networkInterfaces) {
         const hasPublicIp = networkInterfaces.some(
-          (ni: Record<string, unknown>) =>
-            ni.AssociatePublicIpAddress === true
+          (ni: Record<string, unknown>) => ni.AssociatePublicIpAddress === true
         );
         expect(hasPublicIp).toBe(false);
       }
@@ -568,12 +567,14 @@ describe("LaunchTemplateConstruct", () => {
 
       // Tags are applied to the launch template resource itself
       // Check that tags exist (CDK may apply tags differently)
-      const launchTemplates = template.findResources("AWS::EC2::LaunchTemplate");
+      const launchTemplates = template.findResources(
+        "AWS::EC2::LaunchTemplate"
+      );
       const lt = Object.values(launchTemplates)[0] as any;
       const tagSpecs = lt.Properties?.TagSpecifications || [];
-      const launchTemplateTags = tagSpecs.find(
-        (spec: any) => spec.ResourceType === "launch-template"
-      )?.Tags || [];
+      const launchTemplateTags =
+        tagSpecs.find((spec: any) => spec.ResourceType === "launch-template")
+          ?.Tags || [];
 
       expect(launchTemplateTags).toEqual(
         expect.arrayContaining([
@@ -719,7 +720,9 @@ describe("LaunchTemplateStack", () => {
 
       // Verify instance profile is created
       // Note: Stack creates instance profile via construct, so count should be 1
-      const instanceProfiles = template.findResources("AWS::IAM::InstanceProfile");
+      const instanceProfiles = template.findResources(
+        "AWS::IAM::InstanceProfile"
+      );
       expect(Object.keys(instanceProfiles).length).toBeGreaterThanOrEqual(1);
     });
 
@@ -957,7 +960,9 @@ describe("LaunchTemplateStack", () => {
       const template = Template.fromStack(stack);
 
       // User data is base64 encoded, so we need to decode it to check content
-      const launchTemplates = template.findResources("AWS::EC2::LaunchTemplate");
+      const launchTemplates = template.findResources(
+        "AWS::EC2::LaunchTemplate"
+      );
       const lt = Object.values(launchTemplates)[0] as any;
       const userData = lt.Properties?.LaunchTemplateData?.UserData;
 
@@ -995,7 +1000,9 @@ describe("LaunchTemplateStack", () => {
       const template = Template.fromStack(stack);
 
       // User data is base64 encoded, so we need to decode it to check content
-      const launchTemplates = template.findResources("AWS::EC2::LaunchTemplate");
+      const launchTemplates = template.findResources(
+        "AWS::EC2::LaunchTemplate"
+      );
       const lt = Object.values(launchTemplates)[0] as any;
       const userData = lt.Properties?.LaunchTemplateData?.UserData;
 
@@ -1135,12 +1142,14 @@ describe("LaunchTemplateStack", () => {
       });
 
       // Should not have Project tag
-      const launchTemplates = template.findResources("AWS::EC2::LaunchTemplate");
+      const launchTemplates = template.findResources(
+        "AWS::EC2::LaunchTemplate"
+      );
       const lt = Object.values(launchTemplates)[0];
       const tagSpecs = lt.Properties?.TagSpecifications || [];
-      const launchTemplateTags = tagSpecs.find(
-        (spec: any) => spec.ResourceType === "launch-template"
-      )?.Tags || [];
+      const launchTemplateTags =
+        tagSpecs.find((spec: any) => spec.ResourceType === "launch-template")
+          ?.Tags || [];
 
       const hasProjectTag = launchTemplateTags.some(
         (tag: any) => tag.Key === "Project"

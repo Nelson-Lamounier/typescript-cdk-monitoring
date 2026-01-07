@@ -508,9 +508,9 @@ export class ApplicationLoadBalancerConstruct extends Construct {
 
     // Create default security group if none provided
     // Project-agnostic naming: uses project name if provided
-    const albName = loadBalancerName || (projectName
-      ? `${envName}-${projectName}-alb`
-      : `${envName}-alb`);
+    const albName =
+      loadBalancerName ||
+      (projectName ? `${envName}-${projectName}-alb` : `${envName}-alb`);
 
     if (securityGroups.length === 0) {
       this.securityGroup = new ec2.SecurityGroup(this, "AlbSecurityGroup", {
@@ -745,7 +745,9 @@ export class LoadBalancerStack extends cdk.Stack {
     // 4. CLOUDFORMATION OUTPUTS
     // ========================================================================
     // Project-agnostic export naming: includes project name if provided
-    const exportPrefix = projectName ? `${envName}-${projectName}` : `${envName}`;
+    const exportPrefix = projectName
+      ? `${envName}-${projectName}`
+      : `${envName}`;
 
     new cdk.CfnOutput(this, "LoadBalancerArn", {
       value: this.alb.loadBalancerArn,

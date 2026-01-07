@@ -2318,7 +2318,6 @@ export class EcsStack extends cdk.Stack {
     return nodeExporterService.service;
   }
 
-
   private createOutputs(
     taskLogGroup: logs.LogGroup,
     eventLogGroup: logs.LogGroup,
