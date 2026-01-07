@@ -247,6 +247,13 @@ export class AutoScalingGroupConstruct extends Construct {
     });
 
     // Add capacity provider to cluster (if cluster is a concrete Cluster, not ICluster)
+    // Capacity provider name must not start with "aws", "ecs", or "fargate"
+    // and can only contain letters, numbers, underscores, and hyphens
+    const capacityProviderName = `${envName}-monitoring-capacity-provider`
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, "-")
+      .substring(0, 255);
+
     const capacityProvider = new ecs.AsgCapacityProvider(
       this,
       "CapacityProvider",
@@ -256,6 +263,14 @@ export class AutoScalingGroupConstruct extends Construct {
         enableManagedTerminationProtection: false,
       }
     );
+
+    // Override the capacity provider name using escape hatch
+    // CDK auto-generated names may start with "ecs" which is not allowed
+    const cfnCapacityProvider = capacityProvider.node
+      .defaultChild as ecs.CfnCapacityProvider;
+    if (cfnCapacityProvider) {
+      cfnCapacityProvider.name = capacityProviderName;
+    }
 
     // Only add capacity provider if cluster is a concrete Cluster instance
     if (cluster instanceof ecs.Cluster) {
@@ -693,6 +708,17 @@ export class EcsClusterConstruct extends Construct {
     // 5. Check security groups allow outbound traffic (for ECS agent communication)
     // 6. For public subnets: verify instances have public IPs
     // 7. For private subnets: verify NAT gateway is configured
+    // Capacity provider name must not start with "aws", "ecs", or "fargate"
+    // and can only contain letters, numbers, underscores, and hyphens
+    const capacityProviderName = `${envName}-${clusterName.replace(
+      "ecs-",
+      ""
+    )}-capacity-provider`
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, "-")
+      .replace(/^ecs-/, "") // Remove "ecs-" prefix if present
+      .substring(0, 255);
+
     const capacityProvider = new ecs.AsgCapacityProvider(
       this,
       "CapacityProvider",
@@ -706,6 +732,14 @@ export class EcsClusterConstruct extends Construct {
         enableManagedTerminationProtection: false,
       }
     );
+
+    // Override the capacity provider name using escape hatch
+    // CDK auto-generated names may start with "ecs" which is not allowed
+    const cfnCapacityProvider = capacityProvider.node
+      .defaultChild as ecs.CfnCapacityProvider;
+    if (cfnCapacityProvider) {
+      cfnCapacityProvider.name = capacityProviderName;
+    }
 
     this.cluster.addAsgCapacityProvider(capacityProvider);
 
@@ -1808,6 +1842,14 @@ export class EcsStack extends cdk.Stack {
     );
 
     // Add the Auto Scaling Group as a capacity provider to the cluster
+    // Capacity provider name must not start with "aws", "ecs", or "fargate"
+    // and can only contain letters, numbers, underscores, and hyphens
+    const capacityProviderName =
+      `${envName}-${applicationName}-capacity-provider`
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]/g, "-")
+        .substring(0, 255);
+
     const capacityProvider = new ecs.AsgCapacityProvider(
       this,
       "AsgCapacityProvider",
@@ -1817,6 +1859,15 @@ export class EcsStack extends cdk.Stack {
         enableManagedTerminationProtection: false,
       }
     );
+
+    // Override the capacity provider name using escape hatch
+    // CDK auto-generated names may start with "ecs" which is not allowed
+    const cfnCapacityProvider = capacityProvider.node
+      .defaultChild as ecs.CfnCapacityProvider;
+    if (cfnCapacityProvider) {
+      cfnCapacityProvider.name = capacityProviderName;
+    }
+
     cluster.addAsgCapacityProvider(capacityProvider);
 
     // Build and apply UserData with dynamic EBS volume configuration
