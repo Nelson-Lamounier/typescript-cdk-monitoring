@@ -37,6 +37,12 @@ export interface EcsServicesStackProps extends cdk.StackProps {
    */
   loadBalancer?: elbv2.IApplicationLoadBalancer;
   /**
+   * Load balancer listener (optional)
+   * If provided, target groups will be added to this listener
+   * Must be provided if loadBalancer is provided
+   */
+  listener?: elbv2.IApplicationListener;
+  /**
    * Default log retention for service log groups
    * @default TWO_WEEKS
    */
@@ -104,6 +110,7 @@ export class EcsServicesStack extends cdk.Stack {
       applicationName,
       services,
       loadBalancer,
+      listener,
       defaultLogRetention = logs.RetentionDays.TWO_WEEKS,
       enablePublicEcr = false,
     } = props;
@@ -116,14 +123,12 @@ export class EcsServicesStack extends cdk.Stack {
     this.services = new Map();
     this.serviceUrls = new Map();
 
-    // Create listener if load balancer is provided
-    let listener: elbv2.ApplicationListener | undefined;
-    if (
-      this.loadBalancer &&
-      this.loadBalancer instanceof elbv2.ApplicationLoadBalancer
-    ) {
-      listener = this.createLoadBalancerListener(
-        this.loadBalancer as elbv2.ApplicationLoadBalancer
+    // Use provided listener (created in EcsStack to avoid cyclic dependencies)
+    // If listener is not provided but load balancer is, that's a configuration error
+    if (this.loadBalancer && !listener) {
+      throw new Error(
+        "Listener must be provided when load balancer is provided. " +
+          "The listener should be created in EcsStack and passed to EcsServicesStack."
       );
     }
 
@@ -316,28 +321,6 @@ export class EcsServicesStack extends cdk.Stack {
     Tags.of(service).add("Service", serviceConfig.name);
 
     return service;
-  }
-
-  /**
-   * Create load balancer listener
-   */
-  private createLoadBalancerListener(
-    alb: elbv2.ApplicationLoadBalancer
-  ): elbv2.ApplicationListener {
-    const listener = alb.addListener("ApplicationListener", {
-      port: 80,
-      protocol: elbv2.ApplicationProtocol.HTTP,
-    });
-
-    // Add default action
-    listener.addAction("DefaultAction", {
-      action: elbv2.ListenerAction.fixedResponse(404, {
-        contentType: "text/plain",
-        messageBody: "Not Found - No matching service route",
-      }),
-    });
-
-    return listener;
   }
 
   /**

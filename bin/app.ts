@@ -386,6 +386,7 @@ if (ecsApplicationConfig.services && ecsApplicationConfig.services.length > 0) {
       cluster: ecsStack.cluster,
       autoScalingGroup: ecsStack.autoScalingGroup,
       loadBalancer: ecsStack.loadBalancer,
+      listener: ecsStack.listener, // Pass listener from EcsStack to avoid cyclic dependencies
       services: ecsApplicationConfig.services,
       enablePublicEcr: projectConfig.type === "monitoring", // Monitoring uses public Docker Hub images
     }

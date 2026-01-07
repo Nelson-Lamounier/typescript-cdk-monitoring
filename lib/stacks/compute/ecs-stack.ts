@@ -1427,6 +1427,7 @@ export class EcsStack extends cdk.Stack {
   public readonly cluster: ecs.Cluster;
   public readonly services: Map<string, ecs.Ec2Service>; // Empty - services created in separate stack
   public readonly loadBalancer?: elbv2.ApplicationLoadBalancer;
+  public readonly listener?: elbv2.ApplicationListener; // Listener for services to attach target groups
   public readonly serviceUrls: Map<string, string>; // Empty - services created in separate stack
   public readonly autoScalingGroup: autoscaling.AutoScalingGroup; // Exposed for use by services stack
   private readonly applicationConfig: EcsApplicationConfig;
@@ -1512,8 +1513,8 @@ export class EcsStack extends cdk.Stack {
     });
 
     // Create Application Load Balancer if configured
-    // Note: Services will be created in a separate stack (MonitoringServicesStack)
-    // This stack only creates infrastructure (cluster, capacity, load balancer)
+    // Note: Services will be created in a separate stack (EcsServicesStack)
+    // This stack only creates infrastructure (cluster, capacity, load balancer, listener)
     const lbConfig = applicationConfig.loadBalancer;
     if (lbConfig) {
       this.loadBalancer = this.createLoadBalancer(
@@ -1522,6 +1523,21 @@ export class EcsStack extends cdk.Stack {
         applicationConfig.applicationName,
         lbConfig.allowedIpRanges
       );
+
+      // Create listener for services to attach target groups
+      // This must be created in EcsStack to avoid cyclic dependencies
+      this.listener = this.loadBalancer.addListener("ApplicationListener", {
+        port: 80,
+        protocol: elbv2.ApplicationProtocol.HTTP,
+      });
+
+      // Add default action for unmatched routes
+      this.listener.addAction("DefaultAction", {
+        action: elbv2.ListenerAction.fixedResponse(404, {
+          contentType: "text/plain",
+          messageBody: "Not Found - No matching service route",
+        }),
+      });
     }
 
     // Initialize services map (empty - services created in separate stack)
