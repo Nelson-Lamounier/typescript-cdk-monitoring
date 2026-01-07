@@ -1,3 +1,5 @@
+<!-- @format -->
+
 # Local Development Guide
 
 ## You Must Commit and Push to GitHub
@@ -7,9 +9,11 @@ Workflows run on GitHub's servers, not your local machine.
 ### Why You Need to Push
 
 When you run:
+
 ```bash
 gh workflow run deploy.yml -f environment=pipeline
 ```
+
 Here's what happens:
 
 1. GitHub Actions clones the repository from GitHub (not your local files)
@@ -351,10 +355,10 @@ on:
           - production
   push:
     branches:
-      - main  # Only auto-deploy from main
+      - main # Only auto-deploy from main
     paths:
-      - 'lib/**'
-      - '.github/workflows/deploy.yml'
+      - "lib/**"
+      - ".github/workflows/deploy.yml"
 ```
 
 ### 2. Create Development Environment
@@ -410,17 +414,17 @@ npx cdk deploy NetworkingStack-monitoring-development \
 
 ## Summary
 
-| Scenario | Best Approach | Speed |
-|----------|--------------|-------|
-| Testing CDK stack changes | Local CDK deploy | ⚡⚡⚡ Fastest |
-| Testing workflow changes | Test branch + gh workflow run | ⚡⚡ Fast |
-| Quick iteration | Local CDK diff/synth | ⚡⚡⚡ Fastest |
-| Full pipeline test | Commit → Push → Trigger workflow | ⚡ Slower |
-| Testing without push | act (limited AWS functionality) | ⚡⚡ Fast |
+| Scenario                  | Best Approach                    | Speed          |
+| ------------------------- | -------------------------------- | -------------- |
+| Testing CDK stack changes | Local CDK deploy                 | ⚡⚡⚡ Fastest |
+| Testing workflow changes  | Test branch + gh workflow run    | ⚡⚡ Fast      |
+| Quick iteration           | Local CDK diff/synth             | ⚡⚡⚡ Fastest |
+| Full pipeline test        | Commit → Push → Trigger workflow | ⚡ Slower      |
+| Testing without push      | act (limited AWS functionality)  | ⚡⚡ Fast      |
 
 ### My Recommendation for Your Workflow
 
-```bash
+````bash
 # 1. Quick iteration (uncommitted changes) - use project-specific stack names
 # Development is the first deployment target
 PROJECT_NAME=monitoring ENVIRONMENT=development npx cdk diff NetworkingStack-monitoring-development
@@ -488,9 +492,10 @@ PROJECT_NAME=monitoring ENVIRONMENT=production npx cdk deploy NetworkingStack-mo
 
 # Webapp project - Development
 PROJECT_NAME=webapp ENVIRONMENT=development npx cdk deploy NetworkingStack-webapp-development
-```
+````
 
 **Using CDK Context**:
+
 ```bash
 # Monitoring project - Development (first deployment target)
 npx cdk deploy NetworkingStack-monitoring-development \
@@ -557,6 +562,7 @@ PROJECT_NAME=monitoring ENVIRONMENT=development npx cdk destroy NetworkingStack-
 ### SSM Parameter Paths
 
 SSM parameters follow project-specific paths:
+
 - Format: `/${project}/${environment}/[resource]/[parameter]`
 - Example: `/monitoring/development/ebs/prometheus-volume-size` (first deployment target)
 - Example: `/monitoring/staging/ebs/prometheus-volume-size` (second deployment target)
@@ -565,7 +571,8 @@ SSM parameters follow project-specific paths:
 ### CloudFormation Exports
 
 CloudFormation exports follow project-specific naming:
+
 - Format: `${environment}-${project}-[resource]-[property]`
 - Example: `development-monitoring-vpc-id` (first deployment target)
 - Example: `staging-monitoring-vpc-id` (second deployment target)
-- Example: `development-webapp-alb-arn` 
+- Example: `development-webapp-alb-arn`

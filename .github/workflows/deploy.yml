@@ -120,7 +120,7 @@ jobs:
           STACK_INPUT="${{ github.event.inputs.stack }}"
           ENVIRONMENT="${{ env.DEPLOY_ENVIRONMENT }}"
           PROJECT_NAME="${{ env.PROJECT_NAME }}"
-          
+
           echo "Deployment Configuration:"
           echo "  Environment: $ENVIRONMENT"
           echo "  Project: $PROJECT_NAME"
@@ -373,7 +373,7 @@ jobs:
       - name: CDK Synth for Validation
         run: |
           ENVIRONMENT="${{ needs.determine-jobs.outputs.environment }}"
-          
+
           # First list available stacks to debug
           PROJECT_NAME="${{ needs.determine-jobs.outputs.project_name }}"
           echo "Available CDK stacks for environment: $ENVIRONMENT, project: $PROJECT_NAME"
@@ -482,7 +482,7 @@ jobs:
 
           # Set outputs and environment variables
           echo "target_account_id=$TARGET_ACCOUNT_ID" >> $GITHUB_OUTPUT
-          
+
           # Set environment-specific account ID variables for CDK
           case "$ENVIRONMENT" in
             development)
@@ -625,7 +625,7 @@ jobs:
         run: |
           ENVIRONMENT="${{ needs.determine-jobs.outputs.environment }}"
           PROJECT_NAME="${{ needs.determine-jobs.outputs.project_name }}"
-          
+
           echo "Checking for CloudFormation export dependencies..."
           echo "Environment: $ENVIRONMENT"
           echo "Project: $PROJECT_NAME"
@@ -687,7 +687,8 @@ jobs:
           aws-account-id: ${{ needs.validate-setup.outputs.pipeline_account_id }}
           aws-region: ${{ env.AWS_REGION }}
           dev-vpc-id: ${{ needs.validate-setup.outputs.dev_vpc_id }}
-          dev-account-id: ${{ vars.AWS_ACCOUNT_ID_DEV }}
+          dev-account-id:
+            ${{ vars.AWS_ACCOUNT_ID_DEV }}
 
             # ============================================================================
   # ============================================================================
@@ -737,57 +738,57 @@ jobs:
           echo "Environment: $ENVIRONMENT"
           echo "Project: $PROJECT_NAME"
           echo ""
-          
+
           # Project-specific SSM parameter prefix
           SSM_PREFIX="/${PROJECT_NAME}/${ENVIRONMENT}"
-          
+
           # Check for Prometheus config parameter (monitoring projects only)
           PROMETHEUS_CONFIG=$(aws ssm get-parameter \
             --name "${SSM_PREFIX}/prometheus-config" \
             --query 'Parameter.Value' \
             --output text 2>/dev/null || echo "")
-          
+
           if [ -n "$PROMETHEUS_CONFIG" ]; then
             echo "✓ Prometheus config parameter exists"
           else
             echo "INFO: Prometheus config parameter not found (expected for non-monitoring projects)"
           fi
-          
+
           # Check for Grafana datasource config parameter (monitoring projects only)
           GRAFANA_DATASOURCE=$(aws ssm get-parameter \
             --name "${SSM_PREFIX}/grafana-datasource-config" \
             --query 'Parameter.Value' \
             --output text 2>/dev/null || echo "")
-          
+
           if [ -n "$GRAFANA_DATASOURCE" ]; then
             echo "✓ Grafana datasource config parameter exists"
           else
             echo "INFO: Grafana datasource config parameter not found (expected for non-monitoring projects)"
           fi
-          
+
           # Check for EBS volume configuration parameters (all projects)
           PROMETHEUS_VOLUME_SIZE=$(aws ssm get-parameter \
             --name "${SSM_PREFIX}/ebs/prometheus-volume-size" \
             --query 'Parameter.Value' \
             --output text 2>/dev/null || echo "")
-          
+
           if [ -n "$PROMETHEUS_VOLUME_SIZE" ]; then
             echo "✓ Prometheus volume size parameter: ${PROMETHEUS_VOLUME_SIZE}GB"
           else
             echo "INFO: Prometheus volume size parameter not found (may use generic volumes array)"
           fi
-          
+
           # Check for generic volume parameters (if using volumes array)
           VOLUME_PARAMS=$(aws ssm describe-parameters \
             --parameter-filters "Key=Name,Values=${SSM_PREFIX}/ebs" \
             --query 'Parameters[].Name' \
             --output text 2>/dev/null || echo "")
-          
+
           if [ -n "$VOLUME_PARAMS" ]; then
             echo "✓ Found volume configuration parameters:"
             echo "$VOLUME_PARAMS" | tr '\t' '\n' | sed 's/^/    /'
           fi
-          
+
           echo ""
           echo "SUCCESS: EBS Storage Stack deployment validated"
 
@@ -797,7 +798,14 @@ jobs:
   # ============================================================================
   deploy-ecs:
     name: Deploy ECS
-    needs: [determine-jobs, build, validate-setup, deploy-networking, deploy-ebs-storage]
+    needs:
+      [
+        determine-jobs,
+        build,
+        validate-setup,
+        deploy-networking,
+        deploy-ebs-storage,
+      ]
     runs-on: ubuntu-latest
     environment: ${{ needs.determine-jobs.outputs.environment }}
     if: |

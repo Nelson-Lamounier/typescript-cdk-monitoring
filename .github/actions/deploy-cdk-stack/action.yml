@@ -144,22 +144,22 @@ runs:
       run: |
         echo "Verifying CDK bootstrap stack version..."
         echo ""
-        
+
         # Check if bootstrap stack exists and get its version
         # CDK requires bootstrap version 30 or later for modern features
         BOOTSTRAP_STACK_NAME="CDKToolkit"
         REGION="${{ inputs.aws-region }}"
         BOOTSTRAP_CHECK_FAILED=0
-        
+
         # Try to get bootstrap stack version
         BOOTSTRAP_OUTPUT=$(aws cloudformation describe-stacks \
           --stack-name "$BOOTSTRAP_STACK_NAME" \
           --region "$REGION" \
           --query 'Stacks[0].Parameters[?ParameterKey==`BootstrapVersion`].ParameterValue' \
           --output text 2>&1)
-        
+
         BOOTSTRAP_ERROR_CODE=$?
-        
+
         # Check if the error is due to stack not existing vs permission issues
         if echo "$BOOTSTRAP_OUTPUT" | grep -q "does not exist"; then
           echo "Bootstrap stack not found"
@@ -264,7 +264,7 @@ runs:
             echo ""
           fi
         fi
-        
+
         if [ $BOOTSTRAP_CHECK_FAILED -eq 1 ]; then
           exit 1
         fi

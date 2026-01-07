@@ -121,7 +121,7 @@ runs:
         # Check build artifacts - verifies TypeScript compilation output exists
         # TypeScript compiles to dist/ directory (per tsconfig.json)
         JS_FILES=$(find dist -name "*.js" 2>/dev/null | wc -l)
-        
+
         if [ "$JS_FILES" -gt 0 ]; then
           echo "Build Artifacts: $JS_FILES JavaScript files found"
           echo "Compiled files found in:"
