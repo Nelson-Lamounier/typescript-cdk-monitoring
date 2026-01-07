@@ -103,7 +103,7 @@ export class EcsServicesStack extends cdk.Stack {
     const {
       vpc,
       cluster,
-      autoScalingGroup,
+      // autoScalingGroup is unused but kept in interface for compatibility
       envName,
       projectName,
       applicationName,
@@ -174,18 +174,10 @@ export class EcsServicesStack extends cdk.Stack {
           );
         }
 
-        // Allow ALB to reach service port
-        if (
-          serviceConfig.albPort &&
-          this.loadBalancer &&
-          this.loadBalancer instanceof elbv2.ApplicationLoadBalancer
-        ) {
-          autoScalingGroup.connections.allowFrom(
-            this.loadBalancer,
-            ec2.Port.tcp(serviceConfig.albPort),
-            `Allow ALB to reach ${serviceConfig.name}`
-          );
-        }
+        // Note: Security group rules for ALB to reach services are handled by
+        // the ASG security group configuration in EcsStack, which allows
+        // traffic from the VPC CIDR. This avoids creating a cyclic dependency
+        // between EcsStack and EcsServicesStack.
       }
     }
 
