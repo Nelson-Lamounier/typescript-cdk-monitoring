@@ -2,6 +2,13 @@
 
 // Single source of truth for environment configuration
 // Environment variables keep account IDs out of source control
+//
+// DEPLOYMENT STRATEGY:
+// All services deploy sequentially: development → staging → production
+// - Development: First deployment target for all services
+// - Staging: Pre-production testing environment (mirrors production config)
+// - Production: Live environment (requires approval)
+// - Pipeline: CI/CD infrastructure only (not a deployment target)
 
 export interface EnvironmentConfig {
   account: string; // AWS Account ID for deployment target
@@ -28,6 +35,7 @@ export const environments: Record<string, EnvironmentConfig> = {
     enableEventBridge: true, // Allows pipeline account to collect metrics
   },
 
+  // SECOND DEPLOYMENT TARGET: All services deploy here after development
   // Pre-production testing, mirrors production config
   staging: {
     account: process.env.AWS_ACCOUNT_ID_STAGING || "",
@@ -50,7 +58,9 @@ export const environments: Record<string, EnvironmentConfig> = {
     alertEmail: process.env.ALERT_EMAIL,
   },
 
+  // CI/CD INFRASTRUCTURE ONLY: Not a deployment target
   // Pipeline account - hosts centralised monitoring for all environments
+  // Note: Services are NOT deployed to this account, only CI/CD infrastructure
   pipeline: {
     account: process.env.AWS_PIPELINE_ACCOUNT_ID || "",
     region: process.env.AWS_REGION || "eu-west-1",

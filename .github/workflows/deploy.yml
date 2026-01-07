@@ -10,12 +10,11 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: "Environment to deploy to"
+        description: "Environment to deploy to (deployment flow: development → staging → production)"
         required: true
         type: choice
-        default: "pipeline"
+        default: "development"
         options:
-          - pipeline
           - development
           - staging
           - production
@@ -68,8 +67,8 @@ env:
   AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-1' }}
   TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
   TURBO_TEAM: ${{ vars.TURBO_TEAM }}
-  # Environment is determined from workflow input or defaults to pipeline
-  DEPLOY_ENVIRONMENT: ${{ github.event.inputs.environment || 'pipeline' }}
+  # Environment is determined from workflow input or defaults to development
+  DEPLOY_ENVIRONMENT: ${{ github.event.inputs.environment || 'development' }}
   # Project name is determined from workflow input or defaults to monitoring
   PROJECT_NAME: ${{ github.event.inputs.project || 'monitoring' }}
 
@@ -389,7 +388,7 @@ jobs:
           AWS_REGION: ${{ env.AWS_REGION }}
           CDK_ENVIRONMENT: ${{ needs.determine-jobs.outputs.environment }}
           PROJECT_NAME: ${{ needs.determine-jobs.outputs.project_name }}
-          AWS_PIPELINE_ACCOUNT_ID: "123456789012" # Dummy account ID for validation
+          # Environment-specific account IDs will be set by validate-setup job
 
   # ============================================================================
   # JOB 2: Validation & Setup (With Deployment Permissions)
@@ -401,7 +400,7 @@ jobs:
     if: needs.determine-jobs.outputs.run_validate_setup == 'true'
     environment: ${{ needs.determine-jobs.outputs.environment }}
     outputs:
-      pipeline_account_id: ${{ steps.setup.outputs.pipeline_account_id }}
+      target_account_id: ${{ steps.setup.outputs.target_account_id }}
       dev_vpc_id: ${{ steps.dev-info.outputs.vpc_id || 'NOT_FOUND' }}
 
     steps:
@@ -418,29 +417,89 @@ jobs:
       - name: Setup Environment Variables
         id: setup
         run: |
-          echo "Setting up pipeline environment variables..."
+          ENVIRONMENT="${{ needs.determine-jobs.outputs.environment }}"
+          echo "Setting up deployment environment variables..."
+          echo "Target Environment: $ENVIRONMENT"
           echo ""
 
-          # Get current account ID with error handling
-          echo "Retrieving AWS account information..."
+          # Determine target account ID based on environment
+          case "$ENVIRONMENT" in
+            development)
+              TARGET_ACCOUNT_ID="${{ vars.AWS_ACCOUNT_ID_DEV }}"
+              ENV_VAR_NAME="AWS_ACCOUNT_ID_DEV"
+              ;;
+            staging)
+              TARGET_ACCOUNT_ID="${{ vars.AWS_ACCOUNT_ID_STAGING }}"
+              ENV_VAR_NAME="AWS_ACCOUNT_ID_STAGING"
+              ;;
+            production)
+              TARGET_ACCOUNT_ID="${{ vars.AWS_ACCOUNT_ID_PROD }}"
+              ENV_VAR_NAME="AWS_ACCOUNT_ID_PROD"
+              ;;
+            *)
+              echo "ERROR: Unknown environment: $ENVIRONMENT"
+              echo "Valid environments: development, staging, production"
+              exit 1
+              ;;
+          esac
+
+          # Validate target account ID is configured
+          if [ -z "$TARGET_ACCOUNT_ID" ]; then
+            echo "CRITICAL ERROR: Target account ID not configured for environment: $ENVIRONMENT"
+            echo ""
+            echo "Please configure the following repository variable:"
+            echo "  $ENV_VAR_NAME"
+            echo ""
+            echo "Troubleshooting:"
+            echo "  1. Go to repository Settings → Secrets and variables → Actions → Variables"
+            echo "  2. Add variable: $ENV_VAR_NAME with the AWS account ID"
+            echo "  3. Re-run the workflow"
+            exit 1
+          fi
+
+          # Validate account ID format
+          if ! [[ "$TARGET_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+            echo "ERROR: Invalid account ID format: '$TARGET_ACCOUNT_ID'"
+            echo "Account ID must be 12 digits"
+            exit 1
+          fi
+
+          # Verify we can access the target account
+          echo "Verifying access to target account..."
           if ! CURRENT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text 2>&1); then
             echo "CRITICAL ERROR: Cannot retrieve AWS account information"
             echo "AWS CLI Error: $CURRENT_ACCOUNT"
             exit 1
           fi
 
-          # Validate account ID format
-          if ! [[ "$CURRENT_ACCOUNT" =~ ^[0-9]{12}$ ]]; then
-            echo "ERROR: Retrieved account ID has invalid format: '$CURRENT_ACCOUNT'"
-            exit 1
+          # Check if we're already in the target account or need to assume role
+          if [ "$CURRENT_ACCOUNT" = "$TARGET_ACCOUNT_ID" ]; then
+            echo "✓ Already authenticated to target account"
+          else
+            echo "INFO: Current account (***${CURRENT_ACCOUNT: -4}) differs from target (***${TARGET_ACCOUNT_ID: -4})"
+            echo "Assuming cross-account role will be handled by OIDC configuration"
           fi
 
           # Set outputs and environment variables
-          echo "pipeline_account_id=$CURRENT_ACCOUNT" >> $GITHUB_OUTPUT
-          echo "AWS_PIPELINE_ACCOUNT_ID=$CURRENT_ACCOUNT" >> $GITHUB_ENV
+          echo "target_account_id=$TARGET_ACCOUNT_ID" >> $GITHUB_OUTPUT
+          
+          # Set environment-specific account ID variables for CDK
+          case "$ENVIRONMENT" in
+            development)
+              echo "AWS_ACCOUNT_ID_DEV=$TARGET_ACCOUNT_ID" >> $GITHUB_ENV
+              ;;
+            staging)
+              echo "AWS_ACCOUNT_ID_STAGING=$TARGET_ACCOUNT_ID" >> $GITHUB_ENV
+              ;;
+            production)
+              echo "AWS_ACCOUNT_ID_PROD=$TARGET_ACCOUNT_ID" >> $GITHUB_ENV
+              ;;
+          esac
 
-          echo "Successfully retrieved pipeline account information"
-          echo "Account ID: ***${CURRENT_ACCOUNT: -4} (last 4 digits)"
+          echo ""
+          echo "Successfully configured deployment target"
+          echo "Environment: $ENVIRONMENT"
+          echo "Target Account ID: ***${TARGET_ACCOUNT_ID: -4} (last 4 digits)"
           echo "Region: ${{ env.AWS_REGION }}"
           echo ""
 
@@ -546,11 +605,12 @@ jobs:
 
       - name: Verify Validate-Setup Job Outputs
         run: |
-          if [ -z "${{ needs.validate-setup.outputs.pipeline_account_id }}" ]; then
-            echo "CRITICAL: Pipeline Account ID is empty"
+          if [ -z "${{ needs.validate-setup.outputs.target_account_id }}" ]; then
+            echo "CRITICAL: Target Account ID is empty"
             exit 1
           fi
           echo "Validate-setup job verification passed"
+          echo "Target Account ID: ***${{ needs.validate-setup.outputs.target_account_id }}"
 
       - name: Setup CDK Deployment Environment
         uses: ./.github/actions/setup-cdk-deployment
@@ -664,7 +724,7 @@ jobs:
           stack-name: "EbsStorageStack-${{ needs.determine-jobs.outputs.project_name }}-${{ needs.determine-jobs.outputs.environment }}"
           environment: ${{ needs.determine-jobs.outputs.environment }}
           project-name: ${{ needs.determine-jobs.outputs.project_name }}
-          aws-account-id: ${{ needs.validate-setup.outputs.pipeline_account_id }}
+          aws-account-id: ${{ needs.validate-setup.outputs.target_account_id }}
           aws-region: ${{ env.AWS_REGION }}
           dev-vpc-id: ${{ needs.validate-setup.outputs.dev_vpc_id }}
           dev-account-id: ${{ vars.AWS_ACCOUNT_ID_DEV }}
@@ -767,7 +827,7 @@ jobs:
           stack-name: "EcsStack-${{ needs.determine-jobs.outputs.project_name }}-${{ needs.determine-jobs.outputs.environment }}"
           environment: ${{ needs.determine-jobs.outputs.environment }}
           project-name: ${{ needs.determine-jobs.outputs.project_name }}
-          aws-account-id: ${{ needs.validate-setup.outputs.pipeline_account_id }}
+          aws-account-id: ${{ needs.validate-setup.outputs.target_account_id }}
           aws-region: ${{ env.AWS_REGION }}
           dev-vpc-id: ${{ needs.validate-setup.outputs.dev_vpc_id }}
           dev-account-id: ${{ vars.AWS_ACCOUNT_ID_DEV }}

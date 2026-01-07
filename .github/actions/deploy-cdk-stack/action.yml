@@ -91,10 +91,10 @@ runs:
           echo ""
           if [ -n "${{ inputs.project-name }}" ] && [ "${{ inputs.project-name }}" != "monitoring" ]; then
             echo "Expected Format: [StackName]-[project]-[environment]"
-            echo "Example: NetworkingStack-monitoring-pipeline"
+            echo "Example: NetworkingStack-monitoring-development"
           else
             echo "Expected Format: [StackName]-[environment] or [StackName]-[project]-[environment]"
-            echo "Example: NetworkingStack-pipeline or NetworkingStack-monitoring-pipeline"
+            echo "Example: NetworkingStack-development or NetworkingStack-monitoring-development"
           fi
           echo "Check: Composite action input parameters"
           echo ""

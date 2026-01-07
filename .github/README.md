@@ -25,6 +25,7 @@ These composite actions provide a complete workflow for:
 - Deploying CDK stacks with comprehensive error handling
 - Detecting infrastructure drift between code and deployed resources
 - Managing parallel job execution for optimal pipeline performance
+- Supporting multi-project infrastructure deployments
 
 All actions include:
 - Input validation with clear error messages
@@ -32,6 +33,7 @@ All actions include:
 - Detailed troubleshooting guidance
 - Support for cross-account deployments
 - Environment-specific configuration
+- Project-agnostic naming and configuration (Multi-Project Infrastructure Pattern)
 
 ## Workflows
 
@@ -82,7 +84,11 @@ The repository uses two separate workflows to optimise performance, security, an
 - Manual dispatch with stack selection
 
 **Workflow Inputs** (Manual Dispatch):
-- `stack`: Stack to deploy (networking, monitoring-efs, monitoring-infra, monitoring-services, vpc-peering, destroy-all)
+- `environment`: Environment to deploy to (development, staging, production)
+  - Default: `development` (first deployment target)
+  - Deployment flow: development → staging → production
+- `project`: Project name (e.g., monitoring, webapp) - defaults to "monitoring"
+- `stack`: Stack to deploy (networking, ebs-storage, ecs, load-balancer, launch-template, vpc-peering, destroy-all)
 - `jobs_to_run`: Comma-separated job list or 'all' or 'failed'
 - `rerun_failed_from`: Run ID to re-run failed jobs from
 - `enable_drift_detection`: Enable drift detection after deployment
@@ -90,17 +96,18 @@ The repository uses two separate workflows to optimise performance, security, an
 - `skip_validation`: Skip pre-deployment validation
 
 **Jobs**:
-1. **determine-jobs** - Determines which deployment jobs to run based on inputs and stack selection
+1. **determine-jobs** - Determines which deployment jobs to run based on inputs, project, and stack selection
 2. **build** - Compiles infrastructure code (required for deployments)
 3. **validate-setup** - AWS environment setup with deployment permissions
-4. **deploy-networking** - Deploys NetworkingStack
-5. **deploy-monitoring-efs** - Deploys MonitoringEfsStack
-6. **deploy-vpc-peering** - Deploys VpcPeeringStack
-7. **deploy-monitoring-infra** - Deploys MonitoringInfraStack
-8. **deploy-monitoring-services** - Deploys MonitoringServiceStack
-9. **health-checks** - Post-deployment health validation
-10. **drift-detection-*** - Infrastructure drift detection for each stack
-11. **destroy-all** - Stack destruction job (optional)
+4. **deploy-networking** - Deploys NetworkingStack (project-specific: `NetworkingStack-${project}-${environment}`)
+5. **deploy-ebs-storage** - Deploys EbsStorageStack (project-specific: `EbsStorageStack-${project}-${environment}`)
+6. **deploy-ecs** - Deploys EcsStack (project-specific: `EcsStack-${project}-${environment}`)
+7. **deploy-load-balancer** - Deploys LoadBalancerStack (project-specific: `LoadBalancerStack-${project}-${environment}`)
+8. **deploy-launch-template** - Deploys LaunchTemplateStack (project-specific: `LaunchTemplateStack-${project}-${environment}`)
+9. **deploy-vpc-peering** - Deploys VpcPeeringStack (project-specific: `VpcPeeringStack-${project}-${environment}`)
+10. **health-checks** - Post-deployment health validation
+11. **drift-detection-*** - Infrastructure drift detection for each stack
+12. **destroy-all** - Stack destruction job (optional)
 
 **Key Features**:
 - **Environment Protection**: Requires approval for production deployments
@@ -111,17 +118,104 @@ The repository uses two separate workflows to optimise performance, security, an
 
 **Usage**:
 ```yaml
-# Automatically runs on merge to main
-# Or manually trigger with stack selection:
+# Automatically runs on merge to main (deploys to development by default)
+# Or manually trigger with environment and stack selection:
+# - Select environment (development, staging, production)
+#   - Development: First deployment target
+#   - Staging: Pre-production testing
+#   - Production: Requires approval
+# - Select project (e.g., monitoring, webapp) - defaults to "monitoring"
 # - Select stack to deploy
 # - Optionally specify jobs_to_run
 # - Optionally provide rerun_failed_from run ID
 ```
 
+**Deployment Flow**:
+1. Deploy to **development** account first
+2. After testing, deploy to **staging** account
+3. After approval, deploy to **production** account
+
+**Stack Naming Pattern**:
+All stacks follow the Multi-Project Infrastructure Pattern:
+- Format: `[StackName]-[project]-[environment]`
+- Example: `NetworkingStack-monitoring-development`
+- Example: `EcsStack-webapp-staging`
+- Example: `EbsStorageStack-monitoring-production`
+
+**SSM Parameter Pattern**:
+All SSM parameters follow project-specific paths:
+- Format: `/${project}/${environment}/[resource]/[parameter]`
+- Example: `/monitoring/development/ebs/prometheus-volume-size`
+- Example: `/webapp/staging/ecs/cluster-name`
+
 **Dependencies**:
 - Requires successful CI workflow (or can run build/validate-setup internally)
 - Uses build cache from CI when available
 - Validates AWS credentials and account configuration
+
+---
+
+### Multi-Project Infrastructure Pattern
+
+The deployment workflow supports the **Multi-Project Infrastructure Pattern**, allowing you to deploy multiple projects (e.g., monitoring, webapp) using the same infrastructure codebase with project-specific naming and configuration.
+
+#### Key Concepts
+
+**Project-Agnostic Stacks**: All stacks are dynamically named based on project and environment:
+- Stack naming: `[StackName]-[project]-[environment]`
+- Example: `NetworkingStack-monitoring-development` (first deployment target)
+- Example: `EcsStack-webapp-staging` (second deployment target)
+
+**Project-Specific Configuration**:
+- SSM parameters: `/${project}/${environment}/[resource]/[parameter]`
+- CloudFormation exports: `${environment}-${project}-[resource]-[property]`
+- Resource tags: Include `Project` and `ProjectType` tags
+
+**Default Project**: If no project is specified, defaults to `"monitoring"` for backward compatibility.
+
+#### Project Selection
+
+**Via Workflow Dispatch**:
+```yaml
+# Manual deployment with project selection
+environment: "development"  # First deployment target
+project: "monitoring"  # or "webapp", etc.
+stack: "networking"
+```
+
+**Via Environment Variables**:
+```bash
+# Local deployment - Development (first deployment target)
+PROJECT_NAME=monitoring ENVIRONMENT=development cdk deploy NetworkingStack-monitoring-development
+
+# Or with CDK context
+cdk deploy NetworkingStack-monitoring-development \
+  --context project=monitoring \
+  --context environment=development
+```
+
+**Via GitHub Actions**:
+```yaml
+- uses: ./.github/actions/deploy-cdk-stack
+  with:
+    stack-name: 'NetworkingStack-monitoring-development'
+    environment: 'development'
+    project-name: 'monitoring'  # Optional, defaults to "monitoring"
+```
+
+#### Project Configuration
+
+Projects are configured in `lib/config/projects.ts`:
+- Each project defines its type (monitoring, webapp, etc.)
+- Project-specific configurations (volumes, services, etc.)
+- Environment-specific overrides
+
+#### Benefits
+
+1. **Code Reusability**: Same infrastructure code for multiple projects
+2. **Clear Separation**: Project-specific naming prevents resource conflicts
+3. **Cost Optimisation**: Shared infrastructure where appropriate, isolated where needed
+4. **Flexible Deployment**: Deploy different projects to different environments independently
 
 ---
 
@@ -137,7 +231,7 @@ Both workflows include a `determine-jobs` job that intelligently selects which j
    - Fetches failed jobs from a previous workflow run
    - Uses GitHub CLI to query run information
    - Automatically enables dependencies
-   - Example: If `deploy-monitoring-infra` failed, it enables `build`, `validate-setup`, `deploy-networking`, `deploy-efs`, and `deploy-infra`
+   - Example: If `deploy-ecs` failed, it enables `build`, `validate-setup`, `deploy-networking`, `deploy-ebs-storage`, and `deploy-ecs`
 
 2. **Selective Jobs** (`jobs_to_run`)
    - Comma-separated list: `"build,deploy-networking"`
@@ -158,10 +252,11 @@ For selective execution, use these keywords (case-insensitive):
 - `build` → Build infrastructure
 - `validate` or `setup` → Validate and setup
 - `networking` → Deploy networking stack
-- `efs` → Deploy EFS stack
+- `ebs` or `storage` → Deploy EBS storage stack
+- `ecs` → Deploy ECS stack
+- `load-balancer` or `alb` → Deploy load balancer stack
+- `launch-template` → Deploy launch template stack
 - `peering` or `vpc` → Deploy VPC peering
-- `infra` → Deploy monitoring infrastructure
-- `services` → Deploy monitoring services
 - `health` → Health checks
 - `destroy` → Destroy all stacks
 - `drift` → Drift detection
@@ -179,15 +274,23 @@ When `stack: "destroy-all"` is selected:
 # Re-run failed jobs from a previous run
 rerun_failed_from: "1234567890"
 
-# Run specific jobs
+# Run specific jobs for monitoring project
+project: "monitoring"
 jobs_to_run: "build,deploy-networking"
 
-# Run all jobs (default)
+# Run all jobs for webapp project
+project: "webapp"
 jobs_to_run: "all"  # or leave empty
 
 # Quick deployment without drift detection
+project: "monitoring"
 jobs_to_run: "build,deploy-networking"
 enable_drift_detection: false
+
+# Deploy specific stack for a project
+project: "monitoring"
+stack: "networking"
+environment: "pipeline"
 ```
 
 #### Error Handling
@@ -252,7 +355,7 @@ Sets up the complete environment for CDK deployment including AWS credentials, b
 | `aws-role` | AWS IAM role ARN for OIDC authentication | Yes | - |
 | `aws-region` | AWS region for deployment | Yes | - |
 | `build-cache-key` | Build cache key from build job | Yes | - |
-| `environment-name` | Environment name for deployment | No | `pipeline` |
+| `environment-name` | Environment name for deployment | No | `development` |
 
 **Usage Example**:
 
@@ -264,7 +367,7 @@ Sets up the complete environment for CDK deployment including AWS credentials, b
     aws-role: ${{ secrets.AWS_ROLE_ARN }}
     aws-region: 'eu-west-1'
     build-cache-key: ${{ needs.build.outputs.cache-key }}
-    environment-name: 'pipeline'
+    environment-name: 'development'
 ```
 
 **Key Features**:
@@ -292,8 +395,9 @@ Deploys a CDK stack with comprehensive validation, error handling, and troublesh
 
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
-| `stack-name` | Name of the CDK stack to deploy | Yes | - |
-| `environment` | Environment name (e.g., pipeline, development, production) | Yes | - |
+| `stack-name` | Name of the CDK stack to deploy (format: `StackName-${project}-${environment}`) | Yes | - |
+| `environment` | Environment name (e.g., development, staging, production) | Yes | - |
+| `project-name` | Project name (e.g., monitoring, webapp) for multi-project infrastructure pattern | No | `monitoring` |
 | `aws-account-id` | AWS Account ID for deployment | Yes | - |
 | `aws-region` | AWS Region for deployment | Yes | - |
 | `dev-vpc-id` | Development VPC ID (optional, for cross-account peering) | No | `""` |
@@ -306,18 +410,30 @@ Deploys a CDK stack with comprehensive validation, error handling, and troublesh
 |--------|-------------|
 | `deployment-status` | Status of the deployment (`success` or `failure`) |
 
-**Usage Example**:
+**Usage Examples**:
 
 ```yaml
+# Deploy monitoring project stack to development (first deployment target)
 - name: Deploy Networking Stack
   uses: ./.github/actions/deploy-cdk-stack
   with:
-    stack-name: 'NetworkingStack-pipeline'
-    environment: 'pipeline'
+    stack-name: 'NetworkingStack-monitoring-development'
+    environment: 'development'
+    project-name: 'monitoring'
     aws-account-id: ${{ needs.validate-setup.outputs.aws-account-id }}
     aws-region: 'eu-west-1'
     dev-vpc-id: ${{ secrets.DEV_VPC_ID }}
     dev-account-id: ${{ secrets.DEV_ACCOUNT_ID }}
+
+# Deploy webapp project stack
+- name: Deploy Networking Stack
+  uses: ./.github/actions/deploy-cdk-stack
+  with:
+    stack-name: 'NetworkingStack-webapp-development'
+    environment: 'development'
+    project-name: 'webapp'
+    aws-account-id: ${{ needs.validate-setup.outputs.aws-account-id }}
+    aws-region: 'eu-west-1'
 ```
 
 **Key Features**:
@@ -333,13 +449,14 @@ Deploys a CDK stack with comprehensive validation, error handling, and troublesh
 - **EPIPE Errors**: Automatically retries without piping to avoid broken pipe issues
 - **Change Set Conflicts**: Cleans up conflicting change sets and retries
 - **Export Dependencies**: Provides ordered deployment guidance when exports are in use
-- **Stack Not Found**: Validates stack name and provides available stack list
+- **Stack Not Found**: Validates stack name format (including project name) and provides available stack list
 
 **Common Error Scenarios**:
-1. **Stack Not Found**: Verifies stack name format and environment configuration
+1. **Stack Not Found**: Verifies stack name format (`StackName-${project}-${environment}`) and environment/project configuration
 2. **CDK CLI Missing**: Checks setup-cdk-deployment job completion
 3. **Change Set Conflicts**: Automatically cleans up and retries
-4. **Export Dependencies**: Guides ordered deployment of dependent stacks
+4. **Export Dependencies**: Guides ordered deployment of dependent stacks (project-specific exports)
+5. **Project Context Missing**: Ensures `project-name` is provided or defaults to "monitoring"
 
 ---
 
@@ -354,7 +471,7 @@ Detects infrastructure drift between deployed CloudFormation stacks and CDK code
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
 | `stack-name` | Name of the CDK stack to check for drift | Yes | - |
-| `environment` | Environment name (e.g., pipeline, development, production) | Yes | - |
+| `environment` | Environment name (e.g., development, staging, production) | Yes | - |
 | `aws-account-id` | AWS Account ID for deployment | Yes | - |
 | `aws-region` | AWS Region for deployment | Yes | - |
 | `dev-vpc-id` | Development VPC ID (optional) | No | `""` |
@@ -370,14 +487,26 @@ Detects infrastructure drift between deployed CloudFormation stacks and CDK code
 | `drift-count` | Number of resources with detected drift |
 | `drift-severity` | Severity of drift: `none`, `low`, `medium`, `high`, `critical` |
 
-**Usage Example**:
+**Usage Examples**:
 
 ```yaml
+# Detect drift for monitoring project in development
 - name: Detect Infrastructure Drift
   uses: ./.github/actions/drift-detection
   with:
-    stack-name: 'NetworkingStack-pipeline'
-    environment: 'pipeline'
+    stack-name: 'NetworkingStack-monitoring-development'
+    environment: 'development'
+    aws-account-id: ${{ needs.validate-setup.outputs.aws-account-id }}
+    aws-region: 'eu-west-1'
+    drift-threshold: '2'
+    check-mode: 'full'
+
+# Detect drift for webapp project
+- name: Detect Infrastructure Drift
+  uses: ./.github/actions/drift-detection
+  with:
+    stack-name: 'EcsStack-webapp-development'
+    environment: 'development'
     aws-account-id: ${{ needs.validate-setup.outputs.aws-account-id }}
     aws-region: 'eu-west-1'
     drift-threshold: '2'
@@ -544,8 +673,9 @@ jobs:
       
       - uses: ./.github/actions/deploy-cdk-stack
         with:
-          stack-name: 'NetworkingStack-pipeline'
-          environment: 'pipeline'
+          stack-name: 'NetworkingStack-monitoring-development'
+          environment: 'development'
+          project-name: 'monitoring'
           aws-account-id: ${{ secrets.AWS_ACCOUNT_ID }}
           aws-region: 'eu-west-1'
 
@@ -561,8 +691,8 @@ jobs:
       
       - uses: ./.github/actions/drift-detection
         with:
-          stack-name: 'NetworkingStack-pipeline'
-          environment: 'pipeline'
+          stack-name: 'NetworkingStack-monitoring-development'
+          environment: 'development'
           aws-account-id: ${{ secrets.AWS_ACCOUNT_ID }}
           aws-region: 'eu-west-1'
           drift-threshold: '0'
@@ -572,10 +702,12 @@ jobs:
 ### Cross-Account Deployment
 
 ```yaml
+# Deploy monitoring project with cross-account VPC peering (development)
 - uses: ./.github/actions/deploy-cdk-stack
   with:
-    stack-name: 'MonitoringStack-pipeline'
-    environment: 'pipeline'
+    stack-name: 'NetworkingStack-monitoring-development'
+    environment: 'development'
+    project-name: 'monitoring'
     aws-account-id: ${{ secrets.PIPELINE_ACCOUNT_ID }}
     aws-region: 'eu-west-1'
     dev-vpc-id: ${{ secrets.DEV_VPC_ID }}
@@ -585,10 +717,11 @@ jobs:
 ### Quick Drift Check
 
 ```yaml
+# Quick drift check for monitoring project (development)
 - uses: ./.github/actions/drift-detection
   with:
-    stack-name: 'NetworkingStack-pipeline'
-    environment: 'pipeline'
+    stack-name: 'NetworkingStack-monitoring-development'
+    environment: 'development'
     aws-account-id: ${{ secrets.AWS_ACCOUNT_ID }}
     aws-region: 'eu-west-1'
     check-mode: 'quick'  # Faster, CDK diff only
@@ -602,10 +735,11 @@ jobs:
 ### Deployment Failures
 
 **Stack Not Found Error**:
-- Verify stack name format: `[StackName]-[environment]`
-- Check `infrastructure/bin/app.ts` for stack definitions
-- Ensure `ENVIRONMENT` variable matches input environment
-- Run `cd infrastructure && ENVIRONMENT=pipeline npx cdk list` locally
+- Verify stack name format: `[StackName]-[project]-[environment]` (e.g., `NetworkingStack-monitoring-development`)
+- Check `bin/app.ts` for stack definitions and project configuration
+- Ensure `ENVIRONMENT` and `PROJECT_NAME` variables match input values
+- Run locally: `PROJECT_NAME=monitoring ENVIRONMENT=development npx cdk list`
+- Or with context: `npx cdk list --context project=monitoring --context environment=development`
 
 **CDK CLI Not Found**:
 - Verify `setup-cdk-deployment` action completed successfully
@@ -624,7 +758,9 @@ jobs:
 
 **CloudFormation Export Dependencies**:
 - Update dependent stacks first, then the exporting stack
-- For NetworkingStack: Update MonitoringInfraStack → MonitoringEfsStack → NetworkingStack
+- For NetworkingStack: Update EbsStorageStack → EcsStack → NetworkingStack (project-specific)
+- Export names follow pattern: `${environment}-${project}-[resource]-[property]`
+- Example: `development-monitoring-vpc-id` (for monitoring project in development environment)
 - See `infrastructure/CLOUDFORMATION_EXPORT_DEPENDENCY_FIX.md` for details
 
 ### Drift Detection Issues
@@ -641,8 +777,9 @@ jobs:
 
 **False Positives**:
 - Review CDK diff output in artifacts
-- Verify environment variables match deployment
-- Check for SSM parameter lookup differences
+- Verify environment variables (`ENVIRONMENT`, `PROJECT_NAME`) match deployment
+- Check for SSM parameter lookup differences (project-specific paths: `/${project}/${environment}/...`)
+- Ensure project context is consistent: `--context project=${projectName} --context environment=${environment}`
 
 ### Setup Issues
 
@@ -713,16 +850,17 @@ CI Workflow (ci.yml)
 └── validate-setup (read-only)
 
 CD Workflow (deploy.yml)
-├── determine-jobs (CD)
+├── determine-jobs (CD) - includes project selection
 ├── build (uses CI cache if available)
 ├── validate-setup (with deployment permissions)
-├── deploy-networking
-├── deploy-monitoring-efs
-├── deploy-vpc-peering
-├── deploy-monitoring-infra
-├── deploy-monitoring-services
+├── deploy-networking (project-specific: NetworkingStack-${project}-${environment})
+├── deploy-ebs-storage (project-specific: EbsStorageStack-${project}-${environment})
+├── deploy-ecs (project-specific: EcsStack-${project}-${environment})
+├── deploy-load-balancer (project-specific: LoadBalancerStack-${project}-${environment})
+├── deploy-launch-template (project-specific: LaunchTemplateStack-${project}-${environment})
+├── deploy-vpc-peering (project-specific: VpcPeeringStack-${project}-${environment})
 ├── health-checks
-└── drift-detection-*
+└── drift-detection-* (project-specific)
 ```
 
 ### Job Selection Logic
