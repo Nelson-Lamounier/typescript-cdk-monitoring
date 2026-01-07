@@ -32,16 +32,15 @@ export interface EcsServicesStackProps extends cdk.StackProps {
    */
   services: EcsServiceConfig[];
   /**
-   * Load balancer for routing (optional)
-   * If provided, services with loadBalancer config will be attached
+   * Load balancer configuration (optional)
+   * If provided, a load balancer will be created in this stack
+   * and services with loadBalancer config will be attached
    */
-  loadBalancer?: elbv2.IApplicationLoadBalancer;
-  /**
-   * Load balancer listener (optional)
-   * If provided, target groups will be added to this listener
-   * Must be provided if loadBalancer is provided
-   */
-  listener?: elbv2.IApplicationListener;
+  loadBalancerConfig?: {
+    internetFacing?: boolean;
+    allowedIpRanges?: string[];
+    name?: string;
+  };
   /**
    * Default log retention for service log groups
    * @default TWO_WEEKS
@@ -109,27 +108,28 @@ export class EcsServicesStack extends cdk.Stack {
       projectName,
       applicationName,
       services,
-      loadBalancer,
-      listener,
+      loadBalancerConfig,
       defaultLogRetention = logs.RetentionDays.TWO_WEEKS,
       enablePublicEcr = false,
     } = props;
-
-    this.loadBalancer = loadBalancer as
-      | elbv2.ApplicationLoadBalancer
-      | undefined;
 
     // Initialize services map
     this.services = new Map();
     this.serviceUrls = new Map();
 
-    // Use provided listener (created in EcsStack to avoid cyclic dependencies)
-    // If listener is not provided but load balancer is, that's a configuration error
-    if (this.loadBalancer && !listener) {
-      throw new Error(
-        "Listener must be provided when load balancer is provided. " +
-          "The listener should be created in EcsStack and passed to EcsServicesStack."
+    // Create load balancer if configured
+    // Load balancer, listener, and target groups must all be in this stack to avoid cyclic dependencies
+    let listener: elbv2.ApplicationListener | undefined;
+    if (loadBalancerConfig) {
+      this.loadBalancer = this.createLoadBalancer(
+        vpc,
+        envName,
+        applicationName,
+        loadBalancerConfig.allowedIpRanges,
+        loadBalancerConfig.internetFacing ?? true,
+        loadBalancerConfig.name
       );
+      listener = this.createLoadBalancerListener(this.loadBalancer);
     }
 
     // Create services dynamically from configuration
@@ -324,6 +324,77 @@ export class EcsServicesStack extends cdk.Stack {
   }
 
   /**
+   * Create load balancer
+   * Must be created in this stack (same as listener and target groups) to avoid cyclic dependencies
+   */
+  private createLoadBalancer(
+    vpc: ec2.IVpc,
+    envName: string,
+    applicationName: string,
+    allowedIpRanges?: string[],
+    internetFacing: boolean = true,
+    name?: string
+  ): elbv2.ApplicationLoadBalancer {
+    const albSecurityGroup = new ec2.SecurityGroup(this, "ApplicationAlbSg", {
+      vpc,
+      description: `Security group for ${applicationName} ALB`,
+      allowAllOutbound: true,
+    });
+
+    const ipRanges = allowedIpRanges || ["0.0.0.0/0"];
+    ipRanges.forEach((ipRange) => {
+      albSecurityGroup.addIngressRule(
+        ec2.Peer.ipv4(ipRange),
+        ec2.Port.tcp(80),
+        `Allow HTTP access from ${ipRange}`
+      );
+    });
+
+    const loadBalancer = new elbv2.ApplicationLoadBalancer(
+      this,
+      "ApplicationAlb",
+      {
+        vpc,
+        internetFacing,
+        loadBalancerName: name || `${envName}-${applicationName}-alb`,
+        securityGroup: albSecurityGroup,
+      }
+    );
+
+    Tags.of(loadBalancer).add(
+      "Name",
+      name || `${envName}-${applicationName}-alb`
+    );
+    Tags.of(loadBalancer).add("Environment", envName);
+    Tags.of(loadBalancer).add("Application", applicationName);
+
+    return loadBalancer;
+  }
+
+  /**
+   * Create load balancer listener
+   * Must be created in this stack (same as target groups) to avoid cyclic dependencies
+   */
+  private createLoadBalancerListener(
+    alb: elbv2.ApplicationLoadBalancer
+  ): elbv2.ApplicationListener {
+    const listener = alb.addListener("ApplicationListener", {
+      port: 80,
+      protocol: elbv2.ApplicationProtocol.HTTP,
+    });
+
+    // Add default action for unmatched routes
+    listener.addAction("DefaultAction", {
+      action: elbv2.ListenerAction.fixedResponse(404, {
+        contentType: "text/plain",
+        messageBody: "Not Found - No matching service route",
+      }),
+    });
+
+    return listener;
+  }
+
+  /**
    * Create target group for a service
    */
   private createTargetGroup(
@@ -379,6 +450,12 @@ export class EcsServicesStack extends cdk.Stack {
         value: alb.loadBalancerDnsName,
         description: "Application Load Balancer DNS Name",
         exportName: `${envName}-${applicationName}-alb-dns`,
+      });
+
+      new cdk.CfnOutput(this, "ApplicationAlbArn", {
+        value: alb.loadBalancerArn,
+        description: `${applicationName} ALB ARN`,
+        exportName: `${envName}-${applicationName}-alb-arn`,
       });
 
       // Output service URLs
