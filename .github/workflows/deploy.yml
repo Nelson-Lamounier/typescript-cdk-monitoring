@@ -635,7 +635,7 @@ jobs:
       always() &&
       needs.determine-jobs.outputs.run_deploy_networking == 'true' &&
       (needs.build.result == 'success' || needs.build.result == 'skipped') &&
-      (needs.validate-setup.result == 'success' || needs.validate-setup.result == 'skipped')
+      needs.validate-setup.result == 'success'
 
     steps:
       - name: Checkout
@@ -736,7 +736,7 @@ jobs:
           stack-name: "NetworkingStack-${{ needs.determine-jobs.outputs.project_name }}-${{ needs.determine-jobs.outputs.environment }}"
           environment: ${{ needs.determine-jobs.outputs.environment }}
           project-name: ${{ needs.determine-jobs.outputs.project_name }}
-          aws-account-id: ${{ needs.validate-setup.outputs.pipeline_account_id }}
+          aws-account-id: ${{ needs.validate-setup.outputs.target_account_id }}
           aws-region: ${{ env.AWS_REGION }}
           dev-vpc-id: ${{ needs.validate-setup.outputs.dev_vpc_id }}
           dev-account-id:
@@ -755,7 +755,7 @@ jobs:
       always() &&
       needs.determine-jobs.outputs.run_deploy_ebs_storage == 'true' &&
       (needs.build.result == 'success' || needs.build.result == 'skipped') &&
-      (needs.validate-setup.result == 'success' || needs.validate-setup.result == 'skipped') &&
+      needs.validate-setup.result == 'success' &&
       (needs.deploy-networking.result == 'success' || needs.deploy-networking.result == 'skipped') &&
       (github.event.inputs.stack == 'ebs-storage' || github.event_name == 'push' || github.event.inputs.jobs_to_run != '')
 
@@ -864,7 +864,7 @@ jobs:
       always() &&
       needs.determine-jobs.outputs.run_deploy_ecs == 'true' &&
       (needs.build.result == 'success' || needs.build.result == 'skipped') &&
-      (needs.validate-setup.result == 'success' || needs.validate-setup.result == 'skipped') &&
+      needs.validate-setup.result == 'success' &&
       (needs.deploy-networking.result == 'success' || needs.deploy-networking.result == 'skipped') &&
       (needs.deploy-ebs-storage.result == 'success' || needs.deploy-ebs-storage.result == 'skipped') &&
       (github.event.inputs.stack == 'ecs' || github.event_name == 'push' || github.event.inputs.jobs_to_run != '')
