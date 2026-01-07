@@ -353,14 +353,32 @@ export class AutoScalingGroupConstruct extends Construct {
         );
       }
 
-      // Use multiple methods to ensure the name is set correctly
-      // 1. Direct property assignment (most reliable)
-      (cfnCapacityProvider as any).name = capacityProviderName;
-      // 2. Clear any auto-generated name
+      // CRITICAL: Ensure the Name property appears in CloudFormation template
+      // The issue is that addPropertyOverride might not persist if CDK regenerates properties
+      // We use multiple methods to ensure the name is set in the final template
+
+      // Method 1: Use addPropertyOverride with the exact CloudFormation property name "Name"
+      // Delete any existing value first to ensure clean override
       cfnCapacityProvider.addPropertyDeletionOverride("Name");
       cfnCapacityProvider.addPropertyDeletionOverride("name");
-      // 3. Set the name explicitly
+      // Set the name - this should appear in the CloudFormation template
       cfnCapacityProvider.addPropertyOverride("Name", capacityProviderName);
+
+      // Method 2: Directly set on the internal _cfnProperties object
+      // This ensures the property is present even if addPropertyOverride is overridden
+      const cfnResource = cfnCapacityProvider as any;
+      if (!cfnResource._cfnProperties) {
+        cfnResource._cfnProperties = {};
+      }
+      cfnResource._cfnProperties.Name = capacityProviderName;
+
+      // Method 3: Also set on the cfnOptions to ensure it's included
+      // This provides another layer of assurance
+      if (cfnResource.cfnOptions) {
+        cfnResource.cfnOptions.properties =
+          cfnResource.cfnOptions.properties || {};
+        cfnResource.cfnOptions.properties.Name = capacityProviderName;
+      }
     }
 
     // Only add capacity provider if cluster is a concrete Cluster instance
@@ -904,14 +922,32 @@ export class EcsClusterConstruct extends Construct {
         );
       }
 
-      // Use multiple methods to ensure the name is set correctly
-      // 1. Direct property assignment (most reliable)
-      (cfnCapacityProvider as any).name = capacityProviderName;
-      // 2. Clear any auto-generated name
+      // CRITICAL: Ensure the Name property appears in CloudFormation template
+      // The issue is that addPropertyOverride might not persist if CDK regenerates properties
+      // We use multiple methods to ensure the name is set in the final template
+
+      // Method 1: Use addPropertyOverride with the exact CloudFormation property name "Name"
+      // Delete any existing value first to ensure clean override
       cfnCapacityProvider.addPropertyDeletionOverride("Name");
       cfnCapacityProvider.addPropertyDeletionOverride("name");
-      // 3. Set the name explicitly
+      // Set the name - this should appear in the CloudFormation template
       cfnCapacityProvider.addPropertyOverride("Name", capacityProviderName);
+
+      // Method 2: Directly set on the internal _cfnProperties object
+      // This ensures the property is present even if addPropertyOverride is overridden
+      const cfnResource = cfnCapacityProvider as any;
+      if (!cfnResource._cfnProperties) {
+        cfnResource._cfnProperties = {};
+      }
+      cfnResource._cfnProperties.Name = capacityProviderName;
+
+      // Method 3: Also set on the cfnOptions to ensure it's included
+      // This provides another layer of assurance
+      if (cfnResource.cfnOptions) {
+        cfnResource.cfnOptions.properties =
+          cfnResource.cfnOptions.properties || {};
+        cfnResource.cfnOptions.properties.Name = capacityProviderName;
+      }
     }
 
     // Add capacity provider to cluster AFTER setting the name
@@ -1961,14 +1997,32 @@ export class EcsStack extends cdk.Stack {
         );
       }
 
-      // Use multiple methods to ensure the name is set correctly
-      // 1. Direct property assignment (most reliable)
-      (cfnCapacityProvider as any).name = capacityProviderName;
-      // 2. Clear any auto-generated name
+      // CRITICAL: Ensure the Name property appears in CloudFormation template
+      // The issue is that addPropertyOverride might not persist if CDK regenerates properties
+      // We use multiple methods to ensure the name is set in the final template
+
+      // Method 1: Use addPropertyOverride with the exact CloudFormation property name "Name"
+      // Delete any existing value first to ensure clean override
       cfnCapacityProvider.addPropertyDeletionOverride("Name");
       cfnCapacityProvider.addPropertyDeletionOverride("name");
-      // 3. Set the name explicitly
+      // Set the name - this should appear in the CloudFormation template
       cfnCapacityProvider.addPropertyOverride("Name", capacityProviderName);
+
+      // Method 2: Directly set on the internal _cfnProperties object
+      // This ensures the property is present even if addPropertyOverride is overridden
+      const cfnResource = cfnCapacityProvider as any;
+      if (!cfnResource._cfnProperties) {
+        cfnResource._cfnProperties = {};
+      }
+      cfnResource._cfnProperties.Name = capacityProviderName;
+
+      // Method 3: Also set on the cfnOptions to ensure it's included
+      // This provides another layer of assurance
+      if (cfnResource.cfnOptions) {
+        cfnResource.cfnOptions.properties =
+          cfnResource.cfnOptions.properties || {};
+        cfnResource.cfnOptions.properties.Name = capacityProviderName;
+      }
     }
 
     // Add capacity provider to cluster using high-level API
