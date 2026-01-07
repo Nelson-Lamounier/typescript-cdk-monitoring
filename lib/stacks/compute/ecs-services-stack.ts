@@ -10,11 +10,12 @@ import { Tags } from "aws-cdk-lib";
 import { Construct } from "constructs";
 
 import { EcsTaskExecutionRole } from "../../iam/ecs-task-execution-role";
-import { EcsTaskDefinitionConstruct } from "./ecs-stack";
 import {
   EcsServiceConfig,
   VolumeMountConfig,
 } from "../../types/ecs-service-config";
+
+import { EcsTaskDefinitionConstruct } from "./ecs-stack";
 
 /**
  * Properties for EcsServicesStack
@@ -107,7 +108,9 @@ export class EcsServicesStack extends cdk.Stack {
       enablePublicEcr = false,
     } = props;
 
-    this.loadBalancer = loadBalancer as elbv2.ApplicationLoadBalancer | undefined;
+    this.loadBalancer = loadBalancer as
+      | elbv2.ApplicationLoadBalancer
+      | undefined;
 
     // Initialize services map
     this.services = new Map();
@@ -158,10 +161,7 @@ export class EcsServicesStack extends cdk.Stack {
 
         // Store service URL
         if (this.loadBalancer) {
-          const servicePath = serviceConfig.loadBalancer.path.replace(
-            "/*",
-            ""
-          );
+          const servicePath = serviceConfig.loadBalancer.path.replace("/*", "");
           this.serviceUrls.set(
             serviceConfig.name,
             `http://${this.loadBalancer.loadBalancerDnsName}${servicePath}`
@@ -345,13 +345,12 @@ export class EcsServicesStack extends cdk.Stack {
   private createTargetGroup(
     vpc: ec2.IVpc,
     serviceConfig: EcsServiceConfig,
-    envName: string,
-    applicationName: string
+    _envName: string,
+    _applicationName: string
   ): elbv2.ApplicationTargetGroup {
     const containerPort =
       serviceConfig.container.hostPort || serviceConfig.container.containerPort;
-    const healthCheckPath =
-      serviceConfig.loadBalancer?.healthCheckPath || "/";
+    const healthCheckPath = serviceConfig.loadBalancer?.healthCheckPath || "/";
 
     return new elbv2.ApplicationTargetGroup(
       this,
@@ -386,9 +385,12 @@ export class EcsServicesStack extends cdk.Stack {
     }
 
     // Output service URLs if load balancer exists
-    if (this.loadBalancer && this.loadBalancer instanceof elbv2.ApplicationLoadBalancer) {
+    if (
+      this.loadBalancer &&
+      this.loadBalancer instanceof elbv2.ApplicationLoadBalancer
+    ) {
       const alb = this.loadBalancer as elbv2.ApplicationLoadBalancer;
-      
+
       new cdk.CfnOutput(this, "LoadBalancerDns", {
         value: alb.loadBalancerDnsName,
         description: "Application Load Balancer DNS Name",
