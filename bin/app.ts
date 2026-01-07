@@ -11,6 +11,7 @@ import { LoadBalancerStack } from "../lib/stacks/elb-stack";
 import { LaunchTemplateStack } from "../lib/stacks/compute/launch-template-stack";
 import { EbsStorageStack } from "../lib/stacks/storage/ebs-storage-stack";
 import { EcsStack } from "../lib/stacks/compute/ecs-stack";
+import { EcsServicesStack } from "../lib/stacks/compute/ecs-services-stack";
 import { environments, EnvironmentConfig } from "../config/environments";
 import { getProjectConfig, ProjectConfig } from "../config/projects";
 import {
@@ -362,6 +363,36 @@ ecsStack.addDependency(networkingStack);
 // Add dependency on EBS storage stack for SSM parameters (if storage configured)
 if (ebsStorageStack) {
   ecsStack.addDependency(ebsStorageStack);
+}
+
+// ============================================================================
+// ECS SERVICES STACK
+// ============================================================================
+
+// EcsServicesStack creates the actual ECS services dynamically from configuration
+// It depends on EcsStack which provides the cluster and capacity providers
+// This stack is generic and can be used for any application type
+let ecsServicesStack: EcsServicesStack | undefined;
+if (ecsApplicationConfig.services && ecsApplicationConfig.services.length > 0) {
+  ecsServicesStack = new EcsServicesStack(
+    app,
+    `EcsServicesStack-${projectConfig.name}-${config.envName}`,
+    {
+      ...stackProps,
+      envName: config.envName,
+      projectName: projectConfig.name,
+      applicationName: ecsApplicationConfig.applicationName,
+      vpc: networkingStack.vpc,
+      cluster: ecsStack.cluster,
+      autoScalingGroup: ecsStack.autoScalingGroup,
+      loadBalancer: ecsStack.loadBalancer,
+      services: ecsApplicationConfig.services,
+      enablePublicEcr: projectConfig.type === "monitoring", // Monitoring uses public Docker Hub images
+    }
+  );
+
+  // Explicit dependency ensures EcsStack is deployed first
+  ecsServicesStack.addDependency(ecsStack);
 }
 
 // ============================================================================

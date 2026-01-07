@@ -921,11 +921,15 @@ export class EcsConstruct extends Construct {
     // Create task execution role for CloudWatch Logs access
     // Required for tasks that use awslogs log driver
     // Pass log group ARN for specific permissions
-    const executionRole = new EcsTaskExecutionRole(this, "NodeExporterExecutionRole", {
-      envName,
-      logGroupArn: logGroup.logGroupArn,
-      enablePublicEcr: true, // Node Exporter uses public Docker Hub image
-    }).role;
+    const executionRole = new EcsTaskExecutionRole(
+      this,
+      "NodeExporterExecutionRole",
+      {
+        envName,
+        logGroupArn: logGroup.logGroupArn,
+        enablePublicEcr: true, // Node Exporter uses public Docker Hub image
+      }
+    ).role;
 
     // Task definition with HOST network mode
     const taskDefinition = new ecs.Ec2TaskDefinition(
@@ -1012,9 +1016,7 @@ export class EcsConstruct extends Construct {
       // Extended health check grace period for system-level service
       healthCheckGracePeriod: cdk.Duration.seconds(300),
       // Placement constraints: one per instance to avoid port conflicts
-      placementConstraints: [
-        ecs.PlacementConstraint.distinctInstances(),
-      ],
+      placementConstraints: [ecs.PlacementConstraint.distinctInstances()],
     });
 
     // Tag service
@@ -1426,10 +1428,10 @@ export interface EcsStackProps extends cdk.StackProps {
 
 export class EcsStack extends cdk.Stack {
   public readonly cluster: ecs.Cluster;
-  public readonly services: Map<string, ecs.Ec2Service>;
+  public readonly services: Map<string, ecs.Ec2Service>; // Empty - services created in separate stack
   public readonly loadBalancer?: elbv2.ApplicationLoadBalancer;
-  public readonly serviceUrls: Map<string, string>;
-  private readonly autoScalingGroup: autoscaling.AutoScalingGroup;
+  public readonly serviceUrls: Map<string, string>; // Empty - services created in separate stack
+  public readonly autoScalingGroup: autoscaling.AutoScalingGroup; // Exposed for use by services stack
   private readonly applicationConfig: EcsApplicationConfig;
 
   constructor(scope: Construct, id: string, props: EcsStackProps) {
@@ -1513,6 +1515,8 @@ export class EcsStack extends cdk.Stack {
     });
 
     // Create Application Load Balancer if configured
+    // Note: Services will be created in a separate stack (MonitoringServicesStack)
+    // This stack only creates infrastructure (cluster, capacity, load balancer)
     const lbConfig = applicationConfig.loadBalancer;
     if (lbConfig) {
       this.loadBalancer = this.createLoadBalancer(
@@ -1523,71 +1527,11 @@ export class EcsStack extends cdk.Stack {
       );
     }
 
-    // Initialize services map
+    // Initialize services map (empty - services created in separate stack)
     this.services = new Map();
     this.serviceUrls = new Map();
 
-    // Create services dynamically from configuration
-    let listener: elbv2.ApplicationListener | undefined;
-    if (this.loadBalancer) {
-      listener = this.loadBalancer.addListener("ApplicationListener", {
-        port: 80,
-        protocol: elbv2.ApplicationProtocol.HTTP,
-      });
-
-      // Add default action (fixed response) to satisfy CDK validation
-      // This handles requests that don't match any path-based rules
-      listener.addAction("DefaultAction", {
-        action: elbv2.ListenerAction.fixedResponse(404, {
-          contentType: "text/plain",
-          messageBody: "Not Found - No matching service route",
-        }),
-      });
-    }
-
-    let rulePriority = 100;
-    for (const serviceConfig of applicationConfig.services) {
-      const service = this.createServiceFromConfig(
-        cluster,
-        envName,
-        serviceConfig
-      );
-      this.services.set(serviceConfig.name, service);
-
-      // Configure load balancer routing if configured
-      if (serviceConfig.loadBalancer && listener) {
-        const targetGroup = this.createTargetGroup(vpc, serviceConfig, envName);
-        service.attachToApplicationTargetGroup(targetGroup);
-
-        listener.addTargetGroups(`${serviceConfig.name}TargetGroup`, {
-          targetGroups: [targetGroup],
-          conditions: [
-            elbv2.ListenerCondition.pathPatterns([
-              serviceConfig.loadBalancer.path,
-            ]),
-          ],
-          priority: serviceConfig.loadBalancer.priority ?? rulePriority++,
-        });
-
-        // Store service URL
-        const servicePath = serviceConfig.loadBalancer.path.replace("/*", "");
-        this.serviceUrls.set(
-          serviceConfig.name,
-          `http://${this.loadBalancer!.loadBalancerDnsName}${servicePath}`
-        );
-
-        // Allow ALB to reach service port
-        if (serviceConfig.albPort) {
-          this.autoScalingGroup.connections.allowFrom(
-            this.loadBalancer!,
-            ec2.Port.tcp(serviceConfig.albPort),
-            `Allow ALB to reach ${serviceConfig.name}`
-          );
-        }
-      }
-    }
-
-    // Create outputs
+    // Create outputs (cluster and load balancer for use by services stack)
     this.createOutputs(taskLogGroup, eventLogGroup, envName);
 
     // ========================================================================
@@ -2138,53 +2082,45 @@ export class EcsStack extends cdk.Stack {
     envName: string
   ): void {
     const appName = this.applicationConfig.applicationName;
-    const shouldExport = !envName.includes("pipeline");
+    const exportPrefix = `${envName}-${appName}`;
 
-    // Output service URLs dynamically
-    for (const [serviceName, url] of this.serviceUrls.entries()) {
-      new cdk.CfnOutput(this, `${serviceName}Url`, {
-        value: url,
-        description: `${serviceName} service URL`,
-        ...(shouldExport && {
-          exportName: `${this.stackName}-${serviceName}-url`,
-        }),
-      });
-    }
+    // Output cluster information (exported for use by services stack)
+    new cdk.CfnOutput(this, "ClusterName", {
+      value: this.cluster.clusterName,
+      description: "ECS Cluster Name",
+      exportName: `${exportPrefix}-cluster-name`,
+    });
 
-    // Output ALB DNS if load balancer exists
+    new cdk.CfnOutput(this, "ClusterArn", {
+      value: this.cluster.clusterArn,
+      description: "ECS Cluster ARN",
+      exportName: `${exportPrefix}-cluster-arn`,
+    });
+
+    // Output ALB DNS if load balancer exists (exported for use by services stack)
     if (this.loadBalancer) {
       new cdk.CfnOutput(this, "ApplicationAlbDns", {
         value: this.loadBalancer.loadBalancerDnsName,
         description: `${appName} ALB DNS name`,
-        ...(shouldExport && {
-          exportName: `${this.stackName}-alb-dns`,
-        }),
+        exportName: `${exportPrefix}-alb-dns`,
+      });
+
+      new cdk.CfnOutput(this, "ApplicationAlbArn", {
+        value: this.loadBalancer.loadBalancerArn,
+        description: `${appName} ALB ARN`,
+        exportName: `${exportPrefix}-alb-arn`,
       });
     }
 
-    // Output cluster information
-    new cdk.CfnOutput(this, "ClusterName", {
-      value: this.cluster.clusterName,
-      description: `ECS Cluster name for ${appName}`,
-      ...(shouldExport && {
-        exportName: `${this.stackName}-cluster-name`,
-      }),
-    });
-
+    // Output log groups for reference
     new cdk.CfnOutput(this, "TaskLogGroupName", {
       value: taskLogGroup.logGroupName,
       description: "CloudWatch Log Group for Task Logs",
-      ...(shouldExport && {
-        exportName: `${this.stackName}-task-log-group`,
-      }),
     });
 
     new cdk.CfnOutput(this, "EventLogGroupName", {
       value: eventLogGroup.logGroupName,
       description: "CloudWatch Log Group for ECS Events",
-      ...(shouldExport && {
-        exportName: `${this.stackName}-event-log-group`,
-      }),
     });
   }
 }
