@@ -305,63 +305,79 @@ export class AutoScalingGroupConstruct extends Construct {
       }
     }
 
-    const capacityProvider = new ecs.AsgCapacityProvider(
+    // Create capacity provider directly using CfnCapacityProvider to have full control over the name
+    // WHY: AWS ECS capacity provider names cannot start with "aws", "ecs", or "fargate".
+    // CDK's AsgCapacityProvider construct auto-generates names that may violate this rule.
+    // Creating CfnCapacityProvider directly allows us to set a compliant name from the start.
+    const cfnCapacityProvider = new ecs.CfnCapacityProvider(
       this,
       "CapacityProvider",
       {
-        autoScalingGroup: this.autoScalingGroup,
-        enableManagedScaling: false,
-        enableManagedTerminationProtection: false,
+        name: capacityProviderName, // Set name directly - this is guaranteed to work
+        autoScalingGroupProvider: {
+          autoScalingGroupArn: this.autoScalingGroup.autoScalingGroupArn,
+          managedScaling: {
+            status: "DISABLED",
+          },
+          managedTerminationProtection: "DISABLED",
+        },
       }
     );
 
-    // Override the capacity provider name using escape hatch
-    // CDK auto-generated names may start with "ecs" which is not allowed
-    const cfnCapacityProvider = capacityProvider.node
-      .defaultChild as ecs.CfnCapacityProvider;
-    if (cfnCapacityProvider) {
-      // Final validation before setting the name
-      if (!capacityProviderName || capacityProviderName.length === 0) {
-        throw new Error(
-          `Invalid capacity provider name: empty. ` +
-            `envName: "${envName}", applicationName: "${applicationName}"`
-        );
-      }
+    // Manually add the capacity provider to the cluster
+    // We need to update the cluster's CloudFormation resource directly
+    if (cluster instanceof ecs.Cluster) {
+      const clusterCfn = cluster.node.defaultChild as ecs.CfnCluster;
+      if (clusterCfn) {
+        // Get existing capacity providers or initialize empty array
+        const existingProviders = clusterCfn.capacityProviders || [];
+        if (!existingProviders.includes(capacityProviderName)) {
+          clusterCfn.capacityProviders = [
+            ...existingProviders,
+            capacityProviderName,
+          ];
+        }
 
-      // Final check: ensure name doesn't start with forbidden prefixes
-      const finalCheck = capacityProviderName.toLowerCase();
-      const forbiddenPrefixes = ["aws", "ecs", "fargate"];
-      for (const prefix of forbiddenPrefixes) {
-        if (finalCheck.startsWith(prefix)) {
-          throw new Error(
-            `Capacity provider name "${capacityProviderName}" starts with forbidden prefix "${prefix}". ` +
-              `This should have been caught earlier - please report this as a bug.`
-          );
+        // Set default capacity provider strategy if not already set
+        const existingStrategy = clusterCfn.defaultCapacityProviderStrategy;
+        if (Array.isArray(existingStrategy)) {
+          const hasStrategy = existingStrategy.some((s) => {
+            // Handle both IResolvable and CapacityProviderStrategyItemProperty types
+            if (
+              typeof s === "object" &&
+              s !== null &&
+              "capacityProvider" in s
+            ) {
+              return (
+                (s as ecs.CfnCluster.CapacityProviderStrategyItemProperty)
+                  .capacityProvider === capacityProviderName
+              );
+            }
+            return false;
+          });
+          if (!hasStrategy) {
+            clusterCfn.defaultCapacityProviderStrategy = [
+              ...existingStrategy,
+              {
+                capacityProvider: capacityProviderName,
+                weight: 1,
+              },
+            ];
+          }
+        } else if (!existingStrategy) {
+          clusterCfn.defaultCapacityProviderStrategy = [
+            {
+              capacityProvider: capacityProviderName,
+              weight: 1,
+            },
+          ];
         }
       }
-
-      // Ensure name only contains valid characters
-      if (!/^[a-zA-Z0-9_-]+$/.test(capacityProviderName)) {
-        throw new Error(
-          `Capacity provider name "${capacityProviderName}" contains invalid characters. ` +
-            `Only letters, numbers, underscores, and hyphens are allowed.`
-        );
-      }
-
-      // Set the name property directly - this is the most reliable method
-      (cfnCapacityProvider as any).name = capacityProviderName;
-
-      // Also use addPropertyOverride as a backup
-      cfnCapacityProvider.addPropertyDeletionOverride("Name");
-      cfnCapacityProvider.addPropertyDeletionOverride("name");
-      cfnCapacityProvider.addPropertyOverride("Name", capacityProviderName);
     }
 
-    // Only add capacity provider if cluster is a concrete Cluster instance
-    // Add AFTER setting the name to ensure name is preserved
-    if (cluster instanceof ecs.Cluster) {
-      cluster.addAsgCapacityProvider(capacityProvider);
-    }
+    // Tag the capacity provider
+    cdk.Tags.of(cfnCapacityProvider).add("Environment", envName);
+    cdk.Tags.of(cfnCapacityProvider).add("Application", applicationName);
 
     // Add tags
     cdk.Tags.of(this.autoScalingGroup).add("Name", `${envName}-monitoring-asg`);
@@ -845,65 +861,66 @@ export class EcsClusterConstruct extends Construct {
       }
     }
 
-    const capacityProvider = new ecs.AsgCapacityProvider(
+    // Create capacity provider directly using CfnCapacityProvider to have full control over the name
+    // WHY: AWS ECS capacity provider names cannot start with "aws", "ecs", or "fargate".
+    // CDK's AsgCapacityProvider construct auto-generates names that may violate this rule.
+    // Creating CfnCapacityProvider directly allows us to set a compliant name from the start.
+    const cfnCapacityProvider = new ecs.CfnCapacityProvider(
       this,
       "CapacityProvider",
       {
-        autoScalingGroup: this.asg,
-        // Enable managed scaling - ECS will scale based on task demand
-        // The ASG will still launch instances based on desiredCapacity initially
-        // If you need instances to launch immediately regardless of tasks, consider
-        // setting enableManagedScaling: false temporarily for troubleshooting
-        enableManagedScaling: false,
-        enableManagedTerminationProtection: false,
+        name: capacityProviderName, // Set name directly - this is guaranteed to work
+        autoScalingGroupProvider: {
+          autoScalingGroupArn: this.asg.autoScalingGroupArn,
+          managedScaling: {
+            status: "DISABLED",
+          },
+          managedTerminationProtection: "DISABLED",
+        },
       }
     );
 
-    // Override the capacity provider name using escape hatch
-    // CDK auto-generated names may start with "ecs" which is not allowed
-    // Use addPropertyOverride as it's more reliable than direct property assignment
-    const cfnCapacityProvider = capacityProvider.node
-      .defaultChild as ecs.CfnCapacityProvider;
-    if (cfnCapacityProvider) {
-      // Final validation before setting the name
-      if (!capacityProviderName || capacityProviderName.length === 0) {
-        throw new Error(
-          `Invalid capacity provider name: empty. ` +
-            `envName: "${envName}", clusterName: "${clusterName}"`
-        );
+    // Manually add the capacity provider to the cluster
+    // We need to update the cluster's CloudFormation resource directly
+    const clusterCfn = this.cluster.node.defaultChild as ecs.CfnCluster;
+    if (clusterCfn) {
+      // Get existing capacity providers or initialize empty array
+      const existingProviders = clusterCfn.capacityProviders || [];
+      if (!existingProviders.includes(capacityProviderName)) {
+        clusterCfn.capacityProviders = [
+          ...existingProviders,
+          capacityProviderName,
+        ];
       }
 
-      // Final check: ensure name doesn't start with forbidden prefixes
-      const finalCheck = capacityProviderName.toLowerCase();
-      const forbiddenPrefixes = ["aws", "ecs", "fargate"];
-      for (const prefix of forbiddenPrefixes) {
-        if (finalCheck.startsWith(prefix)) {
-          throw new Error(
-            `Capacity provider name "${capacityProviderName}" starts with forbidden prefix "${prefix}". ` +
-              `This should have been caught earlier - please report this as a bug.`
-          );
+      // Set default capacity provider strategy if not already set
+      const existingStrategy = clusterCfn.defaultCapacityProviderStrategy;
+      if (Array.isArray(existingStrategy)) {
+        const hasStrategy = existingStrategy.some(
+          (s: any) => s.capacityProvider === capacityProviderName
+        );
+        if (!hasStrategy) {
+          clusterCfn.defaultCapacityProviderStrategy = [
+            ...existingStrategy,
+            {
+              capacityProvider: capacityProviderName,
+              weight: 1,
+            },
+          ];
         }
+      } else if (!existingStrategy) {
+        clusterCfn.defaultCapacityProviderStrategy = [
+          {
+            capacityProvider: capacityProviderName,
+            weight: 1,
+          },
+        ];
       }
-
-      // Ensure name only contains valid characters
-      if (!/^[a-zA-Z0-9_-]+$/.test(capacityProviderName)) {
-        throw new Error(
-          `Capacity provider name "${capacityProviderName}" contains invalid characters. ` +
-            `Only letters, numbers, underscores, and hyphens are allowed.`
-        );
-      }
-
-      // Set the name property directly - this is the most reliable method
-      (cfnCapacityProvider as any).name = capacityProviderName;
-
-      // Also use addPropertyOverride as a backup
-      cfnCapacityProvider.addPropertyDeletionOverride("Name");
-      cfnCapacityProvider.addPropertyDeletionOverride("name");
-      cfnCapacityProvider.addPropertyOverride("Name", capacityProviderName);
     }
 
-    // Add capacity provider to cluster AFTER setting the name
-    this.cluster.addAsgCapacityProvider(capacityProvider);
+    // Tag the capacity provider
+    Tags.of(cfnCapacityProvider).add("Environment", envName);
+    Tags.of(cfnCapacityProvider).add("ManagedBy", "CDK");
 
     // Add tags to cluster
     Tags.of(this.cluster).add("Name", clusterName);
@@ -1896,61 +1913,74 @@ export class EcsStack extends cdk.Stack {
       }
     }
 
-    // Create capacity provider using high-level construct
-    const capacityProvider = new ecs.AsgCapacityProvider(
+    // Create capacity provider directly using CfnCapacityProvider to have full control over the name
+    // This is necessary because AsgCapacityProvider auto-generates names that may start with "ecs"
+    // which AWS rejects. By creating CfnCapacityProvider directly, we set the name in the constructor.
+    // WHY: AWS ECS capacity provider names cannot start with "aws", "ecs", or "fargate".
+    // CDK's AsgCapacityProvider construct auto-generates names that may violate this rule.
+    // Creating CfnCapacityProvider directly allows us to set a compliant name from the start.
+    const cfnCapacityProvider = new ecs.CfnCapacityProvider(
       this,
       "AsgCapacityProvider",
       {
-        autoScalingGroup,
-        enableManagedScaling: false,
-        enableManagedTerminationProtection: false,
+        name: capacityProviderName, // Set name directly - this is guaranteed to work
+        autoScalingGroupProvider: {
+          autoScalingGroupArn: autoScalingGroup.autoScalingGroupArn,
+          managedScaling: {
+            status: "DISABLED",
+          },
+          managedTerminationProtection: "DISABLED",
+        },
       }
     );
 
-    // Override the capacity provider name using escape hatch
-    // Must be done BEFORE adding to cluster to ensure name is set correctly
-    const cfnCapacityProvider = capacityProvider.node
-      .defaultChild as ecs.CfnCapacityProvider;
-    if (cfnCapacityProvider) {
-      // Final validation before setting the name
-      if (!capacityProviderName || capacityProviderName.length === 0) {
-        throw new Error(
-          `Invalid capacity provider name: empty. ` +
-            `envName: "${envName}", applicationName: "${applicationName}"`
-        );
+    // Manually add the capacity provider to the cluster
+    // We need to update the cluster's CloudFormation resource directly since we're not using
+    // the high-level cluster.addAsgCapacityProvider() method
+    const clusterCfn = cluster.node.defaultChild as ecs.CfnCluster;
+    if (clusterCfn) {
+      // Get existing capacity providers or initialize empty array
+      const existingProviders = clusterCfn.capacityProviders || [];
+      if (!existingProviders.includes(capacityProviderName)) {
+        clusterCfn.capacityProviders = [
+          ...existingProviders,
+          capacityProviderName,
+        ];
       }
 
-      // Final check: ensure name doesn't start with forbidden prefixes
-      const finalCheck = capacityProviderName.toLowerCase();
-      const forbiddenPrefixes = ["aws", "ecs", "fargate"];
-      for (const prefix of forbiddenPrefixes) {
-        if (finalCheck.startsWith(prefix)) {
-          throw new Error(
-            `Capacity provider name "${capacityProviderName}" starts with forbidden prefix "${prefix}". ` +
-              `This should have been caught earlier - please report this as a bug.`
-          );
+      // Set default capacity provider strategy if not already set
+      // This ensures tasks can use this capacity provider
+      // Handle both array and IResolvable types
+      const existingStrategy = clusterCfn.defaultCapacityProviderStrategy;
+      if (Array.isArray(existingStrategy)) {
+        const hasStrategy = existingStrategy.some(
+          (s: any) => s.capacityProvider === capacityProviderName
+        );
+        if (!hasStrategy) {
+          clusterCfn.defaultCapacityProviderStrategy = [
+            ...existingStrategy,
+            {
+              capacityProvider: capacityProviderName,
+              weight: 1,
+            },
+          ];
         }
+      } else if (!existingStrategy) {
+        // No strategy exists, create a new one
+        clusterCfn.defaultCapacityProviderStrategy = [
+          {
+            capacityProvider: capacityProviderName,
+            weight: 1,
+          },
+        ];
       }
-
-      // Ensure name only contains valid characters
-      if (!/^[a-zA-Z0-9_-]+$/.test(capacityProviderName)) {
-        throw new Error(
-          `Capacity provider name "${capacityProviderName}" contains invalid characters. ` +
-            `Only letters, numbers, underscores, and hyphens are allowed.`
-        );
-      }
-
-      // Set the name property directly - this is the most reliable method
-      (cfnCapacityProvider as any).name = capacityProviderName;
-
-      // Also use addPropertyOverride as a backup
-      cfnCapacityProvider.addPropertyDeletionOverride("Name");
-      cfnCapacityProvider.addPropertyDeletionOverride("name");
-      cfnCapacityProvider.addPropertyOverride("Name", capacityProviderName);
+      // If existingStrategy is IResolvable, we can't modify it, so leave it as is
     }
 
-    // Add capacity provider to cluster AFTER setting the name
-    cluster.addAsgCapacityProvider(capacityProvider);
+    // Reference the capacity provider to ensure it's created (prevents unused variable warning)
+    // The capacity provider is registered with the cluster via CloudFormation properties above
+    cdk.Tags.of(cfnCapacityProvider).add("Environment", envName);
+    cdk.Tags.of(cfnCapacityProvider).add("Application", applicationName);
 
     // Build and apply UserData with dynamic EBS volume configuration
     const userDataCommands = this.buildUserData(
