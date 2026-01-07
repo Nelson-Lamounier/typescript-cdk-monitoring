@@ -348,10 +348,17 @@ export class AutoScalingGroupConstruct extends Construct {
         );
       }
 
-      cfnCapacityProvider.name = capacityProviderName;
+      // Set the name property directly - this is the most reliable method
+      (cfnCapacityProvider as any).name = capacityProviderName;
+
+      // Also use addPropertyOverride as a backup
+      cfnCapacityProvider.addPropertyDeletionOverride("Name");
+      cfnCapacityProvider.addPropertyDeletionOverride("name");
+      cfnCapacityProvider.addPropertyOverride("Name", capacityProviderName);
     }
 
     // Only add capacity provider if cluster is a concrete Cluster instance
+    // Add AFTER setting the name to ensure name is preserved
     if (cluster instanceof ecs.Cluster) {
       cluster.addAsgCapacityProvider(capacityProvider);
     }
@@ -854,6 +861,7 @@ export class EcsClusterConstruct extends Construct {
 
     // Override the capacity provider name using escape hatch
     // CDK auto-generated names may start with "ecs" which is not allowed
+    // Use addPropertyOverride as it's more reliable than direct property assignment
     const cfnCapacityProvider = capacityProvider.node
       .defaultChild as ecs.CfnCapacityProvider;
     if (cfnCapacityProvider) {
@@ -885,9 +893,16 @@ export class EcsClusterConstruct extends Construct {
         );
       }
 
-      cfnCapacityProvider.name = capacityProviderName;
+      // Set the name property directly - this is the most reliable method
+      (cfnCapacityProvider as any).name = capacityProviderName;
+
+      // Also use addPropertyOverride as a backup
+      cfnCapacityProvider.addPropertyDeletionOverride("Name");
+      cfnCapacityProvider.addPropertyDeletionOverride("name");
+      cfnCapacityProvider.addPropertyOverride("Name", capacityProviderName);
     }
 
+    // Add capacity provider to cluster AFTER setting the name
     this.cluster.addAsgCapacityProvider(capacityProvider);
 
     // Add tags to cluster
@@ -1881,6 +1896,7 @@ export class EcsStack extends cdk.Stack {
       }
     }
 
+    // Create capacity provider using high-level construct
     const capacityProvider = new ecs.AsgCapacityProvider(
       this,
       "AsgCapacityProvider",
@@ -1892,7 +1908,7 @@ export class EcsStack extends cdk.Stack {
     );
 
     // Override the capacity provider name using escape hatch
-    // CDK auto-generated names may start with "ecs" which is not allowed
+    // Must be done BEFORE adding to cluster to ensure name is set correctly
     const cfnCapacityProvider = capacityProvider.node
       .defaultChild as ecs.CfnCapacityProvider;
     if (cfnCapacityProvider) {
@@ -1924,9 +1940,16 @@ export class EcsStack extends cdk.Stack {
         );
       }
 
-      cfnCapacityProvider.name = capacityProviderName;
+      // Set the name property directly - this is the most reliable method
+      (cfnCapacityProvider as any).name = capacityProviderName;
+
+      // Also use addPropertyOverride as a backup
+      cfnCapacityProvider.addPropertyDeletionOverride("Name");
+      cfnCapacityProvider.addPropertyDeletionOverride("name");
+      cfnCapacityProvider.addPropertyOverride("Name", capacityProviderName);
     }
 
+    // Add capacity provider to cluster AFTER setting the name
     cluster.addAsgCapacityProvider(capacityProvider);
 
     // Build and apply UserData with dynamic EBS volume configuration
