@@ -911,12 +911,29 @@ export class EcsConstruct extends Construct {
   }
 
   private createNodeExporterService(envName: string): ecs.Ec2Service {
+    // Create CloudWatch Log Group for Node Exporter
+    const logGroup = new logs.LogGroup(this, "NodeExporterLogGroup", {
+      logGroupName: `/ecs/${envName}-app-node-exporter`,
+      retention: logs.RetentionDays.ONE_WEEK,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
+    // Create task execution role for CloudWatch Logs access
+    // Required for tasks that use awslogs log driver
+    // Pass log group ARN for specific permissions
+    const executionRole = new EcsTaskExecutionRole(this, "NodeExporterExecutionRole", {
+      envName,
+      logGroupArn: logGroup.logGroupArn,
+      enablePublicEcr: true, // Node Exporter uses public Docker Hub image
+    }).role;
+
     // Task definition with HOST network mode
     const taskDefinition = new ecs.Ec2TaskDefinition(
       this,
       "NodeExporterTaskDef",
       {
         networkMode: ecs.NetworkMode.HOST,
+        executionRole, // Required for CloudWatch Logs
       }
     );
 
@@ -926,11 +943,7 @@ export class EcsConstruct extends Construct {
       memoryReservationMiB: 64,
       logging: ecs.LogDrivers.awsLogs({
         streamPrefix: "node-exporter",
-        logGroup: new logs.LogGroup(this, "NodeExporterLogGroup", {
-          logGroupName: `/ecs/${envName}-app-node-exporter`,
-          retention: logs.RetentionDays.ONE_WEEK,
-          removalPolicy: cdk.RemovalPolicy.DESTROY,
-        }),
+        logGroup: logGroup,
       }),
       command: [
         "--path.procfs=/host/proc",
@@ -978,13 +991,30 @@ export class EcsConstruct extends Construct {
       }
     );
 
-    // Create service
+    // Create service with circuit breaker disabled for Node Exporter
+    // Node Exporter uses HOST network mode and may have port conflicts
+    // Circuit breaker can be too aggressive for system-level services
     const service = new ecs.Ec2Service(this, "NodeExporterService", {
       cluster: this.cluster,
       taskDefinition,
       serviceName: `${envName}-app-node-exporter`,
       desiredCount: 1,
       enableExecuteCommand: true,
+      // Disable circuit breaker for Node Exporter
+      // HOST network mode can have port conflicts that trigger false positives
+      circuitBreaker: {
+        enable: false,
+        rollback: false,
+      },
+      // Allow service to start even if previous deployment failed
+      minHealthyPercent: 0,
+      maxHealthyPercent: 200,
+      // Extended health check grace period for system-level service
+      healthCheckGracePeriod: cdk.Duration.seconds(300),
+      // Placement constraints: one per instance to avoid port conflicts
+      placementConstraints: [
+        ecs.PlacementConstraint.distinctInstances(),
+      ],
     });
 
     // Tag service
