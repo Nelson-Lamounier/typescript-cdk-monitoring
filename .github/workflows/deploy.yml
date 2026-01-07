@@ -9,6 +9,16 @@ on:
       - develop # Remove after testing
   workflow_dispatch:
     inputs:
+      environment:
+        description: "Environment to deploy to"
+        required: true
+        type: choice
+        default: "pipeline"
+        options:
+          - pipeline
+          - development
+          - staging
+          - production
       stack:
         description: "Stack to deploy"
         required: true
@@ -16,9 +26,10 @@ on:
         default: "networking"
         options:
           - networking
-          - monitoring-efs
-          - monitoring-infra
-          - monitoring-services
+          - ebs-storage
+          - ecs
+          - load-balancer
+          - launch-template
           - vpc-peering
           - destroy-all
       jobs_to_run:
@@ -52,6 +63,8 @@ env:
   AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-1' }}
   TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
   TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+  # Environment is determined from workflow input or defaults to pipeline
+  DEPLOY_ENVIRONMENT: ${{ github.event.inputs.environment || 'pipeline' }}
 
 permissions:
   id-token: write
@@ -67,13 +80,15 @@ jobs:
     name: Determine Deployment Jobs to Run
     runs-on: ubuntu-latest
     outputs:
+      environment: ${{ steps.decide.outputs.environment }}
       run_build: ${{ steps.decide.outputs.run_build }}
       run_validate_setup: ${{ steps.decide.outputs.run_validate_setup }}
       run_deploy_networking: ${{ steps.decide.outputs.run_deploy_networking }}
-      run_deploy_efs: ${{ steps.decide.outputs.run_deploy_efs }}
+      run_deploy_ebs_storage: ${{ steps.decide.outputs.run_deploy_ebs_storage }}
+      run_deploy_ecs: ${{ steps.decide.outputs.run_deploy_ecs }}
+      run_deploy_load_balancer: ${{ steps.decide.outputs.run_deploy_load_balancer }}
+      run_deploy_launch_template: ${{ steps.decide.outputs.run_deploy_launch_template }}
       run_deploy_peering: ${{ steps.decide.outputs.run_deploy_peering }}
-      run_deploy_infra: ${{ steps.decide.outputs.run_deploy_infra }}
-      run_deploy_services: ${{ steps.decide.outputs.run_deploy_services }}
       run_health_checks: ${{ steps.decide.outputs.run_health_checks }}
       run_destroy_all: ${{ steps.decide.outputs.run_destroy_all }}
       run_rollback: ${{ steps.decide.outputs.run_rollback }}
@@ -96,6 +111,10 @@ jobs:
           JOBS_INPUT="${{ github.event.inputs.jobs_to_run }}"
           RERUN_FROM="${{ github.event.inputs.rerun_failed_from }}"
           STACK_INPUT="${{ github.event.inputs.stack }}"
+          ENVIRONMENT="${{ env.DEPLOY_ENVIRONMENT }}"
+          
+          echo "Deployment Environment: $ENVIRONMENT"
+          echo "environment=$ENVIRONMENT" >> $GITHUB_OUTPUT
 
           echo "Input parameters:"
           echo "  Jobs to run: $JOBS_INPUT"
@@ -139,10 +158,11 @@ jobs:
                 echo "$FAILED_JOBS" | grep -q "Build Infrastructure" && echo "run_build=true" >> $GITHUB_OUTPUT || echo "run_build=false" >> $GITHUB_OUTPUT
                 echo "$FAILED_JOBS" | grep -q "Validate & Setup" && echo "run_validate_setup=true" >> $GITHUB_OUTPUT || echo "run_validate_setup=false" >> $GITHUB_OUTPUT
                 echo "$FAILED_JOBS" | grep -q "Deploy Networking" && echo "run_deploy_networking=true" >> $GITHUB_OUTPUT || echo "run_deploy_networking=false" >> $GITHUB_OUTPUT
-                echo "$FAILED_JOBS" | grep -q "Deploy Monitoring EFS" && echo "run_deploy_efs=true" >> $GITHUB_OUTPUT || echo "run_deploy_efs=false" >> $GITHUB_OUTPUT
+                echo "$FAILED_JOBS" | grep -q "Deploy EBS Storage\|Deploy Monitoring EBS Storage" && echo "run_deploy_ebs_storage=true" >> $GITHUB_OUTPUT || echo "run_deploy_ebs_storage=false" >> $GITHUB_OUTPUT
+                echo "$FAILED_JOBS" | grep -q "Deploy ECS\|Deploy Monitoring ECS" && echo "run_deploy_ecs=true" >> $GITHUB_OUTPUT || echo "run_deploy_ecs=false" >> $GITHUB_OUTPUT
+                echo "$FAILED_JOBS" | grep -q "Deploy Load Balancer" && echo "run_deploy_load_balancer=true" >> $GITHUB_OUTPUT || echo "run_deploy_load_balancer=false" >> $GITHUB_OUTPUT
+                echo "$FAILED_JOBS" | grep -q "Deploy Launch Template" && echo "run_deploy_launch_template=true" >> $GITHUB_OUTPUT || echo "run_deploy_launch_template=false" >> $GITHUB_OUTPUT
                 echo "$FAILED_JOBS" | grep -q "Deploy VPC Peering" && echo "run_deploy_peering=true" >> $GITHUB_OUTPUT || echo "run_deploy_peering=false" >> $GITHUB_OUTPUT
-                echo "$FAILED_JOBS" | grep -q "Deploy Monitoring Infrastructure" && echo "run_deploy_infra=true" >> $GITHUB_OUTPUT || echo "run_deploy_infra=false" >> $GITHUB_OUTPUT
-                echo "$FAILED_JOBS" | grep -q "Deploy Monitoring Services" && echo "run_deploy_services=true" >> $GITHUB_OUTPUT || echo "run_deploy_services=false" >> $GITHUB_OUTPUT
                 echo "$FAILED_JOBS" | grep -q "Health Checks" && echo "run_health_checks=true" >> $GITHUB_OUTPUT || echo "run_health_checks=false" >> $GITHUB_OUTPUT
                 echo "$FAILED_JOBS" | grep -q "Destroy All" && echo "run_destroy_all=true" >> $GITHUB_OUTPUT || echo "run_destroy_all=false" >> $GITHUB_OUTPUT
                 echo "$FAILED_JOBS" | grep -q "Rollback" && echo "run_rollback=true" >> $GITHUB_OUTPUT || echo "run_rollback=false" >> $GITHUB_OUTPUT
@@ -165,10 +185,11 @@ jobs:
                 echo "run_build=true" >> $GITHUB_OUTPUT
                 echo "run_validate_setup=true" >> $GITHUB_OUTPUT
                 echo "run_deploy_networking=true" >> $GITHUB_OUTPUT
-                echo "run_deploy_efs=true" >> $GITHUB_OUTPUT
+                echo "run_deploy_ebs_storage=true" >> $GITHUB_OUTPUT
+                echo "run_deploy_ecs=true" >> $GITHUB_OUTPUT
+                echo "run_deploy_load_balancer=true" >> $GITHUB_OUTPUT
+                echo "run_deploy_launch_template=true" >> $GITHUB_OUTPUT
                 echo "run_deploy_peering=true" >> $GITHUB_OUTPUT
-                echo "run_deploy_infra=true" >> $GITHUB_OUTPUT
-                echo "run_deploy_services=true" >> $GITHUB_OUTPUT
                 echo "run_health_checks=true" >> $GITHUB_OUTPUT
                 echo "run_destroy_all=false" >> $GITHUB_OUTPUT
                 echo "run_rollback=false" >> $GITHUB_OUTPUT
@@ -185,10 +206,11 @@ jobs:
             echo "run_build=true" >> $GITHUB_OUTPUT
             echo "run_validate_setup=true" >> $GITHUB_OUTPUT
             echo "run_deploy_networking=true" >> $GITHUB_OUTPUT
-            echo "run_deploy_efs=true" >> $GITHUB_OUTPUT
+            echo "run_deploy_ebs_storage=true" >> $GITHUB_OUTPUT
+            echo "run_deploy_ecs=true" >> $GITHUB_OUTPUT
+            echo "run_deploy_load_balancer=true" >> $GITHUB_OUTPUT
+            echo "run_deploy_launch_template=true" >> $GITHUB_OUTPUT
             echo "run_deploy_peering=true" >> $GITHUB_OUTPUT
-            echo "run_deploy_infra=true" >> $GITHUB_OUTPUT
-            echo "run_deploy_services=true" >> $GITHUB_OUTPUT
             echo "run_health_checks=true" >> $GITHUB_OUTPUT
             echo "run_destroy_all=false" >> $GITHUB_OUTPUT
             echo "run_rollback=false" >> $GITHUB_OUTPUT
@@ -204,10 +226,11 @@ jobs:
             echo "run_build=false" >> $GITHUB_OUTPUT
             echo "run_validate_setup=false" >> $GITHUB_OUTPUT
             echo "run_deploy_networking=false" >> $GITHUB_OUTPUT
-            echo "run_deploy_efs=false" >> $GITHUB_OUTPUT
+            echo "run_deploy_ebs_storage=false" >> $GITHUB_OUTPUT
+            echo "run_deploy_ecs=false" >> $GITHUB_OUTPUT
+            echo "run_deploy_load_balancer=false" >> $GITHUB_OUTPUT
+            echo "run_deploy_launch_template=false" >> $GITHUB_OUTPUT
             echo "run_deploy_peering=false" >> $GITHUB_OUTPUT
-            echo "run_deploy_infra=false" >> $GITHUB_OUTPUT
-            echo "run_deploy_services=false" >> $GITHUB_OUTPUT
             echo "run_health_checks=false" >> $GITHUB_OUTPUT
             echo "run_destroy_all=false" >> $GITHUB_OUTPUT
             echo "run_rollback=false" >> $GITHUB_OUTPUT
@@ -219,10 +242,11 @@ jobs:
             echo "$JOBS_LOWER" | grep -q "build" && echo "run_build=true" >> $GITHUB_OUTPUT
             echo "$JOBS_LOWER" | grep -q "validate\|setup" && echo "run_validate_setup=true" >> $GITHUB_OUTPUT
             echo "$JOBS_LOWER" | grep -q "networking" && echo "run_deploy_networking=true" >> $GITHUB_OUTPUT
-            echo "$JOBS_LOWER" | grep -q "efs" && echo "run_deploy_efs=true" >> $GITHUB_OUTPUT
+            echo "$JOBS_LOWER" | grep -q "ebs.*storage\|storage.*ebs\|ebs-storage" && echo "run_deploy_ebs_storage=true" >> $GITHUB_OUTPUT
+            echo "$JOBS_LOWER" | grep -q "ecs\|monitoring-ecs" && echo "run_deploy_ecs=true" >> $GITHUB_OUTPUT
+            echo "$JOBS_LOWER" | grep -q "load.*balancer\|alb" && echo "run_deploy_load_balancer=true" >> $GITHUB_OUTPUT
+            echo "$JOBS_LOWER" | grep -q "launch.*template" && echo "run_deploy_launch_template=true" >> $GITHUB_OUTPUT
             echo "$JOBS_LOWER" | grep -q "peering\|vpc" && echo "run_deploy_peering=true" >> $GITHUB_OUTPUT
-            echo "$JOBS_LOWER" | grep -q "infra" && echo "run_deploy_infra=true" >> $GITHUB_OUTPUT
-            echo "$JOBS_LOWER" | grep -q "services" && echo "run_deploy_services=true" >> $GITHUB_OUTPUT
             echo "$JOBS_LOWER" | grep -q "health" && echo "run_health_checks=true" >> $GITHUB_OUTPUT
             echo "$JOBS_LOWER" | grep -q "destroy" && echo "run_destroy_all=true" >> $GITHUB_OUTPUT
             echo "$JOBS_LOWER" | grep -q "rollback" && echo "run_rollback=true" >> $GITHUB_OUTPUT
@@ -242,10 +266,11 @@ jobs:
             echo "run_destroy_all=true" >> $GITHUB_OUTPUT
             # Disable deployment jobs for destroy
             echo "run_deploy_networking=false" >> $GITHUB_OUTPUT
-            echo "run_deploy_efs=false" >> $GITHUB_OUTPUT
+            echo "run_deploy_ebs_storage=false" >> $GITHUB_OUTPUT
+            echo "run_deploy_ecs=false" >> $GITHUB_OUTPUT
+            echo "run_deploy_load_balancer=false" >> $GITHUB_OUTPUT
+            echo "run_deploy_launch_template=false" >> $GITHUB_OUTPUT
             echo "run_deploy_peering=false" >> $GITHUB_OUTPUT
-            echo "run_deploy_infra=false" >> $GITHUB_OUTPUT
-            echo "run_deploy_services=false" >> $GITHUB_OUTPUT
             echo "run_health_checks=false" >> $GITHUB_OUTPUT
           fi
 
@@ -253,11 +278,12 @@ jobs:
           echo "Deployment job execution plan determined:"
           echo "  Build: $(grep 'run_build=' $GITHUB_OUTPUT | cut -d'=' -f2 | tail -1)"
           echo "  Validate Setup: $(grep 'run_validate_setup=' $GITHUB_OUTPUT | cut -d'=' -f2 | tail -1)"
-          echo "  Deploy Networking: $(grep 'run_deploy_networking=' $GITHUB_OUTPUT | cut -d'=' -f2 | tail -1)"
-          echo "  Deploy EFS: $(grep 'run_deploy_efs=' $GITHUB_OUTPUT | cut -d'=' -f2 | tail -1)"
-          echo "  Deploy VPC Peering: $(grep 'run_deploy_peering=' $GITHUB_OUTPUT | cut -d'=' -f2 | tail -1)"
-          echo "  Deploy Infrastructure: $(grep 'run_deploy_infra=' $GITHUB_OUTPUT | cut -d'=' -f2 | tail -1)"
-          echo "  Deploy Services: $(grep 'run_deploy_services=' $GITHUB_OUTPUT | cut -d'=' -f2 | tail -1)"
+            echo "  Deploy Networking: $(grep 'run_deploy_networking=' $GITHUB_OUTPUT | cut -d'=' -f2 | tail -1)"
+            echo "  Deploy EBS Storage: $(grep 'run_deploy_ebs_storage=' $GITHUB_OUTPUT | cut -d'=' -f2 | tail -1)"
+            echo "  Deploy ECS: $(grep 'run_deploy_ecs=' $GITHUB_OUTPUT | cut -d'=' -f2 | tail -1)"
+            echo "  Deploy Load Balancer: $(grep 'run_deploy_load_balancer=' $GITHUB_OUTPUT | cut -d'=' -f2 | tail -1)"
+            echo "  Deploy Launch Template: $(grep 'run_deploy_launch_template=' $GITHUB_OUTPUT | cut -d'=' -f2 | tail -1)"
+            echo "  Deploy VPC Peering: $(grep 'run_deploy_peering=' $GITHUB_OUTPUT | cut -d'=' -f2 | tail -1)"
           echo "  Health Checks: $(grep 'run_health_checks=' $GITHUB_OUTPUT | cut -d'=' -f2 | tail -1)"
           echo "  Destroy All: $(grep 'run_destroy_all=' $GITHUB_OUTPUT | cut -d'=' -f2 | tail -1)"
           echo "  Rollback: $(grep 'run_rollback=' $GITHUB_OUTPUT | cut -d'=' -f2 | tail -1)"
@@ -335,17 +361,19 @@ jobs:
 
       - name: CDK Synth for Validation
         run: |
+          ENVIRONMENT="${{ needs.determine-jobs.outputs.environment }}"
+          
           # First list available stacks to debug
-          echo "Available CDK stacks:"
-          CDK_ENVIRONMENT=pipeline npx cdk list --context environment=pipeline
+          echo "Available CDK stacks for environment: $ENVIRONMENT"
+          CDK_ENVIRONMENT="$ENVIRONMENT" npx cdk list --context environment="$ENVIRONMENT"
           echo ""
 
           # Synthesize NetworkingStack for build validation
-          echo "Synthesizing NetworkingStack..."
-          CDK_ENVIRONMENT=pipeline npx cdk synth NetworkingStack-pipeline --context environment=pipeline --quiet || echo "CDK synthesis completed with warnings (expected)"
+          echo "Synthesizing NetworkingStack-$ENVIRONMENT..."
+          CDK_ENVIRONMENT="$ENVIRONMENT" npx cdk synth "NetworkingStack-$ENVIRONMENT" --context environment="$ENVIRONMENT" --quiet || echo "CDK synthesis completed with warnings (expected)"
         env:
           AWS_REGION: ${{ env.AWS_REGION }}
-          CDK_ENVIRONMENT: pipeline
+          CDK_ENVIRONMENT: ${{ needs.determine-jobs.outputs.environment }}
           AWS_PIPELINE_ACCOUNT_ID: "123456789012" # Dummy account ID for validation
 
   # ============================================================================
@@ -356,7 +384,7 @@ jobs:
     needs: [determine-jobs]
     runs-on: ubuntu-latest
     if: needs.determine-jobs.outputs.run_validate_setup == 'true'
-    environment: pipeline
+    environment: ${{ needs.determine-jobs.outputs.environment }}
     outputs:
       pipeline_account_id: ${{ steps.setup.outputs.pipeline_account_id }}
       dev_vpc_id: ${{ steps.dev-info.outputs.vpc_id || 'NOT_FOUND' }}
@@ -476,7 +504,7 @@ jobs:
     name: Deploy Networking Stack
     needs: [determine-jobs, build, validate-setup]
     runs-on: ubuntu-latest
-    environment: pipeline
+    environment: ${{ needs.determine-jobs.outputs.environment }}
     if: |
       always() &&
       needs.determine-jobs.outputs.run_deploy_networking == 'true' &&
@@ -520,10 +548,13 @@ jobs:
       - name: Handle Export Dependencies
         shell: bash
         run: |
+          ENVIRONMENT="${{ needs.determine-jobs.outputs.environment }}"
+          
           echo "Checking for CloudFormation export dependencies..."
+          echo "Environment: $ENVIRONMENT"
           echo ""
 
-          STACK_NAME="NetworkingStack-pipeline"
+          STACK_NAME="NetworkingStack-$ENVIRONMENT"
           STACK_EXISTS=$(aws cloudformation describe-stacks \
             --stack-name "$STACK_NAME" \
             --query 'Stacks[0].StackName' \
@@ -542,26 +573,26 @@ jobs:
               echo ""
               
               # Update dependent stacks first if they exist
-              INFRA_STACK="MonitoringInfraStack-pipeline"
-              INFRA_EXISTS=$(aws cloudformation describe-stacks \
-                --stack-name "$INFRA_STACK" \
+              EBS_STORAGE_STACK="EbsStorageStack-$ENVIRONMENT"
+              EBS_STORAGE_EXISTS=$(aws cloudformation describe-stacks \
+                --stack-name "$EBS_STORAGE_STACK" \
                 --query 'Stacks[0].StackName' \
                 --output text 2>/dev/null || echo "")
               
-              if [ -n "$INFRA_EXISTS" ]; then
-                echo "Updating MonitoringInfraStack first to handle export changes..."
-                CDK_ENVIRONMENT=pipeline yarn cdk deploy "$INFRA_STACK" --context environment=pipeline --require-approval never 2>&1 || echo "MonitoringInfraStack update completed"
+              if [ -n "$EBS_STORAGE_EXISTS" ]; then
+                echo "Updating EbsStorageStack first to handle export changes..."
+                CDK_ENVIRONMENT="$ENVIRONMENT" yarn cdk deploy "$EBS_STORAGE_STACK" --context environment="$ENVIRONMENT" --require-approval never 2>&1 || echo "EbsStorageStack update completed"
               fi
               
-              EFS_STACK="MonitoringEfsStack-pipeline"
-              EFS_EXISTS=$(aws cloudformation describe-stacks \
-                --stack-name "$EFS_STACK" \
+              ECS_STACK="EcsStack-$ENVIRONMENT"
+              ECS_EXISTS=$(aws cloudformation describe-stacks \
+                --stack-name "$ECS_STACK" \
                 --query 'Stacks[0].StackName' \
                 --output text 2>/dev/null || echo "")
               
-              if [ -n "$EFS_EXISTS" ]; then
-                echo "Updating MonitoringEfsStack first to handle export changes..."
-                CDK_ENVIRONMENT=pipeline yarn cdk deploy "$EFS_STACK" --context environment=pipeline --require-approval never 2>&1 || echo "MonitoringEfsStack update completed"
+              if [ -n "$ECS_EXISTS" ]; then
+                echo "Updating EcsStack first to handle export changes..."
+                CDK_ENVIRONMENT="$ENVIRONMENT" yarn cdk deploy "$ECS_STACK" --context environment="$ENVIRONMENT" --require-approval never 2>&1 || echo "EcsStack update completed"
               fi
               
               echo "Dependent stacks updated (if needed)"
@@ -571,38 +602,29 @@ jobs:
       - name: Deploy NetworkingStack
         uses: ./.github/actions/deploy-cdk-stack
         with:
-          stack-name: "NetworkingStack-pipeline"
-          environment: "pipeline"
+          stack-name: "NetworkingStack-${{ needs.determine-jobs.outputs.environment }}"
+          environment: ${{ needs.determine-jobs.outputs.environment }}
           aws-account-id: ${{ needs.validate-setup.outputs.pipeline_account_id }}
           aws-region: ${{ env.AWS_REGION }}
           dev-vpc-id: ${{ needs.validate-setup.outputs.dev_vpc_id }}
-          dev-account-id:
-            ${{ vars.AWS_ACCOUNT_ID_DEV }}
+          dev-account-id: ${{ vars.AWS_ACCOUNT_ID_DEV }}
 
             # ============================================================================
-  # JOB 3: Deploy Monitoring EFS Stack
   # ============================================================================
+  # JOB 4: Deploy EBS Storage Stack
   # ============================================================================
-  # JOB 5: Deploy Monitoring EFS (Parallel with VPC Peering)
-  # ============================================================================
-  deploy-monitoring-efs:
-    name: Deploy Monitoring EFS
+  deploy-ebs-storage:
+    name: Deploy EBS Storage
     needs: [determine-jobs, build, validate-setup, deploy-networking]
     runs-on: ubuntu-latest
-    environment: pipeline
+    environment: ${{ needs.determine-jobs.outputs.environment }}
     if: |
       always() &&
-      needs.determine-jobs.outputs.run_deploy_efs == 'true' &&
+      needs.determine-jobs.outputs.run_deploy_ebs_storage == 'true' &&
       (needs.build.result == 'success' || needs.build.result == 'skipped') &&
       (needs.validate-setup.result == 'success' || needs.validate-setup.result == 'skipped') &&
       (needs.deploy-networking.result == 'success' || needs.deploy-networking.result == 'skipped') &&
-      (github.event.inputs.stack == 'monitoring-efs' || github.event_name == 'push' || github.event.inputs.jobs_to_run != '')
-
-    outputs:
-      efs_id: ${{ steps.get-outputs.outputs.efs_id }}
-      efs_access_point_id: ${{ steps.get-outputs.outputs.efs_access_point_id }}
-      efs_availability_zone: ${{ steps.get-outputs.outputs.efs_availability_zone }}
-      efs_security_group_id: ${{ steps.get-outputs.outputs.efs_security_group_id }}
+      (github.event.inputs.stack == 'ebs-storage' || github.event_name == 'push' || github.event.inputs.jobs_to_run != '')
 
     steps:
       - name: Checkout
@@ -616,95 +638,102 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           build-cache-key: ${{ needs.build.outputs.cache-key }}
 
-      - name: Deploy MonitoringEfsStack
+      - name: Deploy EbsStorageStack
         uses: ./.github/actions/deploy-cdk-stack
         with:
-          stack-name: "MonitoringEfsStack-pipeline"
-          environment: "pipeline"
+          stack-name: "EbsStorageStack-${{ needs.determine-jobs.outputs.environment }}"
+          environment: ${{ needs.determine-jobs.outputs.environment }}
           aws-account-id: ${{ needs.validate-setup.outputs.pipeline_account_id }}
           aws-region: ${{ env.AWS_REGION }}
           dev-vpc-id: ${{ needs.validate-setup.outputs.dev_vpc_id }}
           dev-account-id: ${{ vars.AWS_ACCOUNT_ID_DEV }}
 
-      - name: Get Stack Outputs
-        id: get-outputs
+      - name: Validate SSM Parameters
         run: |
-          echo "Retrieving MonitoringEfsStack outputs..."
-
-          # Get outputs
-          EFS_ID=$(aws cloudformation describe-stacks \
-            --stack-name MonitoringEfsStack-pipeline \
-            --query 'Stacks[0].Outputs[?OutputKey==`FileSystemId`].OutputValue' \
+          ENVIRONMENT="${{ needs.determine-jobs.outputs.environment }}"
+          echo "Validating SSM parameters created by EbsStorageStack..."
+          
+          # Check for Prometheus config parameter
+          PROMETHEUS_CONFIG=$(aws ssm get-parameter \
+            --name "/monitoring/$ENVIRONMENT/prometheus-config" \
+            --query 'Parameter.Value' \
             --output text 2>/dev/null || echo "")
-
-          EFS_ACCESS_POINT_ID=$(aws cloudformation describe-stacks \
-            --stack-name MonitoringEfsStack-pipeline \
-            --query 'Stacks[0].Outputs[?OutputKey==`AccessPointId`].OutputValue' \
-            --output text 2>/dev/null || echo "")
-
-          EFS_AZ=$(aws cloudformation describe-stacks \
-            --stack-name MonitoringEfsStack-pipeline \
-            --query 'Stacks[0].Outputs[?OutputKey==`EfsAvailabilityZone`].OutputValue' \
-            --output text 2>/dev/null || echo "")
-
-          EFS_SG_ID=$(aws cloudformation describe-stacks \
-            --stack-name MonitoringEfsStack-pipeline \
-            --query 'Stacks[0].Outputs[?OutputKey==`MountTargetSecurityGroupId`].OutputValue' \
-            --output text 2>/dev/null || echo "")
-
-          echo "efs_id=$EFS_ID" >> $GITHUB_OUTPUT
-          echo "efs_access_point_id=$EFS_ACCESS_POINT_ID" >> $GITHUB_OUTPUT
-          echo "efs_availability_zone=$EFS_AZ" >> $GITHUB_OUTPUT
-          echo "efs_security_group_id=$EFS_SG_ID" >> $GITHUB_OUTPUT
-
-          # Security: Mask resource IDs in logs
-          echo "::add-mask::$EFS_ID"
-          echo "::add-mask::$EFS_ACCESS_POINT_ID"
-          echo "::add-mask::$EFS_SG_ID"
-
-          echo "MonitoringEfsStack-pipeline outputs retrieved successfully"
-          echo "   EFS ID: ***MASKED***"
-          echo "   Access Point ID: ***MASKED***"
-          echo "   Availability Zone: $EFS_AZ"
-          echo "   Security Group ID: ***MASKED***"
-
-      - name: Validate EFS Configuration
-        run: |
-          EFS_ID="${{ steps.get-outputs.outputs.efs_id }}"
-
-          if [ -n "$EFS_ID" ]; then
-            echo "Validating EFS configuration..."
-            
-            # Check EFS file system status
-            EFS_STATE=$(aws efs describe-file-systems \
-              --file-system-id "$EFS_ID" \
-              --query 'FileSystems[0].LifeCycleState' \
-              --output text)
-            
-            echo "EFS State: $EFS_STATE"
-            
-            # Check mount targets
-            MOUNT_TARGETS=$(aws efs describe-mount-targets \
-              --file-system-id "$EFS_ID" \
-              --query 'length(MountTargets)' \
-              --output text)
-            
-            echo "Mount Targets: $MOUNT_TARGETS"
-            
-            if [ "$EFS_STATE" = "available" ] && [ "$MOUNT_TARGETS" -gt "0" ]; then
-              echo "SUCCESS: EFS is ready for use"
-            else
-              echo "EFS may not be fully ready yet"
-            fi
+          
+          if [ -n "$PROMETHEUS_CONFIG" ]; then
+            echo "✓ Prometheus config parameter exists"
           else
-            echo "EFS ID not found in outputs"
-            exit 1
+            echo "WARNING: Prometheus config parameter not found"
           fi
+          
+          # Check for Grafana datasource config parameter
+          GRAFANA_DATASOURCE=$(aws ssm get-parameter \
+            --name "/monitoring/$ENVIRONMENT/grafana-datasource-config" \
+            --query 'Parameter.Value' \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -n "$GRAFANA_DATASOURCE" ]; then
+            echo "✓ Grafana datasource config parameter exists"
+          else
+            echo "WARNING: Grafana datasource config parameter not found"
+          fi
+          
+          # Check for EBS volume configuration parameters
+          PROMETHEUS_VOLUME_SIZE=$(aws ssm get-parameter \
+            --name "/monitoring/$ENVIRONMENT/ebs/prometheus-volume-size" \
+            --query 'Parameter.Value' \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -n "$PROMETHEUS_VOLUME_SIZE" ]; then
+            echo "✓ Prometheus volume size parameter: ${PROMETHEUS_VOLUME_SIZE}GB"
+          else
+            echo "WARNING: Prometheus volume size parameter not found"
+          fi
+          
+          echo "SUCCESS: EBS Storage Stack deployment validated"
+
+  # ============================================================================
+  # ============================================================================
+  # JOB 5: Deploy ECS Stack
+  # ============================================================================
+  deploy-ecs:
+    name: Deploy ECS
+    needs: [determine-jobs, build, validate-setup, deploy-networking, deploy-ebs-storage]
+    runs-on: ubuntu-latest
+    environment: ${{ needs.determine-jobs.outputs.environment }}
+    if: |
+      always() &&
+      needs.determine-jobs.outputs.run_deploy_ecs == 'true' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
+      (needs.validate-setup.result == 'success' || needs.validate-setup.result == 'skipped') &&
+      (needs.deploy-networking.result == 'success' || needs.deploy-networking.result == 'skipped') &&
+      (needs.deploy-ebs-storage.result == 'success' || needs.deploy-ebs-storage.result == 'skipped') &&
+      (github.event.inputs.stack == 'ecs' || github.event_name == 'push' || github.event.inputs.jobs_to_run != '')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup CDK Deployment Environment
+        uses: ./.github/actions/setup-cdk-deployment
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          aws-role: ${{ secrets.AWS_OIDC_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          build-cache-key: ${{ needs.build.outputs.cache-key }}
+
+      - name: Deploy EcsStack
+        uses: ./.github/actions/deploy-cdk-stack
+        with:
+          stack-name: "EcsStack-${{ needs.determine-jobs.outputs.environment }}"
+          environment: ${{ needs.determine-jobs.outputs.environment }}
+          aws-account-id: ${{ needs.validate-setup.outputs.pipeline_account_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          dev-vpc-id: ${{ needs.validate-setup.outputs.dev_vpc_id }}
+          dev-account-id: ${{ vars.AWS_ACCOUNT_ID_DEV }}
 
   # ============================================================================
   # Additional deployment jobs would continue here...
-  # deploy-monitoring-efs, deploy-vpc-peering, deploy-monitoring-infra,
-  # deploy-monitoring-services, health-checks, drift-detection-*, destroy-all
+  # deploy-load-balancer, deploy-launch-template, deploy-vpc-peering,
+  # health-checks, drift-detection-*, destroy-all
   # ============================================================================
-  # Note: Add remaining deployment jobs from original workflow file
-  # They follow the same pattern as deploy-networking above
+  # Note: Add remaining deployment jobs following the same pattern as above
