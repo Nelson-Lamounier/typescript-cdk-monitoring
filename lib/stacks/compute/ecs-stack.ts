@@ -15,10 +15,7 @@ import { Construct } from "constructs";
 import { EcsTaskExecutionRole } from "../../iam/ecs-task-execution-role";
 import { SuppressionManager } from "../../cdk-nag/suppression-manager";
 import { CrossAccountTarget } from "../../types";
-import {
-  EcsApplicationConfig,
-  EcsServiceConfig,
-} from "../../types/ecs-service-config";
+import { EcsApplicationConfig } from "../../types/ecs-service-config";
 
 import { LaunchTemplateConstruct } from "./launch-template-stack";
 
@@ -1546,125 +1543,6 @@ export class EcsStack extends cdk.Stack {
     cdk.Tags.of(this).add("Application", applicationConfig.applicationName);
     cdk.Tags.of(this).add("Environment", envName);
     cdk.Tags.of(this).add("ManagedBy", "CDK");
-  }
-
-  /**
-   * Create a service from configuration
-   */
-  private createServiceFromConfig(
-    cluster: ecs.Cluster,
-    envName: string,
-    serviceConfig: EcsServiceConfig
-  ): ecs.Ec2Service {
-    // Create log group if not provided
-    let logGroup = serviceConfig.container.logGroup;
-    if (!logGroup) {
-      logGroup = new logs.LogGroup(this, `${serviceConfig.name}LogGroup`, {
-        logGroupName: `/ecs/${envName}/${serviceConfig.name}`,
-        retention: logs.RetentionDays.TWO_WEEKS,
-        removalPolicy: cdk.RemovalPolicy.DESTROY,
-      });
-    }
-
-    // Create task definition
-    const taskDef = new EcsTaskDefinitionConstruct(
-      this,
-      `${serviceConfig.name}TaskDef`,
-      {
-        envName,
-        networkMode: serviceConfig.networkMode || ecs.NetworkMode.BRIDGE,
-        containers: [
-          {
-            name: serviceConfig.container.name,
-            image: ecs.ContainerImage.fromRegistry(
-              serviceConfig.container.image
-            ),
-            containerPort: serviceConfig.container.containerPort,
-            hostPort: serviceConfig.container.hostPort,
-            memoryReservationMiB: serviceConfig.container.memoryReservationMiB,
-            memoryLimitMiB: serviceConfig.container.memoryLimitMiB,
-            cpu: serviceConfig.container.cpu,
-            user: serviceConfig.container.user,
-            command: serviceConfig.container.command,
-            environment: serviceConfig.container.environment,
-            logGroup: logGroup,
-            logStreamPrefix:
-              serviceConfig.container.logStreamPrefix || serviceConfig.name,
-          },
-        ],
-        volumes: serviceConfig.volumes?.map((vol) => ({
-          name: vol.name,
-          host: { sourcePath: vol.hostPath },
-        })),
-      }
-    );
-
-    // Add mount points
-    if (serviceConfig.volumes) {
-      for (const vol of serviceConfig.volumes) {
-        taskDef.addMountPoints(serviceConfig.container.name, {
-          sourceVolume: vol.name,
-          containerPath: vol.containerPath,
-          readOnly: vol.readOnly ?? false,
-        });
-      }
-    }
-
-    // Create service
-    const service = new EcsServiceConstruct(
-      this,
-      `${serviceConfig.name}Service`,
-      {
-        cluster,
-        taskDefinition: taskDef.taskDefinition,
-        envName,
-        serviceName: `${envName}-${serviceConfig.name}`,
-        desiredCount: serviceConfig.desiredCount ?? 1,
-        enableExecuteCommand: serviceConfig.enableExecuteCommand ?? false,
-      }
-    );
-
-    return service.service;
-  }
-
-  /**
-   * Create target group for a service
-   */
-  private createTargetGroup(
-    vpc: ec2.IVpc,
-    serviceConfig: EcsServiceConfig,
-    envName: string
-  ): elbv2.ApplicationTargetGroup {
-    if (!serviceConfig.loadBalancer) {
-      throw new Error(
-        "Service must have loadBalancer configuration to create target group"
-      );
-    }
-
-    const targetGroup = new elbv2.ApplicationTargetGroup(
-      this,
-      `${serviceConfig.name}TargetGroup`,
-      {
-        port:
-          serviceConfig.container.hostPort ||
-          serviceConfig.container.containerPort,
-        protocol: elbv2.ApplicationProtocol.HTTP,
-        vpc,
-        targetType: elbv2.TargetType.INSTANCE,
-        healthCheck: {
-          path: serviceConfig.loadBalancer.healthCheckPath || "/",
-          interval: cdk.Duration.seconds(30),
-          timeout: cdk.Duration.seconds(5),
-          healthyThresholdCount: 2,
-          unhealthyThresholdCount: 3,
-        },
-      }
-    );
-
-    cdk.Tags.of(targetGroup).add("Service", serviceConfig.name);
-    cdk.Tags.of(targetGroup).add("Environment", envName);
-
-    return targetGroup;
   }
 
   /**

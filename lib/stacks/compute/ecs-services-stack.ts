@@ -149,7 +149,8 @@ export class EcsServicesStack extends cdk.Stack {
         );
         service.attachToApplicationTargetGroup(targetGroup);
 
-        listener.addTargetGroups(`${serviceConfig.name}TargetGroup`, {
+        const targetGroupId = `${serviceConfig.name}TargetGroup`;
+        listener.addTargetGroups(targetGroupId, {
           targetGroups: [targetGroup],
           conditions: [
             elbv2.ListenerCondition.pathPatterns([
