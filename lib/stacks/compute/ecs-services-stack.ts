@@ -74,7 +74,11 @@ export interface EcsServicesStackProps extends cdk.StackProps {
  *   services: [
  *     {
  *       name: "prometheus",
- *       container: { /* ... */ },
+ *       container: {
+ *         name: "prometheus",
+ *         image: "prom/prometheus:latest",
+ *         containerPort: 9090,
+ *       },
  *       loadBalancer: { path: "/prometheus/*" },
  *     },
  *   ],
