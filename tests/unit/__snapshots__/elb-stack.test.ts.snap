@@ -1,0 +1,1096 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`LoadBalancerStack Test Suite Snapshots ALB resource matches snapshot 1`] = `
+{
+  "ALBCAA855EE": {
+    "DependsOn": [
+      "ALBAccessLogBucketPolicy9EFD8A3B",
+    ],
+    "Properties": {
+      "LoadBalancerAttributes": [
+        {
+          "Key": "deletion_protection.enabled",
+          "Value": "false",
+        },
+        {
+          "Key": "access_logs.s3.enabled",
+          "Value": "true",
+        },
+        {
+          "Key": "access_logs.s3.bucket",
+          "Value": {
+            "Ref": "ALBAccessLogBucket049F3881",
+          },
+        },
+        {
+          "Key": "access_logs.s3.prefix",
+          "Value": "test/alb",
+        },
+      ],
+      "Name": "test-alb",
+      "Scheme": "internet-facing",
+      "SecurityGroups": [
+        {
+          "Fn::GetAtt": [
+            "ALBSecurityGroup8B8624F8",
+            "GroupId",
+          ],
+        },
+      ],
+      "Subnets": [
+        {
+          "Fn::ImportValue": "TestVpcStack:ExportsOutputRefTestVpcPublicSubnet1SubnetA7DB1EDF095592DF",
+        },
+        {
+          "Fn::ImportValue": "TestVpcStack:ExportsOutputRefTestVpcPublicSubnet2Subnet80A14523FD2CDFFC",
+        },
+      ],
+      "Tags": [
+        {
+          "Key": "Environment",
+          "Value": "test",
+        },
+        {
+          "Key": "ManagedBy",
+          "Value": "CDK",
+        },
+        {
+          "Key": "Name",
+          "Value": "test-alb",
+        },
+        {
+          "Key": "Stack",
+          "Value": "LoadBalancer",
+        },
+      ],
+      "Type": "application",
+    },
+    "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+  },
+}
+`;
+
+exports[`LoadBalancerStack Test Suite Snapshots Listener matches snapshot 1`] = `
+{
+  "ALBHttpListener2FDE4CC9": {
+    "Properties": {
+      "DefaultActions": [
+        {
+          "FixedResponseConfig": {
+            "ContentType": "text/plain",
+            "MessageBody": "Not Found",
+            "StatusCode": "404",
+          },
+          "Type": "fixed-response",
+        },
+      ],
+      "LoadBalancerArn": {
+        "Ref": "ALBCAA855EE",
+      },
+      "Port": 80,
+      "Protocol": "HTTP",
+    },
+    "Type": "AWS::ElasticLoadBalancingV2::Listener",
+  },
+}
+`;
+
+exports[`LoadBalancerStack Test Suite Snapshots LoadBalancerStack matches snapshot 1`] = `
+{
+  "Metadata": {
+    "cdk_nag": {
+      "rules_to_suppress": [
+        {
+          "applies_to": [
+            "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+          ],
+          "id": "AwsSolutions-IAM4",
+          "reason": "AWS managed policies are used for Lambda functions created by CDK for custom resources (Auto Scaling lifecycle hooks, VPC default security group restriction, EventBridge targets). These are standard CloudFormation custom resource Lambda functions managed by CDK.",
+        },
+        {
+          "applies_to": [
+            "Resource::*",
+          ],
+          "id": "AwsSolutions-IAM5",
+          "reason": "Wildcard permissions are used by CDK-managed custom resource Lambdas for EventBridge to CloudWatch Logs integration and other CDK framework operations. This is required by the CDK framework to manage resource policies and cannot be scoped further. This is standard CDK behavior.",
+        },
+        {
+          "applies_to": [
+            "Action::ecs:Submit*",
+          ],
+          "id": "AwsSolutions-IAM5",
+          "reason": "ECS Container Instance IAM role requires wildcard action permissions (ecs:Submit*) to communicate with ECS control plane. This is a standard permission for ECS EC2 instances as documented in AWS ECS best practices and is created by CDK's Auto Scaling Group construct.",
+        },
+        {
+          "applies_to": [
+            {
+              "regex": "/^Resource::arn:(aws|<AWS::Partition>):autoscaling:.*:.*:autoScalingGroup:\\*:autoScalingGroupName\\/<.*>$/",
+            },
+          ],
+          "id": "AwsSolutions-IAM5",
+          "reason": "Auto Scaling Group lifecycle hook Lambda (DrainECSHook) requires permissions to manage Auto Scaling lifecycle actions. The wildcard is scoped to the specific Auto Scaling Group name pattern and is necessary for proper instance lifecycle management during ECS task draining. This is a CDK-managed resource.",
+        },
+        {
+          "id": "AwsSolutions-L1",
+          "reason": "Lambda runtime versions are managed by CDK for custom resources. CDK automatically updates these with new releases. Upgrading CDK version will update these runtimes.",
+        },
+        {
+          "id": "AwsSolutions-EC23",
+          "reason": "Application Load Balancer must accept traffic from the internet (0.0.0.0/0) to serve public-facing application. Security is enforced through: 1) ALB security group only allows HTTP/HTTPS, 2) Target security groups restrict access to ALB only, 3) WAF rules (if enabled), 4) Application-level authentication.",
+        },
+        {
+          "id": "AwsSolutions-ELB2",
+          "reason": "ALB access logging may be disabled in some environments to reduce costs. When enabled, access logging is configured to S3 bucket for audit and troubleshooting purposes. Logs are retained according to compliance requirements.",
+        },
+        {
+          "id": "AwsSolutions-S1",
+          "reason": "S3 access log bucket has server access logging enabled via serverAccessLogsPrefix property. This bucket stores ALB access logs and its own access logs are stored in a separate prefix within the same bucket.",
+        },
+      ],
+    },
+  },
+  "Outputs": {
+    "HttpListenerArn": {
+      "Description": "HTTP Listener ARN",
+      "Export": {
+        "Name": "test-http-listener-arn",
+      },
+      "Value": {
+        "Ref": "ALBHttpListener2FDE4CC9",
+      },
+    },
+    "LoadBalancerArn": {
+      "Description": "Application Load Balancer ARN",
+      "Export": {
+        "Name": "test-alb-arn",
+      },
+      "Value": {
+        "Ref": "ALBCAA855EE",
+      },
+    },
+    "LoadBalancerDnsName": {
+      "Description": "Application Load Balancer DNS Name",
+      "Export": {
+        "Name": "test-alb-dns",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "ALBCAA855EE",
+          "DNSName",
+        ],
+      },
+    },
+    "SecurityGroupId": {
+      "Description": "ALB Security Group ID",
+      "Export": {
+        "Name": "test-alb-sg-id",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "ALBSecurityGroup8B8624F8",
+          "GroupId",
+        ],
+      },
+    },
+  },
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+  },
+  "Resources": {
+    "ALBAccessLogBucket049F3881": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "AccessControl": "LogDeliveryWrite",
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256",
+              },
+            },
+          ],
+        },
+        "BucketName": "test-alb-access-logs-123456789012",
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "ExpirationInDays": 90,
+              "Id": "DeleteOldLogs",
+              "Status": "Enabled",
+              "Transitions": [
+                {
+                  "StorageClass": "STANDARD_IA",
+                  "TransitionInDays": 30,
+                },
+              ],
+            },
+          ],
+        },
+        "LoggingConfiguration": {
+          "LogFilePrefix": "bucket-access-logs/",
+        },
+        "OwnershipControls": {
+          "Rules": [
+            {
+              "ObjectOwnership": "ObjectWriter",
+            },
+          ],
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true,
+        },
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "test",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Stack",
+            "Value": "LoadBalancer",
+          },
+        ],
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "ALBAccessLogBucketPolicy9EFD8A3B": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "ALBAccessLogBucket049F3881",
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "ALBAccessLogBucket049F3881",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "ALBAccessLogBucket049F3881",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": "s3:PutObject",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":iam::156460612806:root",
+                    ],
+                  ],
+                },
+              },
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "ALBAccessLogBucket049F3881",
+                        "Arn",
+                      ],
+                    },
+                    "/test/alb/AWSLogs/123456789012/*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": "s3:PutObject",
+              "Condition": {
+                "StringEquals": {
+                  "s3:x-amz-acl": "bucket-owner-full-control",
+                },
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "delivery.logs.amazonaws.com",
+              },
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "ALBAccessLogBucket049F3881",
+                        "Arn",
+                      ],
+                    },
+                    "/test/alb/AWSLogs/123456789012/*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": "s3:GetBucketAcl",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "delivery.logs.amazonaws.com",
+              },
+              "Resource": {
+                "Fn::GetAtt": [
+                  "ALBAccessLogBucket049F3881",
+                  "Arn",
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::S3::BucketPolicy",
+    },
+    "ALBCAA855EE": {
+      "DependsOn": [
+        "ALBAccessLogBucketPolicy9EFD8A3B",
+      ],
+      "Properties": {
+        "LoadBalancerAttributes": [
+          {
+            "Key": "deletion_protection.enabled",
+            "Value": "false",
+          },
+          {
+            "Key": "access_logs.s3.enabled",
+            "Value": "true",
+          },
+          {
+            "Key": "access_logs.s3.bucket",
+            "Value": {
+              "Ref": "ALBAccessLogBucket049F3881",
+            },
+          },
+          {
+            "Key": "access_logs.s3.prefix",
+            "Value": "test/alb",
+          },
+        ],
+        "Name": "test-alb",
+        "Scheme": "internet-facing",
+        "SecurityGroups": [
+          {
+            "Fn::GetAtt": [
+              "ALBSecurityGroup8B8624F8",
+              "GroupId",
+            ],
+          },
+        ],
+        "Subnets": [
+          {
+            "Fn::ImportValue": "TestVpcStack:ExportsOutputRefTestVpcPublicSubnet1SubnetA7DB1EDF095592DF",
+          },
+          {
+            "Fn::ImportValue": "TestVpcStack:ExportsOutputRefTestVpcPublicSubnet2Subnet80A14523FD2CDFFC",
+          },
+        ],
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "test",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "test-alb",
+          },
+          {
+            "Key": "Stack",
+            "Value": "LoadBalancer",
+          },
+        ],
+        "Type": "application",
+      },
+      "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+    },
+    "ALBHttpListener2FDE4CC9": {
+      "Properties": {
+        "DefaultActions": [
+          {
+            "FixedResponseConfig": {
+              "ContentType": "text/plain",
+              "MessageBody": "Not Found",
+              "StatusCode": "404",
+            },
+            "Type": "fixed-response",
+          },
+        ],
+        "LoadBalancerArn": {
+          "Ref": "ALBCAA855EE",
+        },
+        "Port": 80,
+        "Protocol": "HTTP",
+      },
+      "Type": "AWS::ElasticLoadBalancingV2::Listener",
+    },
+    "ALBSecurityGroup8B8624F8": {
+      "Metadata": {
+        "cdk_nag": {
+          "rules_to_suppress": [
+            {
+              "id": "AwsSolutions-EC23",
+              "reason": "Application Load Balancer must accept traffic from the internet (0.0.0.0/0) to serve public-facing application. Security is enforced through: 1) ALB security group only allows HTTP/HTTPS, 2) Target security groups restrict access to ALB only, 3) WAF rules (if enabled), 4) Application-level authentication.",
+            },
+          ],
+        },
+      },
+      "Properties": {
+        "GroupDescription": "Security group for test-alb",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic by default",
+            "IpProtocol": "-1",
+          },
+        ],
+        "SecurityGroupIngress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow HTTP from 0.0.0.0/0",
+            "FromPort": 80,
+            "IpProtocol": "tcp",
+            "ToPort": 80,
+          },
+        ],
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "test",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Stack",
+            "Value": "LoadBalancer",
+          },
+        ],
+        "VpcId": {
+          "Fn::ImportValue": "TestVpcStack:ExportsOutputRefTestVpcE77CE67811D13B85",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                  ],
+                  {
+                    "Ref": "BootstrapVersion",
+                  },
+                ],
+              },
+            ],
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI.",
+        },
+      ],
+    },
+  },
+}
+`;
+
+exports[`LoadBalancerStack Test Suite Snapshots Security Group matches snapshot 1`] = `
+{
+  "ALBSecurityGroup8B8624F8": {
+    "Metadata": {
+      "cdk_nag": {
+        "rules_to_suppress": [
+          {
+            "id": "AwsSolutions-EC23",
+            "reason": "Application Load Balancer must accept traffic from the internet (0.0.0.0/0) to serve public-facing application. Security is enforced through: 1) ALB security group only allows HTTP/HTTPS, 2) Target security groups restrict access to ALB only, 3) WAF rules (if enabled), 4) Application-level authentication.",
+          },
+        ],
+      },
+    },
+    "Properties": {
+      "GroupDescription": "Security group for test-alb",
+      "SecurityGroupEgress": [
+        {
+          "CidrIp": "0.0.0.0/0",
+          "Description": "Allow all outbound traffic by default",
+          "IpProtocol": "-1",
+        },
+      ],
+      "SecurityGroupIngress": [
+        {
+          "CidrIp": "0.0.0.0/0",
+          "Description": "Allow HTTP from 0.0.0.0/0",
+          "FromPort": 80,
+          "IpProtocol": "tcp",
+          "ToPort": 80,
+        },
+      ],
+      "Tags": [
+        {
+          "Key": "Environment",
+          "Value": "test",
+        },
+        {
+          "Key": "ManagedBy",
+          "Value": "CDK",
+        },
+        {
+          "Key": "Stack",
+          "Value": "LoadBalancer",
+        },
+      ],
+      "VpcId": {
+        "Fn::ImportValue": "TestVpcStack:ExportsOutputRefTestVpcE77CE67811D13B85",
+      },
+    },
+    "Type": "AWS::EC2::SecurityGroup",
+  },
+}
+`;
+
+exports[`LoadBalancerStack with HTTPS Test Suite Snapshots LoadBalancerStack with HTTPS matches snapshot 1`] = `
+{
+  "Metadata": {
+    "cdk_nag": {
+      "rules_to_suppress": [
+        {
+          "applies_to": [
+            "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+          ],
+          "id": "AwsSolutions-IAM4",
+          "reason": "AWS managed policies are used for Lambda functions created by CDK for custom resources (Auto Scaling lifecycle hooks, VPC default security group restriction, EventBridge targets). These are standard CloudFormation custom resource Lambda functions managed by CDK.",
+        },
+        {
+          "applies_to": [
+            "Resource::*",
+          ],
+          "id": "AwsSolutions-IAM5",
+          "reason": "Wildcard permissions are used by CDK-managed custom resource Lambdas for EventBridge to CloudWatch Logs integration and other CDK framework operations. This is required by the CDK framework to manage resource policies and cannot be scoped further. This is standard CDK behavior.",
+        },
+        {
+          "applies_to": [
+            "Action::ecs:Submit*",
+          ],
+          "id": "AwsSolutions-IAM5",
+          "reason": "ECS Container Instance IAM role requires wildcard action permissions (ecs:Submit*) to communicate with ECS control plane. This is a standard permission for ECS EC2 instances as documented in AWS ECS best practices and is created by CDK's Auto Scaling Group construct.",
+        },
+        {
+          "applies_to": [
+            {
+              "regex": "/^Resource::arn:(aws|<AWS::Partition>):autoscaling:.*:.*:autoScalingGroup:\\*:autoScalingGroupName\\/<.*>$/",
+            },
+          ],
+          "id": "AwsSolutions-IAM5",
+          "reason": "Auto Scaling Group lifecycle hook Lambda (DrainECSHook) requires permissions to manage Auto Scaling lifecycle actions. The wildcard is scoped to the specific Auto Scaling Group name pattern and is necessary for proper instance lifecycle management during ECS task draining. This is a CDK-managed resource.",
+        },
+        {
+          "id": "AwsSolutions-L1",
+          "reason": "Lambda runtime versions are managed by CDK for custom resources. CDK automatically updates these with new releases. Upgrading CDK version will update these runtimes.",
+        },
+        {
+          "id": "AwsSolutions-EC23",
+          "reason": "Application Load Balancer must accept traffic from the internet (0.0.0.0/0) to serve public-facing application. Security is enforced through: 1) ALB security group only allows HTTP/HTTPS, 2) Target security groups restrict access to ALB only, 3) WAF rules (if enabled), 4) Application-level authentication.",
+        },
+        {
+          "id": "AwsSolutions-ELB2",
+          "reason": "ALB access logging may be disabled in some environments to reduce costs. When enabled, access logging is configured to S3 bucket for audit and troubleshooting purposes. Logs are retained according to compliance requirements.",
+        },
+        {
+          "id": "AwsSolutions-S1",
+          "reason": "S3 access log bucket has server access logging enabled via serverAccessLogsPrefix property. This bucket stores ALB access logs and its own access logs are stored in a separate prefix within the same bucket.",
+        },
+      ],
+    },
+  },
+  "Outputs": {
+    "HttpListenerArn": {
+      "Description": "HTTP Listener ARN",
+      "Export": {
+        "Name": "production-http-listener-arn",
+      },
+      "Value": {
+        "Ref": "ALBHttpListener2FDE4CC9",
+      },
+    },
+    "HttpsListenerArn": {
+      "Description": "HTTPS Listener ARN",
+      "Export": {
+        "Name": "production-https-listener-arn",
+      },
+      "Value": {
+        "Ref": "ALBHttpsListener8A32E9A3",
+      },
+    },
+    "LoadBalancerArn": {
+      "Description": "Application Load Balancer ARN",
+      "Export": {
+        "Name": "production-alb-arn",
+      },
+      "Value": {
+        "Ref": "ALBCAA855EE",
+      },
+    },
+    "LoadBalancerDnsName": {
+      "Description": "Application Load Balancer DNS Name",
+      "Export": {
+        "Name": "production-alb-dns",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "ALBCAA855EE",
+          "DNSName",
+        ],
+      },
+    },
+    "SecurityGroupId": {
+      "Description": "ALB Security Group ID",
+      "Export": {
+        "Name": "production-alb-sg-id",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "ALBSecurityGroup8B8624F8",
+          "GroupId",
+        ],
+      },
+    },
+  },
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+  },
+  "Resources": {
+    "ALBAccessLogBucket049F3881": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "AccessControl": "LogDeliveryWrite",
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256",
+              },
+            },
+          ],
+        },
+        "BucketName": "prod-alb-access-logs-123456789012",
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "ExpirationInDays": 90,
+              "Id": "DeleteOldLogs",
+              "Status": "Enabled",
+              "Transitions": [
+                {
+                  "StorageClass": "STANDARD_IA",
+                  "TransitionInDays": 30,
+                },
+              ],
+            },
+          ],
+        },
+        "LoggingConfiguration": {
+          "LogFilePrefix": "bucket-access-logs/",
+        },
+        "OwnershipControls": {
+          "Rules": [
+            {
+              "ObjectOwnership": "ObjectWriter",
+            },
+          ],
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true,
+        },
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "production",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Stack",
+            "Value": "LoadBalancer",
+          },
+        ],
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "ALBAccessLogBucketPolicy9EFD8A3B": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "ALBAccessLogBucket049F3881",
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "ALBAccessLogBucket049F3881",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "ALBAccessLogBucket049F3881",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": "s3:PutObject",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":iam::156460612806:root",
+                    ],
+                  ],
+                },
+              },
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "ALBAccessLogBucket049F3881",
+                        "Arn",
+                      ],
+                    },
+                    "/production/alb/AWSLogs/123456789012/*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": "s3:PutObject",
+              "Condition": {
+                "StringEquals": {
+                  "s3:x-amz-acl": "bucket-owner-full-control",
+                },
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "delivery.logs.amazonaws.com",
+              },
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "ALBAccessLogBucket049F3881",
+                        "Arn",
+                      ],
+                    },
+                    "/production/alb/AWSLogs/123456789012/*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": "s3:GetBucketAcl",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "delivery.logs.amazonaws.com",
+              },
+              "Resource": {
+                "Fn::GetAtt": [
+                  "ALBAccessLogBucket049F3881",
+                  "Arn",
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::S3::BucketPolicy",
+    },
+    "ALBCAA855EE": {
+      "DependsOn": [
+        "ALBAccessLogBucketPolicy9EFD8A3B",
+      ],
+      "Properties": {
+        "LoadBalancerAttributes": [
+          {
+            "Key": "deletion_protection.enabled",
+            "Value": "true",
+          },
+          {
+            "Key": "access_logs.s3.enabled",
+            "Value": "true",
+          },
+          {
+            "Key": "access_logs.s3.bucket",
+            "Value": {
+              "Ref": "ALBAccessLogBucket049F3881",
+            },
+          },
+          {
+            "Key": "access_logs.s3.prefix",
+            "Value": "production/alb",
+          },
+        ],
+        "Name": "prod-alb",
+        "Scheme": "internet-facing",
+        "SecurityGroups": [
+          {
+            "Fn::GetAtt": [
+              "ALBSecurityGroup8B8624F8",
+              "GroupId",
+            ],
+          },
+        ],
+        "Subnets": [
+          {
+            "Fn::ImportValue": "TestVpcStackHttps:ExportsOutputRefTestVpcPublicSubnet1SubnetA7DB1EDF095592DF",
+          },
+          {
+            "Fn::ImportValue": "TestVpcStackHttps:ExportsOutputRefTestVpcPublicSubnet2Subnet80A14523FD2CDFFC",
+          },
+        ],
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "production",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "prod-alb",
+          },
+          {
+            "Key": "Stack",
+            "Value": "LoadBalancer",
+          },
+        ],
+        "Type": "application",
+      },
+      "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+    },
+    "ALBHttpListener2FDE4CC9": {
+      "Properties": {
+        "DefaultActions": [
+          {
+            "RedirectConfig": {
+              "Port": "443",
+              "Protocol": "HTTPS",
+              "StatusCode": "HTTP_301",
+            },
+            "Type": "redirect",
+          },
+        ],
+        "LoadBalancerArn": {
+          "Ref": "ALBCAA855EE",
+        },
+        "Port": 80,
+        "Protocol": "HTTP",
+      },
+      "Type": "AWS::ElasticLoadBalancingV2::Listener",
+    },
+    "ALBHttpsListener8A32E9A3": {
+      "Properties": {
+        "Certificates": [
+          {
+            "CertificateArn": "arn:aws:acm:eu-west-1:123456789012:certificate/test-cert-id",
+          },
+        ],
+        "DefaultActions": [
+          {
+            "FixedResponseConfig": {
+              "ContentType": "text/plain",
+              "MessageBody": "Not Found",
+              "StatusCode": "404",
+            },
+            "Type": "fixed-response",
+          },
+        ],
+        "LoadBalancerArn": {
+          "Ref": "ALBCAA855EE",
+        },
+        "Port": 443,
+        "Protocol": "HTTPS",
+        "SslPolicy": "ELBSecurityPolicy-TLS-1-2-2017-01",
+      },
+      "Type": "AWS::ElasticLoadBalancingV2::Listener",
+    },
+    "ALBSecurityGroup8B8624F8": {
+      "Metadata": {
+        "cdk_nag": {
+          "rules_to_suppress": [
+            {
+              "id": "AwsSolutions-EC23",
+              "reason": "Application Load Balancer must accept traffic from the internet (0.0.0.0/0) to serve public-facing application. Security is enforced through: 1) ALB security group only allows HTTP/HTTPS, 2) Target security groups restrict access to ALB only, 3) WAF rules (if enabled), 4) Application-level authentication.",
+            },
+          ],
+        },
+      },
+      "Properties": {
+        "GroupDescription": "Security group for prod-alb",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic by default",
+            "IpProtocol": "-1",
+          },
+        ],
+        "SecurityGroupIngress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow HTTP from 0.0.0.0/0",
+            "FromPort": 80,
+            "IpProtocol": "tcp",
+            "ToPort": 80,
+          },
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow HTTPS from 0.0.0.0/0",
+            "FromPort": 443,
+            "IpProtocol": "tcp",
+            "ToPort": 443,
+          },
+        ],
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "production",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Stack",
+            "Value": "LoadBalancer",
+          },
+        ],
+        "VpcId": {
+          "Fn::ImportValue": "TestVpcStackHttps:ExportsOutputRefTestVpcE77CE67811D13B85",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                  ],
+                  {
+                    "Ref": "BootstrapVersion",
+                  },
+                ],
+              },
+            ],
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI.",
+        },
+      ],
+    },
+  },
+}
+`;
