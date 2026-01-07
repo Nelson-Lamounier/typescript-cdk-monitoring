@@ -370,6 +370,41 @@ jobs:
             fi
           fi
 
+      - name: Setup Account IDs for CDK Synth
+        run: |
+          ENVIRONMENT="${{ needs.determine-jobs.outputs.environment }}"
+          echo "Setting up account IDs for CDK synthesis validation..."
+          echo "Environment: $ENVIRONMENT"
+          echo ""
+
+          # Set all account IDs from GitHub repository variables
+          # These are needed for CDK synth to validate stack configuration
+          # Set all environments to support cross-account references
+          if [ -n "${{ vars.AWS_ACCOUNT_ID_DEV }}" ]; then
+            echo "AWS_ACCOUNT_ID_DEV=${{ vars.AWS_ACCOUNT_ID_DEV }}" >> $GITHUB_ENV
+            echo "✓ Development account ID configured"
+          else
+            echo "WARNING: AWS_ACCOUNT_ID_DEV not configured in repository variables"
+          fi
+
+          if [ -n "${{ vars.AWS_ACCOUNT_ID_STAGING }}" ]; then
+            echo "AWS_ACCOUNT_ID_STAGING=${{ vars.AWS_ACCOUNT_ID_STAGING }}" >> $GITHUB_ENV
+            echo "✓ Staging account ID configured"
+          else
+            echo "WARNING: AWS_ACCOUNT_ID_STAGING not configured in repository variables"
+          fi
+
+          if [ -n "${{ vars.AWS_ACCOUNT_ID_PROD }}" ]; then
+            echo "AWS_ACCOUNT_ID_PROD=${{ vars.AWS_ACCOUNT_ID_PROD }}" >> $GITHUB_ENV
+            echo "✓ Production account ID configured"
+          else
+            echo "WARNING: AWS_ACCOUNT_ID_PROD not configured in repository variables"
+          fi
+
+          echo ""
+          echo "Account IDs configured for CDK synthesis"
+          echo "Note: CDK synth may fail if required account IDs are missing"
+
       - name: CDK Synth for Validation
         run: |
           ENVIRONMENT="${{ needs.determine-jobs.outputs.environment }}"
@@ -388,7 +423,7 @@ jobs:
           AWS_REGION: ${{ env.AWS_REGION }}
           CDK_ENVIRONMENT: ${{ needs.determine-jobs.outputs.environment }}
           PROJECT_NAME: ${{ needs.determine-jobs.outputs.project_name }}
-          # Environment-specific account IDs will be set by validate-setup job
+          # Account IDs are set from GitHub repository variables in previous step
 
   # ============================================================================
   # JOB 2: Validation & Setup (With Deployment Permissions)
