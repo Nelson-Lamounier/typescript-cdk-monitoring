@@ -1464,12 +1464,22 @@ export class EcsStack extends cdk.Stack {
     this.serviceUrls = new Map();
 
     // Create services dynamically from configuration
-    const listener = this.loadBalancer
-      ? this.loadBalancer.addListener("ApplicationListener", {
-          port: 80,
-          protocol: elbv2.ApplicationProtocol.HTTP,
-        })
-      : undefined;
+    let listener: elbv2.ApplicationListener | undefined;
+    if (this.loadBalancer) {
+      listener = this.loadBalancer.addListener("ApplicationListener", {
+        port: 80,
+        protocol: elbv2.ApplicationProtocol.HTTP,
+      });
+
+      // Add default action (fixed response) to satisfy CDK validation
+      // This handles requests that don't match any path-based rules
+      listener.addAction("DefaultAction", {
+        action: elbv2.ListenerAction.fixedResponse(404, {
+          contentType: "text/plain",
+          messageBody: "Not Found - No matching service route",
+        }),
+      });
+    }
 
     let rulePriority = 100;
     for (const serviceConfig of applicationConfig.services) {
