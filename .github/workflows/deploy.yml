@@ -576,7 +576,130 @@ jobs:
           aws-account-id: ${{ needs.validate-setup.outputs.pipeline_account_id }}
           aws-region: ${{ env.AWS_REGION }}
           dev-vpc-id: ${{ needs.validate-setup.outputs.dev_vpc_id }}
+          dev-account-id:
+            ${{ vars.AWS_ACCOUNT_ID_DEV }}
+
+            # ============================================================================
+  # JOB 3: Deploy Monitoring EFS Stack
+  # ============================================================================
+  # ============================================================================
+  # JOB 5: Deploy Monitoring EFS (Parallel with VPC Peering)
+  # ============================================================================
+  deploy-monitoring-efs:
+    name: Deploy Monitoring EFS
+    needs: [determine-jobs, build, validate-setup, deploy-networking]
+    runs-on: ubuntu-latest
+    environment: pipeline
+    if: |
+      always() &&
+      needs.determine-jobs.outputs.run_deploy_efs == 'true' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
+      (needs.validate-setup.result == 'success' || needs.validate-setup.result == 'skipped') &&
+      (needs.deploy-networking.result == 'success' || needs.deploy-networking.result == 'skipped') &&
+      (github.event.inputs.stack == 'monitoring-efs' || github.event_name == 'push' || github.event.inputs.jobs_to_run != '')
+
+    outputs:
+      efs_id: ${{ steps.get-outputs.outputs.efs_id }}
+      efs_access_point_id: ${{ steps.get-outputs.outputs.efs_access_point_id }}
+      efs_availability_zone: ${{ steps.get-outputs.outputs.efs_availability_zone }}
+      efs_security_group_id: ${{ steps.get-outputs.outputs.efs_security_group_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup CDK Deployment Environment
+        uses: ./.github/actions/setup-cdk-deployment
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          aws-role: ${{ secrets.AWS_OIDC_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          build-cache-key: ${{ needs.build.outputs.cache-key }}
+
+      - name: Deploy MonitoringEfsStack
+        uses: ./.github/actions/deploy-cdk-stack
+        with:
+          stack-name: "MonitoringEfsStack-pipeline"
+          environment: "pipeline"
+          aws-account-id: ${{ needs.validate-setup.outputs.pipeline_account_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          dev-vpc-id: ${{ needs.validate-setup.outputs.dev_vpc_id }}
           dev-account-id: ${{ vars.AWS_ACCOUNT_ID_DEV }}
+
+      - name: Get Stack Outputs
+        id: get-outputs
+        run: |
+          echo "Retrieving MonitoringEfsStack outputs..."
+
+          # Get outputs
+          EFS_ID=$(aws cloudformation describe-stacks \
+            --stack-name MonitoringEfsStack-pipeline \
+            --query 'Stacks[0].Outputs[?OutputKey==`FileSystemId`].OutputValue' \
+            --output text 2>/dev/null || echo "")
+
+          EFS_ACCESS_POINT_ID=$(aws cloudformation describe-stacks \
+            --stack-name MonitoringEfsStack-pipeline \
+            --query 'Stacks[0].Outputs[?OutputKey==`AccessPointId`].OutputValue' \
+            --output text 2>/dev/null || echo "")
+
+          EFS_AZ=$(aws cloudformation describe-stacks \
+            --stack-name MonitoringEfsStack-pipeline \
+            --query 'Stacks[0].Outputs[?OutputKey==`EfsAvailabilityZone`].OutputValue' \
+            --output text 2>/dev/null || echo "")
+
+          EFS_SG_ID=$(aws cloudformation describe-stacks \
+            --stack-name MonitoringEfsStack-pipeline \
+            --query 'Stacks[0].Outputs[?OutputKey==`MountTargetSecurityGroupId`].OutputValue' \
+            --output text 2>/dev/null || echo "")
+
+          echo "efs_id=$EFS_ID" >> $GITHUB_OUTPUT
+          echo "efs_access_point_id=$EFS_ACCESS_POINT_ID" >> $GITHUB_OUTPUT
+          echo "efs_availability_zone=$EFS_AZ" >> $GITHUB_OUTPUT
+          echo "efs_security_group_id=$EFS_SG_ID" >> $GITHUB_OUTPUT
+
+          # Security: Mask resource IDs in logs
+          echo "::add-mask::$EFS_ID"
+          echo "::add-mask::$EFS_ACCESS_POINT_ID"
+          echo "::add-mask::$EFS_SG_ID"
+
+          echo "MonitoringEfsStack-pipeline outputs retrieved successfully"
+          echo "   EFS ID: ***MASKED***"
+          echo "   Access Point ID: ***MASKED***"
+          echo "   Availability Zone: $EFS_AZ"
+          echo "   Security Group ID: ***MASKED***"
+
+      - name: Validate EFS Configuration
+        run: |
+          EFS_ID="${{ steps.get-outputs.outputs.efs_id }}"
+
+          if [ -n "$EFS_ID" ]; then
+            echo "Validating EFS configuration..."
+            
+            # Check EFS file system status
+            EFS_STATE=$(aws efs describe-file-systems \
+              --file-system-id "$EFS_ID" \
+              --query 'FileSystems[0].LifeCycleState' \
+              --output text)
+            
+            echo "EFS State: $EFS_STATE"
+            
+            # Check mount targets
+            MOUNT_TARGETS=$(aws efs describe-mount-targets \
+              --file-system-id "$EFS_ID" \
+              --query 'length(MountTargets)' \
+              --output text)
+            
+            echo "Mount Targets: $MOUNT_TARGETS"
+            
+            if [ "$EFS_STATE" = "available" ] && [ "$MOUNT_TARGETS" -gt "0" ]; then
+              echo "SUCCESS: EFS is ready for use"
+            else
+              echo "EFS may not be fully ready yet"
+            fi
+          else
+            echo "EFS ID not found in outputs"
+            exit 1
+          fi
 
   # ============================================================================
   # Additional deployment jobs would continue here...
