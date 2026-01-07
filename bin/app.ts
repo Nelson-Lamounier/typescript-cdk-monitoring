@@ -10,6 +10,7 @@ import { NetworkingStack } from "../lib/stacks/networking-stack";
 import { LoadBalancerStack } from "../lib/stacks/elb-stack";
 import { LaunchTemplateStack } from "../lib/stacks/compute/launch-template-stack";
 import { MonitoringEfsStack } from "../lib/stacks/storage/efs-file-system-stack";
+import { MonitoringEcsStack } from "../lib/stacks/compute/ecs-stack";
 import { environments, EnvironmentConfig } from "../config/environments";
 
 // ============================================================================
@@ -188,30 +189,47 @@ const monitoringEfsStack = new MonitoringEfsStack(
 monitoringEfsStack.addDependency(networkingStack);
 
 // ============================================================================
+// MONITORING ECS STACK
+// ============================================================================
+
+// MonitoringEcsStack depends on NetworkingStack for VPC
+// Creates ECS cluster with Prometheus, Grafana, and Node Exporter services
+// Note: This stack creates its own ALB for monitoring services routing
+// (separate from LoadBalancerStack which is for general application traffic)
+const monitoringEcsStack = new MonitoringEcsStack(
+  app,
+  `MonitoringEcsStack-${config.envName}`,
+  {
+    ...stackProps,
+    envName: config.envName,
+    vpc: networkingStack.vpc,
+    // Optional: Provide EFS from MonitoringEfsStack for persistent storage
+    // If not provided, services will use local storage (data not persistent)
+    // crossAccountTargets: optional - provide for cross-account monitoring
+  }
+);
+
+// Explicit dependency ensures NetworkingStack is deployed first
+monitoringEcsStack.addDependency(networkingStack);
+
+// Optional: Add dependency on EFS stack if you want persistent storage
+// monitoringEcsStack.addDependency(monitoringEfsStack);
+
+// ============================================================================
 // ADDITIONAL STACKS
 // ============================================================================
 
 // Additional stacks can be added here as dependencies are created
 // Available stacks:
 // - networkingStack: VPC, subnets, security groups
-// - loadBalancerStack: ALB, listeners, target groups
+// - loadBalancerStack: ALB, listeners, target groups (for application traffic)
 // - launchTemplateStack: EC2 Launch Template for ECS container instances
 // - monitoringEfsStack: EFS file system for persistent monitoring data storage
+// - monitoringEcsStack: ECS cluster with Prometheus, Grafana, Node Exporter
 //
-// Example:
-// const monitoringInfraStack = new MonitoringInfraStack(
-//   app,
-//   `MonitoringInfraStack-${config.envName}`,
-//   {
-//     ...stackProps,
-//     vpc: networkingStack.vpc,
-//     alb: loadBalancerStack.getLoadBalancer(),
-//     launchTemplate: launchTemplateStack.launchTemplate,
-//     efsFileSystem: monitoringEfsStack.fileSystem,
-//     efsAccessPoint: monitoringEfsStack.accessPoint,
-//     envName: config.envName,
-//   }
-// );
+// Stack dependencies:
+// - All stacks depend on networkingStack (VPC)
+// - monitoringEcsStack can optionally depend on monitoringEfsStack (for persistence)
 
 // ============================================================================
 // TAGS
