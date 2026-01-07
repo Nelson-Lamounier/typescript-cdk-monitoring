@@ -28,6 +28,7 @@
   "include": [
     "bin/**/*.ts",
     "config/**/*.ts",
+    "handlers/**/*.ts",
     "lib/**/*.ts",
     "tests/**/*.ts"
   ],

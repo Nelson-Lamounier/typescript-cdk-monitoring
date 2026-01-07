@@ -105,13 +105,14 @@ export default [
 
   // Lambda handlers and scripts - more relaxed rules
   {
-    files: ["lambda/**/*.ts", "scripts/**/*.js", "playground/**/*.ts"],
+    files: ["lambda/**/*.ts", "handlers/**/*.ts", "scripts/**/*.js", "playground/**/*.ts"],
     languageOptions: {
       parser: tseslint.parser,
       parserOptions: {
         ecmaVersion: "latest",
         sourceType: "module",
-        // Skip project-based linting for playground files
+        tsconfigRootDir: __dirname,
+        project: "./tsconfig.json",
       },
     },
     rules: {

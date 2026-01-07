@@ -4,12 +4,11 @@
 import "source-map-support/register";
 
 import * as cdk from "aws-cdk-lib";
-import * as efs from "aws-cdk-lib/aws-efs";
 
 import { NetworkingStack } from "../lib/stacks/networking-stack";
 import { LoadBalancerStack } from "../lib/stacks/elb-stack";
 import { LaunchTemplateStack } from "../lib/stacks/compute/launch-template-stack";
-import { MonitoringEfsStack } from "../lib/stacks/storage/efs-file-system-stack";
+import { MonitoringEbsStorageStack } from "../lib/stacks/storage/ebs-storage-stack";
 import { MonitoringEcsStack } from "../lib/stacks/compute/ecs-stack";
 import { environments, EnvironmentConfig } from "../config/environments";
 
@@ -167,26 +166,27 @@ const launchTemplateStack = new LaunchTemplateStack(
 launchTemplateStack.addDependency(networkingStack);
 
 // ============================================================================
-// MONITORING EFS STACK
+// MONITORING EBS STORAGE STACK
 // ============================================================================
 
-// MonitoringEfsStack depends on NetworkingStack for VPC
-// Creates EFS file system for persistent monitoring data storage
-const monitoringEfsStack = new MonitoringEfsStack(
+// MonitoringEbsStorageStack depends on NetworkingStack for VPC
+// Creates SSM parameters for monitoring configuration
+// Note: EBS volumes are attached via launch template, not created in this stack
+const monitoringEbsStorageStack = new MonitoringEbsStorageStack(
   app,
-  `MonitoringEfsStack-${config.envName}`,
+  `MonitoringEbsStorageStack-${config.envName}`,
   {
     ...stackProps,
     envName: config.envName,
     vpc: networkingStack.vpc,
-    enableEncryption: true,
-    lifecyclePolicy: efs.LifecyclePolicy.AFTER_30_DAYS,
+    prometheusVolumeSize: 100, // GB
+    grafanaVolumeSize: 50, // GB
     // crossAccountTargets: optional - provide for cross-account monitoring
   }
 );
 
 // Explicit dependency ensures NetworkingStack is deployed first
-monitoringEfsStack.addDependency(networkingStack);
+monitoringEbsStorageStack.addDependency(networkingStack);
 
 // ============================================================================
 // MONITORING ECS STACK
@@ -194,6 +194,7 @@ monitoringEfsStack.addDependency(networkingStack);
 
 // MonitoringEcsStack depends on NetworkingStack for VPC
 // Creates ECS cluster with Prometheus, Grafana, and Node Exporter services
+// Uses EBS volumes for persistent storage (attached via launch template)
 // Note: This stack creates its own ALB for monitoring services routing
 // (separate from LoadBalancerStack which is for general application traffic)
 const monitoringEcsStack = new MonitoringEcsStack(
@@ -203,8 +204,8 @@ const monitoringEcsStack = new MonitoringEcsStack(
     ...stackProps,
     envName: config.envName,
     vpc: networkingStack.vpc,
-    // Optional: Provide EFS from MonitoringEfsStack for persistent storage
-    // If not provided, services will use local storage (data not persistent)
+    prometheusVolumeSize: 100, // GB - matches EBS storage stack
+    grafanaVolumeSize: 50, // GB - matches EBS storage stack
     // crossAccountTargets: optional - provide for cross-account monitoring
   }
 );
@@ -212,8 +213,8 @@ const monitoringEcsStack = new MonitoringEcsStack(
 // Explicit dependency ensures NetworkingStack is deployed first
 monitoringEcsStack.addDependency(networkingStack);
 
-// Optional: Add dependency on EFS stack if you want persistent storage
-// monitoringEcsStack.addDependency(monitoringEfsStack);
+// Add dependency on EBS storage stack for SSM parameters
+monitoringEcsStack.addDependency(monitoringEbsStorageStack);
 
 // ============================================================================
 // ADDITIONAL STACKS
@@ -224,12 +225,13 @@ monitoringEcsStack.addDependency(networkingStack);
 // - networkingStack: VPC, subnets, security groups
 // - loadBalancerStack: ALB, listeners, target groups (for application traffic)
 // - launchTemplateStack: EC2 Launch Template for ECS container instances
-// - monitoringEfsStack: EFS file system for persistent monitoring data storage
+// - monitoringEbsStorageStack: SSM parameters for monitoring configuration
 // - monitoringEcsStack: ECS cluster with Prometheus, Grafana, Node Exporter
 //
 // Stack dependencies:
 // - All stacks depend on networkingStack (VPC)
-// - monitoringEcsStack can optionally depend on monitoringEfsStack (for persistence)
+// - monitoringEcsStack depends on monitoringEbsStorageStack (for SSM parameters)
+// - EBS volumes are attached via launch template in monitoringEcsStack
 
 // ============================================================================
 // TAGS
