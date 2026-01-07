@@ -12,6 +12,7 @@ import { SuppressionManager } from "../../cdk-nag/suppression-manager";
 export interface LaunchTemplateConstructProps {
   vpc: ec2.IVpc;
   envName: string;
+  projectName?: string; // Project name for resource naming and tagging
   instanceType?: ec2.InstanceType;
   machineImage?: ec2.IMachineImage;
   /**
@@ -311,8 +312,16 @@ export class LaunchTemplateConstruct extends Construct {
     );
 
     // Tag launch template (tags will propagate to instances via ASG)
+    // Project-agnostic tagging: uses project name if provided
     Tags.of(this.launchTemplate).add("Environment", props.envName);
-    Tags.of(this.launchTemplate).add("Service", "monitoring"); // Required for EC2 service discovery
+    if (props.projectName) {
+      Tags.of(this.launchTemplate).add("Project", props.projectName);
+    }
+    // Service tag is optional - only add if project name is provided
+    // This allows projects to use EC2 service discovery if needed
+    if (props.projectName) {
+      Tags.of(this.launchTemplate).add("Service", props.projectName);
+    }
     Tags.of(this.launchTemplate).add("ManagedBy", "CDK");
 
     // Note: Outputs are created at the stack level, not here
@@ -342,7 +351,10 @@ export class LaunchTemplateConstruct extends Construct {
 export interface LaunchTemplateStackProps extends cdk.StackProps {
   vpc: ec2.IVpc;
   envName: string;
+  projectName?: string; // Project name for resource naming and tagging
   keyPairName?: string;
+  instanceType?: ec2.InstanceType; // Optional: override default instance type
+  enableMonitoring?: boolean; // Optional: enable detailed monitoring
 }
 
 export class LaunchTemplateStack extends cdk.Stack {
@@ -351,14 +363,27 @@ export class LaunchTemplateStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: LaunchTemplateStackProps) {
     super(scope, id, props);
 
-    const { vpc, envName, keyPairName } = props;
+    const {
+      vpc,
+      envName,
+      projectName,
+      keyPairName,
+      instanceType,
+      enableMonitoring = true,
+    } = props;
 
     // Create ECS-compatible user data
+    // Project-agnostic: Uses project name for cluster naming if provided
+    const clusterName = projectName
+      ? `${envName}-${projectName}-cluster`
+      : `${envName}-cluster`;
+
     const userData = ec2.UserData.forLinux();
     userData.addCommands(
       "#!/bin/bash",
       // ECS configuration - CRITICAL for ECS cluster integration
-      `echo ECS_CLUSTER=${envName}-cluster >> /etc/ecs/ecs.config`,
+      // Project-agnostic cluster naming
+      `echo ECS_CLUSTER=${clusterName} >> /etc/ecs/ecs.config`,
       "echo ECS_ENABLE_CONTAINER_METADATA=true >> /etc/ecs/ecs.config",
       "echo ECS_ENABLE_TASK_IAM_ROLE=true >> /etc/ecs/ecs.config",
 
@@ -368,35 +393,9 @@ export class LaunchTemplateStack extends cdk.Stack {
       "systemctl enable ecs",
       "systemctl start ecs",
 
-      // Install Node Exporter for Prometheus monitoring
-      "useradd --no-create-home --shell /bin/false node_exporter",
-      "cd /tmp",
-      "curl -LO https://github.com/prometheus/node_exporter/releases/download/v1.7.0/node_exporter-1.7.0.linux-amd64.tar.gz",
-      "tar -xvf node_exporter-1.7.0.linux-amd64.tar.gz",
-      "cp node_exporter-1.7.0.linux-amd64/node_exporter /usr/local/bin/",
-      "chown node_exporter:node_exporter /usr/local/bin/node_exporter",
-
-      // Create systemd service for Node Exporter
-      "cat <<EOF > /etc/systemd/system/node_exporter.service",
-      "[Unit]",
-      "Description=Node Exporter",
-      "After=network.target",
-      "",
-      "[Service]",
-      "User=node_exporter",
-      "Group=node_exporter",
-      "Type=simple",
-      "ExecStart=/usr/local/bin/node_exporter",
-      "",
-      "[Install]",
-      "WantedBy=multi-user.target",
-      "EOF",
-
-      "systemctl daemon-reload",
-      "systemctl start node_exporter",
-      "systemctl enable node_exporter",
-
       // Custom application setup (optional)
+      // Note: Project-specific setup (e.g., Node Exporter for monitoring)
+      // should be handled by ECS task definitions or SSM State Manager
       'echo "ECS-compatible launch template initialized"'
     );
 
@@ -417,16 +416,17 @@ export class LaunchTemplateStack extends cdk.Stack {
     });
 
     // Create the launch template construct with ECS-optimized settings
+    // Project-agnostic: Instance type can be overridden via props
     const launchTemplateConstruct = new LaunchTemplateConstruct(
       this,
       "EcsLaunchTemplate",
       {
         vpc,
         envName,
-        instanceType: ec2.InstanceType.of(
-          ec2.InstanceClass.T3,
-          ec2.InstanceSize.MICRO
-        ),
+        projectName: projectName, // Pass project name for tagging
+        instanceType:
+          instanceType ||
+          ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MICRO),
         // Using Amazon Linux 2023 ECS-optimized AMI (Amazon Linux 2 reaches EOL June 30, 2026)
         machineImage: cdk.aws_ecs.EcsOptimizedImage.amazonLinux2023(),
         ...(keyPairName
@@ -440,7 +440,7 @@ export class LaunchTemplateStack extends cdk.Stack {
           : {}),
         userData,
         role: ecsInstanceRole, // Use ECS-compatible role
-        enableMonitoring: true,
+        enableMonitoring: enableMonitoring,
         associatePublicIpAddress: false, // Use private subnets
         blockDevices: [
           {
@@ -459,29 +459,34 @@ export class LaunchTemplateStack extends cdk.Stack {
     // ========================================================================
     // CLOUDFORMATION OUTPUTS
     // ========================================================================
+    // Project-agnostic export naming: includes project name if provided
+    const exportPrefix = projectName
+      ? `${envName}-${projectName}`
+      : `${envName}`;
+
     new cdk.CfnOutput(this, "LaunchTemplateId", {
       value: this.launchTemplate.launchTemplateId ?? "",
       description: "Launch Template ID",
-      exportName: `${envName}-launch-template-id`,
+      exportName: `${exportPrefix}-launch-template-id`,
     });
 
     new cdk.CfnOutput(this, "LaunchTemplateName", {
       value:
         this.launchTemplate.launchTemplateName || `${this.stackName}-template`,
       description: "Launch Template Name",
-      exportName: `${envName}-launch-template-name`,
+      exportName: `${exportPrefix}-launch-template-name`,
     });
 
     new cdk.CfnOutput(this, "SecurityGroupId", {
       value: launchTemplateConstruct.securityGroup.securityGroupId,
       description: "Launch Template Security Group ID",
-      exportName: `${envName}-launch-template-sg-id`,
+      exportName: `${exportPrefix}-launch-template-sg-id`,
     });
 
     new cdk.CfnOutput(this, "InstanceRoleArn", {
       value: launchTemplateConstruct.role.roleArn,
       description: "EC2 Instance IAM Role ARN",
-      exportName: `${envName}-launch-template-role-arn`,
+      exportName: `${exportPrefix}-launch-template-role-arn`,
     });
 
     // ========================================================================
@@ -493,7 +498,11 @@ export class LaunchTemplateStack extends cdk.Stack {
     // ========================================================================
     // RESOURCE TAGGING
     // ========================================================================
+    // Project-agnostic tagging: includes project name if provided
     cdk.Tags.of(this).add("Stack", "LaunchTemplate");
+    if (projectName) {
+      cdk.Tags.of(this).add("Project", projectName);
+    }
     cdk.Tags.of(this).add("Environment", envName);
     cdk.Tags.of(this).add("ManagedBy", "CDK");
   }

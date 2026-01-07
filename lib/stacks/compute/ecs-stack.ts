@@ -1,16 +1,12 @@
 /** @format */
 
-import * as path from "path";
-
 import * as cdk from "aws-cdk-lib";
 import * as autoscaling from "aws-cdk-lib/aws-autoscaling";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecs from "aws-cdk-lib/aws-ecs";
-import * as efs from "aws-cdk-lib/aws-efs";
 import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as logs from "aws-cdk-lib/aws-logs";
-import * as s3_assets from "aws-cdk-lib/aws-s3-assets";
 import * as cw from "aws-cdk-lib/aws-cloudwatch";
 import { Tags } from "aws-cdk-lib";
 import { NagSuppressions } from "cdk-nag";
@@ -19,6 +15,10 @@ import { Construct } from "constructs";
 import { EcsTaskExecutionRole } from "../../iam/ecs-task-execution-role";
 import { SuppressionManager } from "../../cdk-nag/suppression-manager";
 import { CrossAccountTarget } from "../../types";
+import {
+  EcsApplicationConfig,
+  EcsServiceConfig,
+} from "../../types/ecs-service-config";
 
 import { LaunchTemplateConstruct } from "./launch-template-stack";
 
@@ -149,18 +149,7 @@ export class AutoScalingGroupConstruct extends Construct {
       iam.ManagedPolicy.fromAwsManagedPolicyName("AmazonECS_FullAccess")
     );
 
-    // Add EFS permissions to the role
-    this.instanceRole.addToPolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: [
-          "elasticfilesystem:ClientMount",
-          "elasticfilesystem:ClientWrite",
-          "elasticfilesystem:ClientRootAccess",
-        ],
-        resources: ["*"],
-      })
-    );
+    // EBS volumes are attached via launch template - no additional IAM permissions needed
 
     // Add SSM permissions to the role
     this.instanceRole.addToPolicy(
@@ -316,7 +305,6 @@ export class AutoScalingGroupConstruct extends Construct {
     return userData;
   }
 }
-
 
 export interface EcsClusterConstructProps {
   /**
@@ -512,8 +500,12 @@ export class EcsClusterConstruct extends Construct {
             "logs:DescribeLogStreams", // Required for log stream discovery
           ],
           resources: [
-            `arn:aws:logs:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:log-group:/ecs/*:*`,
-            `arn:aws:logs:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:log-group:/aws/ecs/*:*`,
+            `arn:aws:logs:${cdk.Stack.of(this).region}:${
+              cdk.Stack.of(this).account
+            }:log-group:/ecs/*:*`,
+            `arn:aws:logs:${cdk.Stack.of(this).region}:${
+              cdk.Stack.of(this).account
+            }:log-group:/aws/ecs/*:*`,
           ],
         })
       );
@@ -537,13 +529,19 @@ export class EcsClusterConstruct extends Construct {
             "CloudWatch Logs wildcard permissions are required for ECS container instances to create log streams for tasks. Log group names are determined at runtime when tasks start.",
           appliesTo: [
             // CloudWatch Logs wildcard permissions for ECS container instances
-            `Resource::arn:aws:logs:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:log-group:/ecs/*:*`,
-            `Resource::arn:aws:logs:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:log-group:/aws/ecs/*:*`,
+            `Resource::arn:aws:logs:${cdk.Stack.of(this).region}:${
+              cdk.Stack.of(this).account
+            }:log-group:/ecs/*:*`,
+            `Resource::arn:aws:logs:${cdk.Stack.of(this).region}:${
+              cdk.Stack.of(this).account
+            }:log-group:/aws/ecs/*:*`,
             {
-              regex: "/^Resource::arn:aws:logs:.*:.*:log-group:\\/ecs\\/.*:\\*$/",
+              regex:
+                "/^Resource::arn:aws:logs:.*:.*:log-group:\\/ecs\\/.*:\\*$/",
             },
             {
-              regex: "/^Resource::arn:aws:logs:.*:.*:log-group:\\/aws\\/ecs\\/.*:\\*$/",
+              regex:
+                "/^Resource::arn:aws:logs:.*:.*:log-group:\\/aws\\/ecs\\/.*:\\*$/",
             },
           ],
         },
@@ -632,7 +630,8 @@ export class EcsClusterConstruct extends Construct {
     // Tag ASG - tags will propagate to EC2 instances automatically
     // These tags are required for Prometheus EC2 service discovery
     // Access the CloudFormation resource to set tags with PropagateAtLaunch
-    const cfnAsg = this.asg.node.defaultChild as autoscaling.CfnAutoScalingGroup;
+    const cfnAsg = this.asg.node
+      .defaultChild as autoscaling.CfnAutoScalingGroup;
     // Use addPropertyOverride to ensure tags are set correctly in CloudFormation
     cfnAsg.addPropertyOverride("Tags", [
       {
@@ -715,7 +714,6 @@ export class EcsClusterConstruct extends Construct {
     Tags.of(this.cluster).add("Environment", envName);
     Tags.of(this.cluster).add("ManagedBy", "CDK");
 
-
     // Note: Outputs are handled at the stack level to avoid cyclic dependencies
     // The stack that uses this construct should create the necessary outputs
   }
@@ -739,7 +737,6 @@ export class EcsClusterConstruct extends Construct {
     );
   }
 }
-
 
 export interface EcsConstructProps {
   vpc: ec2.IVpc;
@@ -965,7 +962,6 @@ export class EcsConstruct extends Construct {
   }
 }
 
-
 export interface LoadBalancerTargetConfig {
   targetGroup: elbv2.IApplicationTargetGroup;
   containerName: string;
@@ -1139,7 +1135,6 @@ export class EcsServiceConstruct extends Construct {
     });
   }
 }
-
 
 export interface ContainerConfig {
   name: string;
@@ -1348,80 +1343,97 @@ export class EcsTaskDefinitionConstruct extends Construct {
 
 /** @format */
 
-
-export interface MonitoringEcsStackProps extends cdk.StackProps {
+export interface EcsStackProps extends cdk.StackProps {
   vpc: ec2.IVpc;
   envName: string;
-  albDnsName?: string;
-  allowedIpRanges?: string[];
-  /** Cross-account targets to scrape via VPC peering */
+  /**
+   * Application configuration defining services, volumes, and load balancer
+   */
+  applicationConfig: EcsApplicationConfig;
+  /**
+   * Cross-account targets for monitoring (optional, used for Prometheus scrape config)
+   */
   crossAccountTargets?: CrossAccountTarget[];
-  /** Enable EFS for persistent storage (survives instance replacement) */
-  enablePersistence?: boolean;
+  /**
+   * Custom user data script (optional, will use default if not provided)
+   */
+  customUserData?: string[];
 }
 
-export class MonitoringEcsStack extends cdk.Stack {
+export class EcsStack extends cdk.Stack {
   public readonly cluster: ecs.Cluster;
-  public readonly prometheusService: ecs.Ec2Service;
-  public readonly grafanaService: ecs.Ec2Service;
-  public readonly nodeExporterService: ecs.Ec2Service;
-  public readonly loadBalancer: elbv2.ApplicationLoadBalancer;
-  public readonly grafanaUrl: string;
-  public readonly prometheusUrl: string;
+  public readonly services: Map<string, ecs.Ec2Service>;
+  public readonly loadBalancer?: elbv2.ApplicationLoadBalancer;
+  public readonly serviceUrls: Map<string, string>;
   private readonly autoScalingGroup: autoscaling.AutoScalingGroup;
+  private readonly applicationConfig: EcsApplicationConfig;
 
-  constructor(scope: Construct, id: string, props: MonitoringEcsStackProps) {
+  constructor(scope: Construct, id: string, props: EcsStackProps) {
     super(scope, id, props);
 
     const {
       vpc,
       envName,
-      albDnsName,
-      allowedIpRanges,
+      applicationConfig,
       crossAccountTargets,
-      // enablePersistence is deprecated - use MonitoringEfsStack for EFS
+      customUserData,
     } = props;
 
-    // DEPRECATED: EFS creation moved to dedicated MonitoringEfsStack
-    // This stack now assumes external EFS is provided if persistence is needed
-    // For new deployments, use MonitoringEfsStack + MonitoringInfraStack instead
-    // Note: enablePersistence flag is ignored - use MonitoringEfsStack for EFS
-    const fileSystem: efs.FileSystem | undefined = undefined;
+    this.applicationConfig = applicationConfig;
 
-    // Create ECS Cluster for monitoring
+    // Extract EBS volume configuration
+    const ebsVolumes = applicationConfig.ebsVolumes || [];
+    const volumeConfigs = ebsVolumes.map(
+      (vol: {
+        deviceName: string;
+        sizeGB: number;
+        mountPath: string;
+        volumeType?: "gp3" | "gp2" | "io1" | "io2";
+        deleteOnTermination?: boolean;
+      }) => ({
+        deviceName: vol.deviceName,
+        sizeGB: vol.sizeGB,
+        mountPath: vol.mountPath,
+        volumeType:
+          vol.volumeType === "gp3"
+            ? ec2.EbsDeviceVolumeType.GP3
+            : vol.volumeType === "gp2"
+            ? ec2.EbsDeviceVolumeType.GP2
+            : vol.volumeType === "io1"
+            ? ec2.EbsDeviceVolumeType.IO1
+            : ec2.EbsDeviceVolumeType.GP3,
+        deleteOnTermination: vol.deleteOnTermination ?? false,
+      })
+    );
+
+    // Create ECS Cluster with dynamic EBS volumes
     const { cluster, autoScalingGroup } = this.createEcsCluster(
       vpc,
       envName,
+      applicationConfig.applicationName,
       crossAccountTargets,
-      fileSystem
+      volumeConfigs,
+      customUserData
     );
     this.cluster = cluster;
     this.autoScalingGroup = autoScalingGroup;
 
-    // Create CloudWatch Log Groups for monitoring services
-    const monitoringTaskLogGroup = new logs.LogGroup(
-      this,
-      "MonitoringTaskLogs",
-      {
-        logGroupName: `/ecs/${this.stackName}/tasks`,
-        retention: logs.RetentionDays.TWO_WEEKS,
-        removalPolicy: cdk.RemovalPolicy.DESTROY,
-      }
-    );
+    // Create CloudWatch Log Groups for application services
+    const taskLogGroup = new logs.LogGroup(this, "TaskLogs", {
+      logGroupName: `/ecs/${this.stackName}/tasks`,
+      retention: logs.RetentionDays.TWO_WEEKS,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
 
-    const monitoringEventLogGroup = new logs.LogGroup(
-      this,
-      "MonitoringEcsEvents",
-      {
-        logGroupName: `/ecs/${this.stackName}/events`,
-        retention: logs.RetentionDays.TWO_WEEKS,
-        removalPolicy: cdk.RemovalPolicy.DESTROY,
-      }
-    );
+    const eventLogGroup = new logs.LogGroup(this, "EcsEvents", {
+      logGroupName: `/ecs/${this.stackName}/events`,
+      retention: logs.RetentionDays.TWO_WEEKS,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
 
     // Configure ECS to send events to CloudWatch Logs
-    new cdk.aws_events.Rule(this, "MonitoringEcsEventRule", {
-      description: `Capture ECS events for ${envName} monitoring cluster`,
+    new cdk.aws_events.Rule(this, "EcsEventRule", {
+      description: `Capture ECS events for ${envName} ${applicationConfig.applicationName} cluster`,
       eventPattern: {
         source: ["aws.ecs"],
         detailType: [
@@ -1433,107 +1445,276 @@ export class MonitoringEcsStack extends cdk.Stack {
           clusterArn: [this.cluster.clusterArn],
         },
       },
-      targets: [
-        new cdk.aws_events_targets.CloudWatchLogGroup(monitoringEventLogGroup),
-      ],
+      targets: [new cdk.aws_events_targets.CloudWatchLogGroup(eventLogGroup)],
     });
 
-    // Create Application Load Balancer for monitoring services
-    this.loadBalancer = this.createLoadBalancer(vpc, envName, allowedIpRanges);
+    // Create Application Load Balancer if configured
+    const lbConfig = applicationConfig.loadBalancer;
+    if (lbConfig) {
+      this.loadBalancer = this.createLoadBalancer(
+        vpc,
+        envName,
+        applicationConfig.applicationName,
+        lbConfig.allowedIpRanges
+      );
+    }
 
-    // Allow ALB to reach services on the instances
-    this.configureSecurityGroupConnections();
+    // Initialize services map
+    this.services = new Map();
+    this.serviceUrls = new Map();
 
-    // Create Prometheus service
-    this.prometheusService = this.createPrometheusService(
-      this.cluster,
-      envName,
-      albDnsName
-    );
+    // Create services dynamically from configuration
+    const listener = this.loadBalancer
+      ? this.loadBalancer.addListener("ApplicationListener", {
+          port: 80,
+          protocol: elbv2.ApplicationProtocol.HTTP,
+        })
+      : undefined;
 
-    // Create Grafana service
-    this.grafanaService = this.createGrafanaService(this.cluster, envName);
+    let rulePriority = 100;
+    for (const serviceConfig of applicationConfig.services) {
+      const service = this.createServiceFromConfig(
+        cluster,
+        envName,
+        serviceConfig
+      );
+      this.services.set(serviceConfig.name, service);
 
-    // Create Node Exporter service
-    this.nodeExporterService = this.createNodeExporterService(
-      this.cluster,
-      envName
-    );
+      // Configure load balancer routing if configured
+      if (serviceConfig.loadBalancer && listener) {
+        const targetGroup = this.createTargetGroup(vpc, serviceConfig, envName);
+        service.attachToApplicationTargetGroup(targetGroup);
 
-    // Configure load balancer routing
-    this.configureLoadBalancerRouting();
+        listener.addTargetGroups(`${serviceConfig.name}TargetGroup`, {
+          targetGroups: [targetGroup],
+          conditions: [
+            elbv2.ListenerCondition.pathPatterns([
+              serviceConfig.loadBalancer.path,
+            ]),
+          ],
+          priority: serviceConfig.loadBalancer.priority ?? rulePriority++,
+        });
 
-    // Set URLs
-    this.grafanaUrl = `http://${this.loadBalancer.loadBalancerDnsName}/grafana`;
-    this.prometheusUrl = `http://${this.loadBalancer.loadBalancerDnsName}/prometheus`;
+        // Store service URL
+        const servicePath = serviceConfig.loadBalancer.path.replace("/*", "");
+        this.serviceUrls.set(
+          serviceConfig.name,
+          `http://${this.loadBalancer!.loadBalancerDnsName}${servicePath}`
+        );
+
+        // Allow ALB to reach service port
+        if (serviceConfig.albPort) {
+          this.autoScalingGroup.connections.allowFrom(
+            this.loadBalancer!,
+            ec2.Port.tcp(serviceConfig.albPort),
+            `Allow ALB to reach ${serviceConfig.name}`
+          );
+        }
+      }
+    }
 
     // Create outputs
-    this.createOutputs(monitoringTaskLogGroup, monitoringEventLogGroup);
+    this.createOutputs(taskLogGroup, eventLogGroup, envName);
 
     // ========================================================================
     // CDK NAG SUPPRESSIONS
     // ========================================================================
-    SuppressionManager.applyToStack(this, "MonitoringStack", envName);
+    SuppressionManager.applyToStack(this, "ComputeStack", envName);
 
     // ========================================================================
     // RESOURCE TAGGING
     // ========================================================================
-    cdk.Tags.of(this).add("Stack", "MonitoringEcs");
+    cdk.Tags.of(this).add("Stack", "EcsStack");
+    cdk.Tags.of(this).add("Application", applicationConfig.applicationName);
     cdk.Tags.of(this).add("Environment", envName);
     cdk.Tags.of(this).add("ManagedBy", "CDK");
   }
 
+  /**
+   * Create a service from configuration
+   */
+  private createServiceFromConfig(
+    cluster: ecs.Cluster,
+    envName: string,
+    serviceConfig: EcsServiceConfig
+  ): ecs.Ec2Service {
+    // Create log group if not provided
+    let logGroup = serviceConfig.container.logGroup;
+    if (!logGroup) {
+      logGroup = new logs.LogGroup(this, `${serviceConfig.name}LogGroup`, {
+        logGroupName: `/ecs/${envName}/${serviceConfig.name}`,
+        retention: logs.RetentionDays.TWO_WEEKS,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      });
+    }
+
+    // Create task definition
+    const taskDef = new EcsTaskDefinitionConstruct(
+      this,
+      `${serviceConfig.name}TaskDef`,
+      {
+        envName,
+        networkMode: serviceConfig.networkMode || ecs.NetworkMode.BRIDGE,
+        containers: [
+          {
+            name: serviceConfig.container.name,
+            image: ecs.ContainerImage.fromRegistry(
+              serviceConfig.container.image
+            ),
+            containerPort: serviceConfig.container.containerPort,
+            hostPort: serviceConfig.container.hostPort,
+            memoryReservationMiB: serviceConfig.container.memoryReservationMiB,
+            memoryLimitMiB: serviceConfig.container.memoryLimitMiB,
+            cpu: serviceConfig.container.cpu,
+            user: serviceConfig.container.user,
+            command: serviceConfig.container.command,
+            environment: serviceConfig.container.environment,
+            logGroup: logGroup,
+            logStreamPrefix:
+              serviceConfig.container.logStreamPrefix || serviceConfig.name,
+          },
+        ],
+        volumes: serviceConfig.volumes?.map((vol) => ({
+          name: vol.name,
+          host: { sourcePath: vol.hostPath },
+        })),
+      }
+    );
+
+    // Add mount points
+    if (serviceConfig.volumes) {
+      for (const vol of serviceConfig.volumes) {
+        taskDef.addMountPoints(serviceConfig.container.name, {
+          sourceVolume: vol.name,
+          containerPath: vol.containerPath,
+          readOnly: vol.readOnly ?? false,
+        });
+      }
+    }
+
+    // Create service
+    const service = new EcsServiceConstruct(
+      this,
+      `${serviceConfig.name}Service`,
+      {
+        cluster,
+        taskDefinition: taskDef.taskDefinition,
+        envName,
+        serviceName: `${envName}-${serviceConfig.name}`,
+        desiredCount: serviceConfig.desiredCount ?? 1,
+        enableExecuteCommand: serviceConfig.enableExecuteCommand ?? false,
+      }
+    );
+
+    return service.service;
+  }
 
   /**
-   * Create ECS cluster with EC2 capacity and S3-based config provisioning
+   * Create target group for a service
+   */
+  private createTargetGroup(
+    vpc: ec2.IVpc,
+    serviceConfig: EcsServiceConfig,
+    envName: string
+  ): elbv2.ApplicationTargetGroup {
+    if (!serviceConfig.loadBalancer) {
+      throw new Error(
+        "Service must have loadBalancer configuration to create target group"
+      );
+    }
+
+    const targetGroup = new elbv2.ApplicationTargetGroup(
+      this,
+      `${serviceConfig.name}TargetGroup`,
+      {
+        port:
+          serviceConfig.container.hostPort ||
+          serviceConfig.container.containerPort,
+        protocol: elbv2.ApplicationProtocol.HTTP,
+        vpc,
+        targetType: elbv2.TargetType.INSTANCE,
+        healthCheck: {
+          path: serviceConfig.loadBalancer.healthCheckPath || "/",
+          interval: cdk.Duration.seconds(30),
+          timeout: cdk.Duration.seconds(5),
+          healthyThresholdCount: 2,
+          unhealthyThresholdCount: 3,
+        },
+      }
+    );
+
+    cdk.Tags.of(targetGroup).add("Service", serviceConfig.name);
+    cdk.Tags.of(targetGroup).add("Environment", envName);
+
+    return targetGroup;
+  }
+
+  /**
+   * Create ECS cluster with EC2 capacity and dynamic EBS volumes
    * Uses LaunchTemplateConstruct for consistent, secure launch template configuration
+   * EBS volumes are attached via launch template for persistent storage
    */
   private createEcsCluster(
     vpc: ec2.IVpc,
     envName: string,
+    applicationName: string,
     crossAccountTargets?: CrossAccountTarget[],
-    fileSystem?: efs.FileSystem
+    ebsVolumes?: Array<{
+      deviceName: string;
+      sizeGB: number;
+      volumeType: ec2.EbsDeviceVolumeType;
+      deleteOnTermination: boolean;
+    }>,
+    customUserData?: string[]
   ): { cluster: ecs.Cluster; autoScalingGroup: autoscaling.AutoScalingGroup } {
-    // Constrain ECS capacity to the first public AZ to align with EFS mount target
+    // Constrain ECS capacity to the first public AZ
     const publicAz0Subnets = vpc.selectSubnets({
       subnetType: ec2.SubnetType.PUBLIC,
       availabilityZones: [vpc.availabilityZones[0]],
       onePerAz: true,
     });
 
-    const clusterName = `${envName}-monitoring-cluster`;
-    const cluster = new ecs.Cluster(this, "MonitoringCluster", {
+    const clusterName = `${envName}-${applicationName}-cluster`;
+    const cluster = new ecs.Cluster(this, "ApplicationCluster", {
       vpc,
       clusterName,
     });
 
-    // Enable Container Insights
-    const cfnCluster = cluster.node.defaultChild as ecs.CfnCluster;
-    cfnCluster.clusterSettings = [
-      {
-        name: "containerInsights",
-        value: "enabled",
-      },
-    ];
+    // Enable Container Insights if configured
+    const enableContainerInsights =
+      this.applicationConfig.cluster?.enableContainerInsights ?? false;
+    if (enableContainerInsights) {
+      const cfnCluster = cluster.node.defaultChild as ecs.CfnCluster;
+      cfnCluster.clusterSettings = [
+        {
+          name: "containerInsights",
+          value: "enabled",
+        },
+      ];
+    }
 
     // Create ECS-compatible user data for the launch template
     const ecsUserData = ec2.UserData.forLinux();
-    ecsUserData.addCommands(
-      "#!/bin/bash",
-      // ECS configuration - CRITICAL for ECS cluster integration
-      `echo ECS_CLUSTER=${clusterName} >> /etc/ecs/ecs.config`,
-      "echo ECS_ENABLE_CONTAINER_METADATA=true >> /etc/ecs/ecs.config",
-      "echo ECS_ENABLE_TASK_IAM_ROLE=true >> /etc/ecs/ecs.config",
-      "echo ECS_AWSVPC_BLOCK_IMDS=true >> /etc/ecs/ecs.config",
-      // System updates and ECS agent
-      "yum update -y",
-      "yum install -y amazon-cloudwatch-agent",
-      "systemctl enable ecs",
-      "systemctl start ecs",
-      // Security: Block container access to IMDS
-      "iptables --insert FORWARD 1 --in-interface docker+ --destination 169.254.169.254/32 --jump DROP",
-      "service iptables save"
-    );
+    if (customUserData && customUserData.length > 0) {
+      ecsUserData.addCommands(...customUserData);
+    } else {
+      ecsUserData.addCommands(
+        "#!/bin/bash",
+        // ECS configuration - CRITICAL for ECS cluster integration
+        `echo ECS_CLUSTER=${clusterName} >> /etc/ecs/ecs.config`,
+        "echo ECS_ENABLE_CONTAINER_METADATA=true >> /etc/ecs/ecs.config",
+        "echo ECS_ENABLE_TASK_IAM_ROLE=true >> /etc/ecs/ecs.config",
+        "echo ECS_AWSVPC_BLOCK_IMDS=true >> /etc/ecs/ecs.config",
+        // System updates and ECS agent
+        "yum update -y",
+        "yum install -y amazon-cloudwatch-agent",
+        "systemctl enable ecs",
+        "systemctl start ecs",
+        // Security: Block container access to IMDS
+        "iptables --insert FORWARD 1 --in-interface docker+ --destination 169.254.169.254/32 --jump DROP",
+        "service iptables save"
+      );
+    }
 
     // Create launch template using LaunchTemplateConstruct
     // This ensures IMDSv2 is required and follows security best practices
@@ -1556,13 +1737,21 @@ export class MonitoringEcsStack extends cdk.Stack {
           {
             deviceName: "/dev/xvda",
             // ECS-optimized AMI snapshots require at least 30GB minimum
-            // While persistent data is stored on EFS, the root volume must meet snapshot size requirements
             volume: ec2.BlockDeviceVolume.ebs(30, {
               volumeType: ec2.EbsDeviceVolumeType.GP3,
               encrypted: true,
               deleteOnTermination: true,
             }),
           },
+          // Add dynamic EBS volumes from configuration
+          ...(ebsVolumes?.map((vol) => ({
+            deviceName: vol.deviceName,
+            volume: ec2.BlockDeviceVolume.ebs(vol.sizeGB, {
+              volumeType: vol.volumeType,
+              encrypted: true,
+              deleteOnTermination: vol.deleteOnTermination,
+            }),
+          })) || []),
         ],
       }
     );
@@ -1620,72 +1809,15 @@ export class MonitoringEcsStack extends cdk.Stack {
     );
     cluster.addAsgCapacityProvider(capacityProvider);
 
-    // ========================================================================
-    // S3 ASSETS FOR CONFIG FILES
-    // CDK automatically uploads these to S3 and manages versioning
-    // ========================================================================
-    // Resolve path from compiled dist folder back to source config directory
-    // __dirname points to: infrastructure/dist/lib/stacks/monitoring
-    // We need to go up 4 levels to infrastructure root, then into config
-    const configBasePath = path.resolve(__dirname, "../../../../config");
-
-    const prometheusConfigAsset = new s3_assets.Asset(
-      this,
-      "PrometheusConfigAsset",
-      {
-        path: path.join(configBasePath, "prometheus"),
-      }
-    );
-
-    const grafanaProvisioningAsset = new s3_assets.Asset(
-      this,
-      "GrafanaProvisioningAsset",
-      {
-        path: path.join(configBasePath, "grafana", "provisioning"),
-      }
-    );
-
-    // Dashboard JSON files - pre-configured dashboards deployed with the stack
-    const grafanaDashboardsAsset = new s3_assets.Asset(
-      this,
-      "GrafanaDashboardsAsset",
-      {
-        path: path.join(configBasePath, "grafana", "dashboards"),
-      }
-    );
-
-    // Grant EC2 instances permission to read the S3 assets
-    prometheusConfigAsset.grantRead(autoScalingGroup.role);
-    grafanaProvisioningAsset.grantRead(autoScalingGroup.role);
-    grafanaDashboardsAsset.grantRead(autoScalingGroup.role);
-
-    // Allow EFS access from EC2 instances (if enabled)
-    if (fileSystem) {
-      fileSystem.connections.allowDefaultPortFrom(
-        autoScalingGroup,
-        "Allow ECS instances to mount EFS"
-      );
-
-      autoScalingGroup.role.addToPrincipalPolicy(
-        new iam.PolicyStatement({
-          effect: iam.Effect.ALLOW,
-          actions: [
-            "elasticfilesystem:ClientMount",
-            "elasticfilesystem:ClientWrite",
-            "elasticfilesystem:ClientRootAccess",
-          ],
-          resources: [fileSystem.fileSystemArn],
-        })
-      );
-    }
-
-    // Build and apply UserData
+    // Build and apply UserData with dynamic EBS volume configuration
     const userDataCommands = this.buildUserData(
       envName,
-      fileSystem,
-      prometheusConfigAsset,
-      grafanaProvisioningAsset,
-      grafanaDashboardsAsset,
+      applicationName,
+      (this.applicationConfig.ebsVolumes || []).map((vol) => ({
+        deviceName: vol.deviceName,
+        sizeGB: vol.sizeGB,
+        mountPath: vol.mountPath,
+      })),
       crossAccountTargets
     );
     autoScalingGroup.addUserData(...userDataCommands);
@@ -1696,75 +1828,49 @@ export class MonitoringEcsStack extends cdk.Stack {
       "Allow HTTPS outbound for ECS agent and S3"
     );
 
-    autoScalingGroup.connections.allowInternally(
-      ec2.Port.tcp(9100),
-      "Allow Prometheus to scrape Node Exporter"
-    );
-
-    autoScalingGroup.connections.allowInternally(
-      ec2.Port.tcp(9090),
-      "Allow Grafana to query Prometheus"
-    );
+    // Allow internal communication between services (if needed)
+    // This is application-specific and can be configured per service
 
     cdk.Tags.of(cluster).add("Environment", envName);
-    cdk.Tags.of(cluster).add("Purpose", "Monitoring");
+    cdk.Tags.of(cluster).add("Application", applicationName);
 
     return { cluster, autoScalingGroup };
   }
 
   /**
    * Build UserData script that:
-   * 1. Mounts EFS (if enabled)
-   * 2. Downloads config templates from S3
-   * 3. Processes templates with environment-specific values
-   * 4. Starts ECS agent after setup completes
+   * 1. Formats and mounts EBS volumes dynamically from configuration
+   * 2. Creates necessary directories
+   * 3. Starts ECS agent after setup completes
    */
   private buildUserData(
     envName: string,
-    fileSystem: efs.FileSystem | undefined,
-    prometheusAsset: s3_assets.Asset,
-    grafanaAsset: s3_assets.Asset,
-    dashboardsAsset: s3_assets.Asset,
-    crossAccountTargets?: CrossAccountTarget[]
+    applicationName: string,
+    ebsVolumes: Array<{
+      deviceName: string;
+      sizeGB: number;
+      mountPath: string;
+    }>,
+    _crossAccountTargets?: CrossAccountTarget[]
   ): string[] {
     const region = cdk.Stack.of(this).region;
 
-    // Generate cross-account scrape config if targets are provided
-    const crossAccountConfig =
-      crossAccountTargets && crossAccountTargets.length > 0
-        ? this.generateCrossAccountScrapeConfig(crossAccountTargets)
-        : [];
-
-    // EFS mounting commands (conditional)
-    const efsCommands = fileSystem
-      ? this.buildEfsMountCommands(fileSystem, region)
-      : this.buildLocalStorageCommands();
-
-    // Cross-account config injection (if any)
-    const crossAccountInjection =
-      crossAccountConfig.length > 0
-        ? [
-            "",
-            "echo '=== Injecting cross-account scrape targets ==='",
-            "cat >> /mnt/prometheus-config/prometheus.yml << 'CROSSACCOUNT'",
-            ...crossAccountConfig,
-            "CROSSACCOUNT",
-          ]
-        : [];
+    // EBS volume setup commands (dynamic based on configuration)
+    const ebsCommands = this.buildEbsVolumeCommands(ebsVolumes);
 
     return [
       "#!/bin/bash",
       "set -ex",
       "",
       "# ==========================================================================",
-      "# MONITORING STACK PROVISIONING SCRIPT",
+      "# APPLICATION STACK PROVISIONING SCRIPT",
       "# This script is generated by CDK and runs on EC2 instance startup",
       "# ==========================================================================",
       "",
-      "exec > >(tee -a /var/log/monitoring-setup.log) 2>&1",
+      `exec > >(tee -a /var/log/${applicationName}-setup.log) 2>&1`,
       "",
       "echo '========================================='",
-      "echo 'Monitoring Setup Started'",
+      `echo '${applicationName} Setup Started'`,
       `echo 'Environment: ${envName}'`,
       `echo 'Region: ${region}'`,
       "date",
@@ -1778,240 +1884,33 @@ export class MonitoringEcsStack extends cdk.Stack {
       "usermod -a -G docker ec2-user",
       "",
       "# ==========================================================================",
-      "# STORAGE SETUP (EFS or Local)",
+      "# EBS VOLUME SETUP",
       "# ==========================================================================",
-      ...efsCommands,
-      "",
-      "# ==========================================================================",
-      "# CREATE CONFIG DIRECTORIES",
-      "# ==========================================================================",
-      "echo 'Creating config directories...'",
-      "mkdir -p /mnt/prometheus-config",
-      "mkdir -p /mnt/grafana-provisioning/datasources",
-      "mkdir -p /mnt/grafana-provisioning/dashboards",
-      "mkdir -p /mnt/grafana-dashboards",
+      ...ebsCommands,
       "",
       "# ==========================================================================",
-      "# DOWNLOAD CONFIGS FROM S3 (CDK Assets)",
+      "# CREATE REQUIRED DIRECTORIES",
       "# ==========================================================================",
-      "echo '=== Downloading config templates from S3 ==='",
-      "",
-      "# Download and extract Prometheus config",
-      `aws s3 cp s3://${prometheusAsset.s3BucketName}/${prometheusAsset.s3ObjectKey} /tmp/prometheus-config.zip --region ${region}`,
-      "mkdir -p /tmp/prometheus-config",
-      "unzip -o /tmp/prometheus-config.zip -d /tmp/prometheus-config",
-      'echo "Prometheus config contents after unzip:"',
-      "ls -laR /tmp/prometheus-config/",
-      "",
-      "# Download and extract Grafana provisioning",
-      `aws s3 cp s3://${grafanaAsset.s3BucketName}/${grafanaAsset.s3ObjectKey} /tmp/grafana-provisioning.zip --region ${region}`,
-      "mkdir -p /tmp/grafana-provisioning",
-      "unzip -o /tmp/grafana-provisioning.zip -d /tmp/grafana-provisioning",
-      'echo "Grafana provisioning contents:"',
-      "find /tmp/grafana-provisioning -type f",
-      "",
-      "# Download and extract Grafana dashboards",
-      `aws s3 cp s3://${dashboardsAsset.s3BucketName}/${dashboardsAsset.s3ObjectKey} /tmp/grafana-dashboards.zip --region ${region}`,
-      "mkdir -p /tmp/grafana-dashboards",
-      "unzip -o /tmp/grafana-dashboards.zip -d /tmp/grafana-dashboards",
-      'echo "Grafana dashboards contents:"',
-      "find /tmp/grafana-dashboards -name '*.json'",
-      "",
-      "# ==========================================================================",
-      "# PROCESS CONFIG TEMPLATES",
-      "# Replace placeholders with actual values",
-      "# ==========================================================================",
-      "echo '=== Processing config templates ==='",
-      "",
-      "# Get host private IP (needed for Grafana -> Prometheus communication)",
-      "HOST_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)",
-      'echo "Host Private IP: $HOST_IP"',
-      "",
-      "# Process Prometheus config template",
-      "echo 'Processing Prometheus config...'",
-      "",
-      "# Find the prometheus.yml file (might be nested in subdirectory)",
-      "PROM_CONFIG=$(find /tmp/prometheus-config -name 'prometheus.yml' -o -name 'prometheus.yml.template' | head -1)",
-      'echo "Found Prometheus config at: $PROM_CONFIG"',
-      "",
-      'if [ -z "$PROM_CONFIG" ]; then',
-      '  echo "ERROR: No Prometheus config found in S3 asset"',
-      "  echo 'Directory structure:'",
-      "  find /tmp/prometheus-config -type f",
-      "  exit 1",
-      "fi",
-      "",
-      "# Check if it's a template or regular file",
-      'if [[ "$PROM_CONFIG" == *.template ]]; then',
-      '  echo "Processing template file..."',
-      `  sed -e 's/{{ENV_NAME}}/${envName}/g' \\`,
-      `      -e 's/{{REGION}}/${region}/g' \\`,
-      "      -e '/CROSS_ACCOUNT_TARGETS_PLACEHOLDER/d' \\",
-      '      "$PROM_CONFIG" > /mnt/prometheus-config/prometheus.yml',
-      "  echo '✓ Prometheus config processed from template'",
-      "else",
-      '  echo "Copying regular config file..."',
-      '  cp "$PROM_CONFIG" /mnt/prometheus-config/prometheus.yml',
-      "  echo '✓ Prometheus config copied'",
-      "fi",
-      "",
-      "# Also copy alerts.yml if it exists",
-      "ALERTS_FILE=$(find /tmp/prometheus-config -name 'alerts.yml' | head -1)",
-      'if [ -n "$ALERTS_FILE" ]; then',
-      '  cp "$ALERTS_FILE" /mnt/prometheus-config/alerts.yml',
-      "  echo '✓ Alerts config copied'",
-      "fi",
-      ...crossAccountInjection,
-      "",
-      "# Process Grafana datasource template",
-      "echo 'Processing Grafana datasource config...'",
-      "",
-      "# Find datasource config (might be nested)",
-      "DATASOURCE_CONFIG=$(find /tmp/grafana-provisioning -path '*/datasources/prometheus.yml*' | head -1)",
-      'echo "Found datasource config at: $DATASOURCE_CONFIG"',
-      "",
-      'if [ -n "$DATASOURCE_CONFIG" ]; then',
-      '  if [[ "$DATASOURCE_CONFIG" == *.template ]]; then',
-      '    echo "Processing datasource template..."',
-      '    sed -e "s/{{HOST_IP}}/$HOST_IP/g" \\',
-      '        "$DATASOURCE_CONFIG" > /mnt/grafana-provisioning/datasources/prometheus.yml',
-      "    echo '✓ Grafana datasource config processed from template'",
-      "  else",
-      '    echo "Copying datasource config..."',
-      "    # Replace HOST_IP placeholder if it exists",
-      '    sed -e "s/HOST_IP/$HOST_IP/g" \\',
-      '        "$DATASOURCE_CONFIG" > /mnt/grafana-provisioning/datasources/prometheus.yml',
-      "    echo '✓ Grafana datasource config copied'",
-      "  fi",
-      "else",
-      '  echo "WARNING: No Grafana datasource config found, creating default..."',
-      "  cat > /mnt/grafana-provisioning/datasources/prometheus.yml << EOF",
-      "apiVersion: 1",
-      "datasources:",
-      "  - name: Prometheus",
-      "    type: prometheus",
-      "    uid: prometheus",
-      "    access: proxy",
-      "    url: http://${HOST_IP}:9090/prometheus",
-      "    isDefault: true",
-      "    editable: true",
-      "EOF",
-      "fi",
-      "",
-      "# Copy dashboard provisioning config",
-      "echo 'Processing Grafana dashboard provisioning...'",
-      "",
-      "# Find dashboard provisioning config (might be nested)",
-      "DASHBOARD_PROV=$(find /tmp/grafana-provisioning -path '*/dashboards/*.yml' | head -1)",
-      'if [ -n "$DASHBOARD_PROV" ]; then',
-      '  cp "$DASHBOARD_PROV" /mnt/grafana-provisioning/dashboards/dashboards.yml',
-      "  echo '✓ Dashboard provisioning config copied'",
-      "else",
-      '  echo "Creating default dashboard provisioning..."',
-      "  cat > /mnt/grafana-provisioning/dashboards/dashboards.yml << 'EOF'",
-      "apiVersion: 1",
-      "providers:",
-      "  - name: 'Default'",
-      "    orgId: 1",
-      "    folder: ''",
-      "    type: file",
-      "    disableDeletion: false",
-      "    updateIntervalSeconds: 10",
-      "    allowUiUpdates: true",
-      "    options:",
-      "      path: /var/lib/grafana/dashboards",
-      "EOF",
-      "fi",
-      "",
-      "# Copy pre-configured dashboards",
-      "echo 'Copying pre-configured dashboards...'",
-      "DASHBOARD_COUNT=0",
-      "while IFS= read -r -d '' dashboard; do",
-      '  cp "$dashboard" /mnt/grafana-dashboards/',
-      "  ((DASHBOARD_COUNT++))",
-      "done < <(find /tmp/grafana-dashboards -name '*.json' -print0)",
-      "",
-      "if [ $DASHBOARD_COUNT -gt 0 ]; then",
-      '  echo "✓ Copied $DASHBOARD_COUNT dashboard(s)"',
-      "  ls -la /mnt/grafana-dashboards/",
-      "else",
-      '  echo "No dashboard JSON files found in S3 asset"',
-      "fi",
-      "",
-      "# ==========================================================================",
-      "# SET PERMISSIONS",
-      "# ==========================================================================",
-      "echo '=== Setting file permissions ==='",
-      "",
-      "# Prometheus runs as 'nobody' user (UID 65534)",
-      "chown -R 65534:65534 /mnt/prometheus-config",
-      "chmod -R 755 /mnt/prometheus-config",
-      "",
-      "# Grafana runs as 'grafana' user (UID 472)",
-      "chown -R 472:0 /mnt/grafana-provisioning /mnt/grafana-dashboards",
-      "chmod -R 755 /mnt/grafana-provisioning /mnt/grafana-dashboards",
-      "",
-      "# Set permissions on data directories",
-      "if [ -d /mnt/efs ]; then",
-      "  echo 'Setting EFS data directory permissions...'",
-      "  chown -R 65534:65534 /mnt/efs/prometheus-data",
-      "  chown -R 472:0 /mnt/efs/grafana-data",
-      "  chmod -R 755 /mnt/efs/prometheus-data",
-      "  chmod -R 775 /mnt/efs/grafana-data",
-      "else",
-      "  echo 'Setting local data directory permissions...'",
-      "  chown -R 65534:65534 /mnt/prometheus-data",
-      "  chown -R 472:0 /mnt/grafana-data",
-      "  chmod -R 755 /mnt/prometheus-data",
-      "  chmod -R 775 /mnt/grafana-data",
-      "fi",
+      "echo 'Creating required directories...'",
+      // Create directories for all EBS volume mount points
+      ...ebsVolumes.map((vol) => `mkdir -p ${vol.mountPath}`),
       "",
       "# ==========================================================================",
       "# VERIFICATION",
       "# ==========================================================================",
       "echo '=== Verifying setup ==='",
       "",
-      "echo '--- Prometheus Config ---'",
-      "cat /mnt/prometheus-config/prometheus.yml",
-      "echo ''",
-      "",
-      "echo '--- Grafana Datasource Config ---'",
-      "cat /mnt/grafana-provisioning/datasources/prometheus.yml",
-      "echo ''",
-      "",
       "echo '--- Directory Structure ---'",
-      "ls -la /mnt/ | grep -E '(prometheus|grafana|efs)'",
+      "ls -la /mnt/",
       "",
-      "if [ -d /mnt/efs ]; then",
-      "  echo '--- EFS Contents ---'",
-      "  ls -la /mnt/efs/",
-      "fi",
-      "",
-      "# Verify critical files exist",
-      "echo '--- Verifying required files ---'",
-      "REQUIRED_FILES=()",
-      'REQUIRED_FILES+=("/mnt/prometheus-config/prometheus.yml")',
-      'REQUIRED_FILES+=("/mnt/grafana-provisioning/datasources/prometheus.yml")',
-      'REQUIRED_FILES+=("/mnt/grafana-provisioning/dashboards/dashboards.yml")',
-      "",
-      'for f in "${REQUIRED_FILES[@]}"; do',
-      '  if [ -f "$f" ]; then',
-      '    echo "✓ $f exists"',
-      "  else",
-      '    echo "✗ ERROR: Missing required file: $f"',
-      "    exit 1",
-      "  fi",
-      "done",
-      "",
-      "# Check for dashboards (not required, but log status)",
-      "DASHBOARD_COUNT=$(find /mnt/grafana-dashboards -name '*.json' 2>/dev/null | wc -l)",
-      'echo "✓ Found $DASHBOARD_COUNT pre-configured dashboard(s)"',
+      "echo '--- EBS Volume Status ---'",
+      "df -h | grep -E '(xvdf|xvdg|xvdh|xvdi)' || echo 'No EBS volumes found'",
       "",
       "# Create completion marker",
-      "touch /var/lib/cloud/instance/monitoring-setup-complete",
+      `touch /var/lib/cloud/instance/${applicationName}-setup-complete`,
       "",
       "echo '========================================='",
-      "echo '✓ Monitoring setup completed successfully!'",
+      `echo '✓ ${applicationName} setup completed successfully!'`,
       "date",
       "echo '========================================='",
       "",
@@ -2024,191 +1923,106 @@ export class MonitoringEcsStack extends cdk.Stack {
       "",
       "echo '✓ ECS agent started - ready for task scheduling'",
       "echo ''",
-      "echo 'Setup log available at: /var/log/monitoring-setup.log'",
+      `echo 'Setup log available at: /var/log/${applicationName}-setup.log'`,
     ];
   }
 
   /**
-   * Build EFS mount commands for persistent storage
+   * Build EBS volume setup commands for persistent storage
+   * Formats and mounts EBS volumes attached via launch template
+   * Dynamic based on volume configuration
    */
-  private buildEfsMountCommands(
-    fileSystem: efs.FileSystem,
-    region: string
+  private buildEbsVolumeCommands(
+    ebsVolumes: Array<{
+      deviceName: string;
+      sizeGB: number;
+      mountPath: string;
+    }>
   ): string[] {
-    return [
-      "echo '=== Setting up EFS persistent storage ==='",
-      "",
-      "# Install EFS utilities",
-      "yum install -y amazon-efs-utils nfs-utils",
-      "",
-      "# Create EFS mount point",
-      "mkdir -p /mnt/efs",
-      "",
-      "# Resolve EFS mount target IP",
-      `EFS_ID="${fileSystem.fileSystemId}"`,
-      `EFS_DNS="$EFS_ID.efs.${region}.amazonaws.com"`,
-      'echo "EFS ID: $EFS_ID"',
-      'echo "EFS DNS: $EFS_DNS"',
-      "",
-      "EFS_IP=$(nslookup $EFS_DNS | grep \"Address:\" | tail -n1 | awk '{print $2}')",
-      'echo "Resolved EFS IP: $EFS_IP"',
-      "",
-      "# Mount EFS (try NFS4 first, fallback to EFS helper)",
-      'if [ -n "$EFS_IP" ] && [ "$EFS_IP" != "" ]; then',
-      '  echo "Mounting EFS using NFS4 with IP: $EFS_IP"',
-      "  mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2 $EFS_IP:/ /mnt/efs",
-      "else",
-      '  echo "DNS resolution failed, using EFS mount helper with TLS"',
-      "  mount -t efs -o tls $EFS_ID:/ /mnt/efs",
-      "fi",
-      "",
-      "# Verify mount succeeded",
-      "if ! mountpoint -q /mnt/efs; then",
-      '  echo "ERROR: Failed to mount EFS filesystem"',
-      "  dmesg | tail -20",
-      "  exit 1",
-      "fi",
-      "echo '✓ EFS mounted successfully at /mnt/efs'",
-      "",
-      "# Add to fstab for persistence across reboots",
-      'echo "$EFS_ID:/ /mnt/efs efs defaults,_netdev,tls 0 0" >> /etc/fstab',
-      "",
-      "# Create persistent data directories on EFS",
-      "echo 'Creating persistent directories on EFS...'",
-      "mkdir -p /mnt/efs/prometheus-data",
-      "mkdir -p /mnt/efs/grafana-data",
-      "mkdir -p /mnt/efs/grafana-data/plugins",
-      "mkdir -p /mnt/efs/grafana-data/logs",
-      "",
-      "# Remove any existing local directories and create symlinks to EFS",
-      "rm -rf /mnt/prometheus-data /mnt/grafana-data 2>/dev/null || true",
-      "ln -sf /mnt/efs/prometheus-data /mnt/prometheus-data",
-      "ln -sf /mnt/efs/grafana-data /mnt/grafana-data",
-      "",
-      "# Verify symlinks",
-      "if [ ! -L /mnt/prometheus-data ]; then",
-      '  echo "ERROR: Failed to create prometheus-data symlink"',
-      "  exit 1",
-      "fi",
-      "echo '✓ Data symlinks created successfully'",
-    ];
-  }
+    if (ebsVolumes.length === 0) {
+      return [
+        "echo '=== No EBS volumes configured ==='",
+        "echo 'Skipping EBS volume setup'",
+      ];
+    }
 
-  /**
-   * Build local storage commands (no EFS - data not persistent)
-   */
-  private buildLocalStorageCommands(): string[] {
-    return [
-      "echo '=== Setting up local storage (non-persistent) ==='",
-      "echo 'WARNING: Data will not persist across instance replacement'",
+    const commands: string[] = [
+      "echo '=== Setting up EBS volumes for persistent storage ==='",
       "",
-      "# Create local data directories",
-      "mkdir -p /mnt/prometheus-data",
-      "mkdir -p /mnt/grafana-data",
-      "mkdir -p /mnt/grafana-data/plugins",
-      "mkdir -p /mnt/grafana-data/logs",
+      "# Wait for EBS volumes to be attached (volumes are attached via launch template)",
+      "echo 'Waiting for EBS volumes to be available...'",
+      "sleep 5",
       "",
-      "echo '✓ Local directories created'",
     ];
+
+    // Generate commands for each volume
+    for (const volume of ebsVolumes) {
+      const deviceName = volume.deviceName;
+      const mountPath = volume.mountPath;
+      const volumeName = mountPath.split("/").pop() || "volume";
+
+      commands.push(
+        `# Check if ${volumeName} volume (${deviceName}) exists and format if needed`,
+        `if [ -b ${deviceName} ]; then`,
+        `  echo 'Found ${volumeName} volume at ${deviceName}'`,
+        "  # Check if volume is already formatted",
+        `  if ! blkid ${deviceName} > /dev/null 2>&1; then`,
+        `    echo 'Formatting ${volumeName} volume with ext4...'`,
+        `    mkfs.ext4 -F ${deviceName}`,
+        `    echo '✓ ${volumeName} volume formatted'`,
+        "  else",
+        `    echo '${volumeName} volume already formatted'`,
+        "  fi",
+        "  ",
+        "  # Create mount point and mount volume",
+        `  mkdir -p ${mountPath}`,
+        `  mount ${deviceName} ${mountPath}`,
+        "  ",
+        "  # Add to fstab for persistence across reboots",
+        `  if ! grep -q '${deviceName}' /etc/fstab; then`,
+        `    echo '${deviceName} ${mountPath} ext4 defaults,nofail 0 2' >> /etc/fstab`,
+        "  fi",
+        "  ",
+        `  echo '✓ ${volumeName} volume mounted at ${mountPath}'`,
+        "else",
+        `  echo 'WARNING: ${volumeName} volume ${deviceName} not found'`,
+        `  mkdir -p ${mountPath}`,
+        "fi",
+        ""
+      );
+    }
+
+    commands.push(
+      "# Verify volumes are mounted",
+      "echo '=== Verifying EBS volume mounts ==='",
+      "df -h | grep -E '(xvdf|xvdg|xvdh|xvdi)' || echo 'No EBS volumes mounted'",
+      "echo '✓ EBS volume setup completed'"
+    );
+
+    return commands;
   }
 
   /**
    * Generate Prometheus scrape config for cross-account targets
+   * @deprecated This method is no longer used - cross-account config is handled via SSM parameters
    */
   private generateCrossAccountScrapeConfig(
-    targets: CrossAccountTarget[]
+    _targets: CrossAccountTarget[]
   ): string[] {
-    const lines: string[] = [];
-
-    // Separate targets by type
-    const nodeExporterTargets = targets.filter(
-      (t) => !t.targetType || t.targetType === "node-exporter"
-    );
-    const applicationTargets = targets.filter(
-      (t) => t.targetType === "application"
-    );
-
-    // Group node-exporter targets by environment
-    const nodeExporterByEnv = nodeExporterTargets.reduce(
-      (acc, target) => {
-        if (!acc[target.envName]) {
-          acc[target.envName] = [];
-        }
-        acc[target.envName].push(target);
-        return acc;
-      },
-      {} as Record<string, CrossAccountTarget[]>
-    );
-
-    // Generate scrape config for node-exporter targets
-    for (const [env, envTargets] of Object.entries(nodeExporterByEnv)) {
-      lines.push("");
-      lines.push(
-        `  # Cross-Account: ${env} Environment - Node Exporter (via VPC Peering)`
-      );
-      lines.push(`  - job_name: 'node-exporter-${env}'`);
-      lines.push("    static_configs:");
-      lines.push("      - targets:");
-
-      for (const target of envTargets) {
-        const port = target.port;
-        lines.push(`          - '${target.privateIp}:${port}'`);
-      }
-
-      lines.push("        labels:");
-      lines.push(`          environment: '${env}'`);
-      lines.push("          service: 'node-exporter'");
-      lines.push(`          account: '${env}'`);
-      lines.push("          source: 'cross-account'");
-    }
-
-    // Group application targets by environment
-    const applicationByEnv = applicationTargets.reduce(
-      (acc, target) => {
-        if (!acc[target.envName]) {
-          acc[target.envName] = [];
-        }
-        acc[target.envName].push(target);
-        return acc;
-      },
-      {} as Record<string, CrossAccountTarget[]>
-    );
-
-    // Generate scrape config for application targets
-    for (const [env, envTargets] of Object.entries(applicationByEnv)) {
-      lines.push("");
-      lines.push(
-        `  # Cross-Account: ${env} Environment - Application (via VPC Peering)`
-      );
-      lines.push(`  - job_name: 'nextjs-${env}'`);
-      lines.push("    metrics_path: '/api/metrics'");
-      lines.push("    static_configs:");
-      lines.push("      - targets:");
-
-      for (const target of envTargets) {
-        const port = target.port;
-        lines.push(`          - '${target.privateIp}:${port}'`);
-      }
-
-      lines.push("        labels:");
-      lines.push(`          environment: '${env}'`);
-      lines.push("          service: 'nextjs'");
-      lines.push("          app: 'portfolio'");
-      lines.push(`          account: '${env}'`);
-      lines.push("          source: 'cross-account'");
-    }
-
-    return lines;
+    // Deprecated - return empty array
+    // Cross-account config is now handled via SSM parameters in EbsStorageStack
+    return [];
   }
 
   private createLoadBalancer(
     vpc: ec2.IVpc,
     envName: string,
+    applicationName: string,
     allowedIpRanges?: string[]
   ): elbv2.ApplicationLoadBalancer {
-    const albSecurityGroup = new ec2.SecurityGroup(this, "MonitoringAlbSg", {
+    const albSecurityGroup = new ec2.SecurityGroup(this, "ApplicationAlbSg", {
       vpc,
-      description: "Security group for monitoring ALB",
+      description: `Security group for ${applicationName} ALB`,
       allowAllOutbound: true,
     });
 
@@ -2223,36 +2037,25 @@ export class MonitoringEcsStack extends cdk.Stack {
 
     const loadBalancer = new elbv2.ApplicationLoadBalancer(
       this,
-      "MonitoringAlb",
+      "ApplicationAlb",
       {
         vpc,
         internetFacing: true,
-        loadBalancerName: `${envName}-monitoring-alb`,
+        loadBalancerName: `${envName}-${applicationName}-alb`,
         securityGroup: albSecurityGroup,
       }
     );
 
-    cdk.Tags.of(loadBalancer).add("Name", `${envName}-monitoring-alb`);
+    cdk.Tags.of(loadBalancer).add("Name", `${envName}-${applicationName}-alb`);
     cdk.Tags.of(loadBalancer).add("Environment", envName);
-    cdk.Tags.of(loadBalancer).add("Purpose", "Monitoring");
+    cdk.Tags.of(loadBalancer).add("Application", applicationName);
 
     return loadBalancer;
   }
 
-  private configureSecurityGroupConnections(): void {
-    this.autoScalingGroup.connections.allowFrom(
-      this.loadBalancer,
-      ec2.Port.tcp(9090),
-      "Allow ALB to reach Prometheus"
-    );
-
-    this.autoScalingGroup.connections.allowFrom(
-      this.loadBalancer,
-      ec2.Port.tcp(3000),
-      "Allow ALB to reach Grafana"
-    );
-  }
-
+  /**
+   * @deprecated This method is no longer used - services are created dynamically via createServiceFromConfig
+   */
   private createPrometheusService(
     cluster: ecs.Cluster,
     envName: string,
@@ -2266,40 +2069,44 @@ export class MonitoringEcsStack extends cdk.Stack {
     });
 
     // Create task definition with Prometheus container
-    const prometheusTaskDef = new EcsTaskDefinitionConstruct(this, "PrometheusTaskDef", {
-      envName,
-      networkMode: ecs.NetworkMode.BRIDGE,
-      containers: [
-        {
-          name: "prometheus",
-          image: ecs.ContainerImage.fromRegistry("prom/prometheus:latest"),
-          containerPort: 9090,
-          hostPort: 9090, // Static port for ALB target group
-          memoryReservationMiB: 512,
-          memoryLimitMiB: 1024,
-          logStreamPrefix: "prometheus",
-          logGroup: prometheusLogGroup,
-          command: [
-            "--config.file=/etc/prometheus/prometheus.yml",
-            "--storage.tsdb.path=/prometheus",
-            "--web.console.libraries=/usr/share/prometheus/console_libraries",
-            "--web.console.templates=/usr/share/prometheus/consoles",
-            "--web.route-prefix=/prometheus",
-            "--web.external-url=/prometheus",
-          ],
-        },
-      ],
-      volumes: [
-        {
-          name: "prometheus-data",
-          host: { sourcePath: "/mnt/prometheus-data" },
-        },
-        {
-          name: "prometheus-config",
-          host: { sourcePath: "/mnt/prometheus-config" },
-        },
-      ],
-    });
+    const prometheusTaskDef = new EcsTaskDefinitionConstruct(
+      this,
+      "PrometheusTaskDef",
+      {
+        envName,
+        networkMode: ecs.NetworkMode.BRIDGE,
+        containers: [
+          {
+            name: "prometheus",
+            image: ecs.ContainerImage.fromRegistry("prom/prometheus:latest"),
+            containerPort: 9090,
+            hostPort: 9090, // Static port for ALB target group
+            memoryReservationMiB: 512,
+            memoryLimitMiB: 1024,
+            logStreamPrefix: "prometheus",
+            logGroup: prometheusLogGroup,
+            command: [
+              "--config.file=/etc/prometheus/prometheus.yml",
+              "--storage.tsdb.path=/prometheus",
+              "--web.console.libraries=/usr/share/prometheus/console_libraries",
+              "--web.console.templates=/usr/share/prometheus/consoles",
+              "--web.route-prefix=/prometheus",
+              "--web.external-url=/prometheus",
+            ],
+          },
+        ],
+        volumes: [
+          {
+            name: "prometheus-data",
+            host: { sourcePath: "/mnt/prometheus-data" },
+          },
+          {
+            name: "prometheus-config",
+            host: { sourcePath: "/mnt/prometheus-config" },
+          },
+        ],
+      }
+    );
 
     // Add mount points
     prometheusTaskDef.addMountPoints("prometheus", {
@@ -2314,18 +2121,25 @@ export class MonitoringEcsStack extends cdk.Stack {
     });
 
     // Create service
-    const prometheusService = new EcsServiceConstruct(this, "PrometheusService", {
-      cluster,
-      taskDefinition: prometheusTaskDef.taskDefinition,
-      envName,
-      serviceName: `${envName}-prometheus`,
-      desiredCount: 1,
-      enableExecuteCommand: true,
-    });
+    const prometheusService = new EcsServiceConstruct(
+      this,
+      "PrometheusService",
+      {
+        cluster,
+        taskDefinition: prometheusTaskDef.taskDefinition,
+        envName,
+        serviceName: `${envName}-prometheus`,
+        desiredCount: 1,
+        enableExecuteCommand: true,
+      }
+    );
 
     return prometheusService.service;
   }
 
+  /**
+   * @deprecated This method is no longer used - services are created dynamically via createServiceFromConfig
+   */
   private createGrafanaService(
     cluster: ecs.Cluster,
     envName: string
@@ -2338,45 +2152,49 @@ export class MonitoringEcsStack extends cdk.Stack {
     });
 
     // Create task definition with Grafana container
-    const grafanaTaskDef = new EcsTaskDefinitionConstruct(this, "GrafanaTaskDef", {
-      envName,
-      networkMode: ecs.NetworkMode.BRIDGE,
-      containers: [
-        {
-          name: "grafana",
-          image: ecs.ContainerImage.fromRegistry("grafana/grafana:latest"),
-          containerPort: 3000,
-          hostPort: 3000, // Static port for ALB target group
-          memoryReservationMiB: 256,
-          memoryLimitMiB: 512,
-          user: "472", // Grafana runs as UID 472
-          logStreamPrefix: "grafana",
-          logGroup: grafanaLogGroup,
-          environment: {
-            GF_PATHS_DATA: "/var/lib/grafana",
-            GF_PATHS_LOGS: "/var/log/grafana",
-            GF_PATHS_PLUGINS: "/var/lib/grafana/plugins",
-            GF_PATHS_PROVISIONING: "/etc/grafana/provisioning",
-            GF_SERVER_ROOT_URL: "/grafana",
-            GF_SERVER_SERVE_FROM_SUB_PATH: "true",
+    const grafanaTaskDef = new EcsTaskDefinitionConstruct(
+      this,
+      "GrafanaTaskDef",
+      {
+        envName,
+        networkMode: ecs.NetworkMode.BRIDGE,
+        containers: [
+          {
+            name: "grafana",
+            image: ecs.ContainerImage.fromRegistry("grafana/grafana:latest"),
+            containerPort: 3000,
+            hostPort: 3000, // Static port for ALB target group
+            memoryReservationMiB: 256,
+            memoryLimitMiB: 512,
+            user: "472", // Grafana runs as UID 472
+            logStreamPrefix: "grafana",
+            logGroup: grafanaLogGroup,
+            environment: {
+              GF_PATHS_DATA: "/var/lib/grafana",
+              GF_PATHS_LOGS: "/var/log/grafana",
+              GF_PATHS_PLUGINS: "/var/lib/grafana/plugins",
+              GF_PATHS_PROVISIONING: "/etc/grafana/provisioning",
+              GF_SERVER_ROOT_URL: "/grafana",
+              GF_SERVER_SERVE_FROM_SUB_PATH: "true",
+            },
           },
-        },
-      ],
-      volumes: [
-        {
-          name: "grafana-data",
-          host: { sourcePath: "/mnt/grafana-data" },
-        },
-        {
-          name: "grafana-provisioning",
-          host: { sourcePath: "/mnt/grafana-provisioning" },
-        },
-        {
-          name: "grafana-dashboards",
-          host: { sourcePath: "/mnt/grafana-dashboards" },
-        },
-      ],
-    });
+        ],
+        volumes: [
+          {
+            name: "grafana-data",
+            host: { sourcePath: "/mnt/grafana-data" },
+          },
+          {
+            name: "grafana-provisioning",
+            host: { sourcePath: "/mnt/grafana-provisioning" },
+          },
+          {
+            name: "grafana-dashboards",
+            host: { sourcePath: "/mnt/grafana-dashboards" },
+          },
+        ],
+      }
+    );
 
     // Add mount points
     grafanaTaskDef.addMountPoints("grafana", {
@@ -2408,52 +2226,63 @@ export class MonitoringEcsStack extends cdk.Stack {
     return grafanaService.service;
   }
 
+  /**
+   * @deprecated This method is no longer used - services are created dynamically via createServiceFromConfig
+   */
   private createNodeExporterService(
     cluster: ecs.Cluster,
     envName: string
   ): ecs.Ec2Service {
     // Create log group for Node Exporter
-    const nodeExporterLogGroup = new logs.LogGroup(this, "NodeExporterLogGroup", {
-      logGroupName: `/ecs/${envName}/node-exporter`,
-      retention: logs.RetentionDays.ONE_WEEK,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-    });
+    const nodeExporterLogGroup = new logs.LogGroup(
+      this,
+      "NodeExporterLogGroup",
+      {
+        logGroupName: `/ecs/${envName}/node-exporter`,
+        retention: logs.RetentionDays.ONE_WEEK,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      }
+    );
 
     // Create task definition with Node Exporter container (HOST network mode)
-    const nodeExporterTaskDef = new EcsTaskDefinitionConstruct(this, "NodeExporterTaskDef", {
-      envName: `${envName}-monitoring`,
-      networkMode: ecs.NetworkMode.HOST,
-      containers: [
-        {
-          name: "node-exporter",
-          image: ecs.ContainerImage.fromRegistry("prom/node-exporter:latest"),
-          containerPort: 9100,
-          memoryReservationMiB: 64,
-          logStreamPrefix: "node-exporter",
-          logGroup: nodeExporterLogGroup,
-          command: [
-            "--path.procfs=/host/proc",
-            "--path.sysfs=/host/sys",
-            "--path.rootfs=/rootfs",
-            "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($|/)",
-          ],
-        },
-      ],
-      volumes: [
-        {
-          name: "proc",
-          host: { sourcePath: "/proc" },
-        },
-        {
-          name: "sys",
-          host: { sourcePath: "/sys" },
-        },
-        {
-          name: "rootfs",
-          host: { sourcePath: "/" },
-        },
-      ],
-    });
+    const nodeExporterTaskDef = new EcsTaskDefinitionConstruct(
+      this,
+      "NodeExporterTaskDef",
+      {
+        envName: `${envName}-monitoring`,
+        networkMode: ecs.NetworkMode.HOST,
+        containers: [
+          {
+            name: "node-exporter",
+            image: ecs.ContainerImage.fromRegistry("prom/node-exporter:latest"),
+            containerPort: 9100,
+            memoryReservationMiB: 64,
+            logStreamPrefix: "node-exporter",
+            logGroup: nodeExporterLogGroup,
+            command: [
+              "--path.procfs=/host/proc",
+              "--path.sysfs=/host/sys",
+              "--path.rootfs=/rootfs",
+              "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($|/)",
+            ],
+          },
+        ],
+        volumes: [
+          {
+            name: "proc",
+            host: { sourcePath: "/proc" },
+          },
+          {
+            name: "sys",
+            host: { sourcePath: "/sys" },
+          },
+          {
+            name: "rootfs",
+            host: { sourcePath: "/" },
+          },
+        ],
+      }
+    );
 
     // Add mount points
     nodeExporterTaskDef.addMountPoints("node-exporter", {
@@ -2473,148 +2302,76 @@ export class MonitoringEcsStack extends cdk.Stack {
     });
 
     // Create service
-    const nodeExporterService = new EcsServiceConstruct(this, "NodeExporterService", {
-      cluster,
-      taskDefinition: nodeExporterTaskDef.taskDefinition,
-      envName: `${envName}-monitoring`,
-      serviceName: `${envName}-monitoring-node-exporter`,
-      desiredCount: 1,
-      enableExecuteCommand: true,
-    });
+    const nodeExporterService = new EcsServiceConstruct(
+      this,
+      "NodeExporterService",
+      {
+        cluster,
+        taskDefinition: nodeExporterTaskDef.taskDefinition,
+        envName: `${envName}-monitoring`,
+        serviceName: `${envName}-monitoring-node-exporter`,
+        desiredCount: 1,
+        enableExecuteCommand: true,
+      }
+    );
 
     return nodeExporterService.service;
   }
 
-  private configureLoadBalancerRouting(): void {
-    const listener = this.loadBalancer.addListener("MonitoringListener", {
-      port: 80,
-      protocol: elbv2.ApplicationProtocol.HTTP,
-    });
-
-    const grafanaTargetGroup = new elbv2.ApplicationTargetGroup(
-      this,
-      "GrafanaTargetGroup",
-      {
-        port: 3000,
-        protocol: elbv2.ApplicationProtocol.HTTP,
-        vpc: this.cluster.vpc,
-        targetType: elbv2.TargetType.INSTANCE,
-        healthCheck: {
-          path: "/grafana/api/health",
-          healthyHttpCodes: "200",
-          interval: cdk.Duration.seconds(30),
-          timeout: cdk.Duration.seconds(5),
-          healthyThresholdCount: 2,
-          unhealthyThresholdCount: 3,
-        },
-        deregistrationDelay: cdk.Duration.seconds(30),
-      }
-    );
-
-    const prometheusTargetGroup = new elbv2.ApplicationTargetGroup(
-      this,
-      "PrometheusTargetGroup",
-      {
-        port: 9090,
-        protocol: elbv2.ApplicationProtocol.HTTP,
-        vpc: this.cluster.vpc,
-        targetType: elbv2.TargetType.INSTANCE,
-        healthCheck: {
-          path: "/prometheus/-/healthy",
-          healthyHttpCodes: "200",
-          interval: cdk.Duration.seconds(30),
-          timeout: cdk.Duration.seconds(5),
-          healthyThresholdCount: 2,
-          unhealthyThresholdCount: 3,
-        },
-        deregistrationDelay: cdk.Duration.seconds(30),
-      }
-    );
-
-    this.prometheusService.connections.allowFrom(
-      this.loadBalancer,
-      ec2.Port.tcp(9090),
-      "Allow ALB to reach Prometheus"
-    );
-
-    this.grafanaService.connections.allowFrom(
-      this.loadBalancer,
-      ec2.Port.tcp(3000),
-      "Allow ALB to reach Grafana"
-    );
-
-    listener.addTargetGroups("GrafanaRule", {
-      targetGroups: [grafanaTargetGroup],
-      conditions: [elbv2.ListenerCondition.pathPatterns(["/grafana*"])],
-      priority: 100,
-    });
-
-    listener.addTargetGroups("PrometheusRule", {
-      targetGroups: [prometheusTargetGroup],
-      conditions: [elbv2.ListenerCondition.pathPatterns(["/prometheus*"])],
-      priority: 200,
-    });
-
-    listener.addAction("DefaultAction", {
-      action: elbv2.ListenerAction.redirect({
-        path: "/grafana",
-        permanent: true,
-      }),
-    });
-
-    grafanaTargetGroup.addTarget(
-      this.grafanaService.loadBalancerTarget({
-        containerName: "grafana",
-        containerPort: 3000,
-      })
-    );
-
-    prometheusTargetGroup.addTarget(
-      this.prometheusService.loadBalancerTarget({
-        containerName: "prometheus",
-        containerPort: 9090,
-      })
-    );
-  }
 
   private createOutputs(
     taskLogGroup: logs.LogGroup,
-    eventLogGroup: logs.LogGroup
+    eventLogGroup: logs.LogGroup,
+    envName: string
   ): void {
-    new cdk.CfnOutput(this, "GrafanaUrl", {
-      value: this.grafanaUrl,
-      description: "Grafana Dashboard URL (default: admin/admin)",
-      exportName: `${this.stackName}-grafana-url`,
-    });
+    const appName = this.applicationConfig.applicationName;
+    const shouldExport = !envName.includes("pipeline");
 
-    new cdk.CfnOutput(this, "PrometheusUrl", {
-      value: this.prometheusUrl,
-      description: "Prometheus URL",
-      exportName: `${this.stackName}-prometheus-url`,
-    });
+    // Output service URLs dynamically
+    for (const [serviceName, url] of this.serviceUrls.entries()) {
+      new cdk.CfnOutput(this, `${serviceName}Url`, {
+        value: url,
+        description: `${serviceName} service URL`,
+        ...(shouldExport && {
+          exportName: `${this.stackName}-${serviceName}-url`,
+        }),
+      });
+    }
 
-    new cdk.CfnOutput(this, "MonitoringAlbDns", {
-      value: this.loadBalancer.loadBalancerDnsName,
-      description: "Monitoring ALB DNS name",
-      exportName: `${this.stackName}-alb-dns`,
-    });
+    // Output ALB DNS if load balancer exists
+    if (this.loadBalancer) {
+      new cdk.CfnOutput(this, "ApplicationAlbDns", {
+        value: this.loadBalancer.loadBalancerDnsName,
+        description: `${appName} ALB DNS name`,
+        ...(shouldExport && {
+          exportName: `${this.stackName}-alb-dns`,
+        }),
+      });
+    }
 
+    // Output cluster information
     new cdk.CfnOutput(this, "ClusterName", {
       value: this.cluster.clusterName,
-      description: "ECS Cluster name for monitoring",
-      exportName: `${this.stackName}-cluster-name`,
+      description: `ECS Cluster name for ${appName}`,
+      ...(shouldExport && {
+        exportName: `${this.stackName}-cluster-name`,
+      }),
     });
 
-    new cdk.CfnOutput(this, "MonitoringTaskLogGroupName", {
+    new cdk.CfnOutput(this, "TaskLogGroupName", {
       value: taskLogGroup.logGroupName,
-      description: "CloudWatch Log Group for Monitoring Task Logs",
-      exportName: `${this.stackName}-task-log-group`,
+      description: "CloudWatch Log Group for Task Logs",
+      ...(shouldExport && {
+        exportName: `${this.stackName}-task-log-group`,
+      }),
     });
 
-    new cdk.CfnOutput(this, "MonitoringEventLogGroupName", {
+    new cdk.CfnOutput(this, "EventLogGroupName", {
       value: eventLogGroup.logGroupName,
-      description: "CloudWatch Log Group for Monitoring ECS Events",
-      exportName: `${this.stackName}-event-log-group`,
+      description: "CloudWatch Log Group for ECS Events",
+      ...(shouldExport && {
+        exportName: `${this.stackName}-event-log-group`,
+      }),
     });
   }
 }
