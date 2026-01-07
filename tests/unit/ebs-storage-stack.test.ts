@@ -2,7 +2,7 @@
 
 import { App, Stack } from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
-import { Template, Match } from "aws-cdk-lib/assertions";
+import { Template } from "aws-cdk-lib/assertions";
 
 import { EbsStorageStack } from "../../lib/stacks/storage/ebs-storage-stack";
 
