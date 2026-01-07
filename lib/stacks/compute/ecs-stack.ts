@@ -36,6 +36,12 @@ export interface AutoScalingGroupConstructProps {
   envName: string;
 
   /**
+   * Application name for resource naming (used in capacity provider name)
+   * @default "app"
+   */
+  applicationName?: string;
+
+  /**
    * EC2 instance type
    * @default t3.medium
    */
@@ -92,7 +98,8 @@ export interface AutoScalingGroupConstructProps {
 }
 
 /**
- * Construct for creating an Auto Scaling Group for ECS with monitoring-specific configuration
+ * Construct for creating an Auto Scaling Group for ECS
+ * Supports dynamic application naming for capacity provider configuration
  */
 export class AutoScalingGroupConstruct extends Construct {
   public readonly autoScalingGroup: autoscaling.AutoScalingGroup;
@@ -111,6 +118,7 @@ export class AutoScalingGroupConstruct extends Construct {
       vpc,
       cluster,
       envName,
+      applicationName = "app",
       instanceType = ec2.InstanceType.of(
         ec2.InstanceClass.T3,
         ec2.InstanceSize.SMALL
@@ -246,10 +254,23 @@ export class AutoScalingGroupConstruct extends Construct {
     // Add capacity provider to cluster (if cluster is a concrete Cluster, not ICluster)
     // Capacity provider name must not start with "aws", "ecs", or "fargate"
     // and can only contain letters, numbers, underscores, and hyphens
-    const capacityProviderName = `${envName}-monitoring-capacity-provider`
+    let capacityProviderName = `${envName}-${applicationName}-capacity-provider`
       .toLowerCase()
       .replace(/[^a-z0-9_-]/g, "-")
+      .replace(/^-+|-+$/g, "") // Remove leading/trailing hyphens
       .substring(0, 255);
+
+    // Ensure name doesn't start with forbidden prefixes
+    const forbiddenPrefixes = ["aws", "ecs", "fargate"];
+    for (const prefix of forbiddenPrefixes) {
+      if (
+        capacityProviderName.startsWith(`${prefix}-`) ||
+        capacityProviderName === prefix
+      ) {
+        capacityProviderName = `cp-${capacityProviderName}`;
+        break;
+      }
+    }
 
     const capacityProvider = new ecs.AsgCapacityProvider(
       this,
@@ -266,6 +287,13 @@ export class AutoScalingGroupConstruct extends Construct {
     const cfnCapacityProvider = capacityProvider.node
       .defaultChild as ecs.CfnCapacityProvider;
     if (cfnCapacityProvider) {
+      // Ensure the name is set and doesn't violate AWS constraints
+      if (!capacityProviderName || capacityProviderName.length === 0) {
+        throw new Error(
+          `Invalid capacity provider name generated: "${capacityProviderName}". ` +
+            `Name must be 1-255 characters and not start with "aws", "ecs", or "fargate".`
+        );
+      }
       cfnCapacityProvider.name = capacityProviderName;
     }
 
@@ -707,14 +735,26 @@ export class EcsClusterConstruct extends Construct {
     // 7. For private subnets: verify NAT gateway is configured
     // Capacity provider name must not start with "aws", "ecs", or "fargate"
     // and can only contain letters, numbers, underscores, and hyphens
-    const capacityProviderName = `${envName}-${clusterName.replace(
+    let capacityProviderName = `${envName}-${clusterName.replace(
       "ecs-",
       ""
     )}-capacity-provider`
       .toLowerCase()
       .replace(/[^a-z0-9_-]/g, "-")
-      .replace(/^ecs-/, "") // Remove "ecs-" prefix if present
+      .replace(/^-+|-+$/g, "") // Remove leading/trailing hyphens
       .substring(0, 255);
+
+    // Ensure name doesn't start with forbidden prefixes
+    const forbiddenPrefixes = ["aws", "ecs", "fargate"];
+    for (const prefix of forbiddenPrefixes) {
+      if (
+        capacityProviderName.startsWith(`${prefix}-`) ||
+        capacityProviderName === prefix
+      ) {
+        capacityProviderName = `cp-${capacityProviderName}`;
+        break;
+      }
+    }
 
     const capacityProvider = new ecs.AsgCapacityProvider(
       this,
@@ -735,6 +775,13 @@ export class EcsClusterConstruct extends Construct {
     const cfnCapacityProvider = capacityProvider.node
       .defaultChild as ecs.CfnCapacityProvider;
     if (cfnCapacityProvider) {
+      // Ensure the name is set and doesn't violate AWS constraints
+      if (!capacityProviderName || capacityProviderName.length === 0) {
+        throw new Error(
+          `Invalid capacity provider name generated: "${capacityProviderName}". ` +
+            `Name must be 1-255 characters and not start with "aws", "ecs", or "fargate".`
+        );
+      }
       cfnCapacityProvider.name = capacityProviderName;
     }
 
@@ -1685,11 +1732,23 @@ export class EcsStack extends cdk.Stack {
     // Add the Auto Scaling Group as a capacity provider to the cluster
     // Capacity provider name must not start with "aws", "ecs", or "fargate"
     // and can only contain letters, numbers, underscores, and hyphens
-    const capacityProviderName =
-      `${envName}-${applicationName}-capacity-provider`
-        .toLowerCase()
-        .replace(/[^a-z0-9_-]/g, "-")
-        .substring(0, 255);
+    let capacityProviderName = `${envName}-${applicationName}-capacity-provider`
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, "-")
+      .replace(/^-+|-+$/g, "") // Remove leading/trailing hyphens
+      .substring(0, 255);
+
+    // Ensure name doesn't start with forbidden prefixes
+    const forbiddenPrefixes = ["aws", "ecs", "fargate"];
+    for (const prefix of forbiddenPrefixes) {
+      if (
+        capacityProviderName.startsWith(`${prefix}-`) ||
+        capacityProviderName === prefix
+      ) {
+        capacityProviderName = `cp-${capacityProviderName}`;
+        break;
+      }
+    }
 
     const capacityProvider = new ecs.AsgCapacityProvider(
       this,
@@ -1706,6 +1765,13 @@ export class EcsStack extends cdk.Stack {
     const cfnCapacityProvider = capacityProvider.node
       .defaultChild as ecs.CfnCapacityProvider;
     if (cfnCapacityProvider) {
+      // Ensure the name is set and doesn't violate AWS constraints
+      if (!capacityProviderName || capacityProviderName.length === 0) {
+        throw new Error(
+          `Invalid capacity provider name generated: "${capacityProviderName}". ` +
+            `Name must be 1-255 characters and not start with "aws", "ecs", or "fargate".`
+        );
+      }
       cfnCapacityProvider.name = capacityProviderName;
     }
 
