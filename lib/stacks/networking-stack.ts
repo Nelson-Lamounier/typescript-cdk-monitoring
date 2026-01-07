@@ -27,6 +27,7 @@ export interface SubnetConfiguration {
 export interface VpcFlowLogsConstructProps {
   vpc: ec2.IVpc;
   envName: string;
+  projectName?: string; // Project name for log group naming
   trafficType?: ec2.FlowLogTrafficType;
   logGroupName?: string;
   retentionDays?: number;
@@ -37,6 +38,7 @@ export interface VpcFlowLogsConstructProps {
  */
 export interface VpcConstructProps {
   envName: string;
+  projectName?: string; // Project name for resource naming and tagging
   vpcName?: string;
   cidr?: string;
   maxAzs?: number;
@@ -51,6 +53,7 @@ export interface VpcConstructProps {
  */
 export interface NetworkingStackProps extends cdk.StackProps {
   envName: string;
+  projectName?: string; // Project name for resource naming and tagging
   vpcCidr?: string;
   maxAzs?: number;
   natGateways?: number;
@@ -184,7 +187,8 @@ export class VpcConstruct extends Construct {
 
     const {
       envName,
-      vpcName = `${envName}-vpc`,
+      projectName,
+      vpcName,
       cidr = "10.0.0.0/16",
       maxAzs = 2,
       natGateways = 0,
@@ -205,11 +209,16 @@ export class VpcConstruct extends Construct {
       enableDnsSupport = true,
     } = props;
 
+    // Project-agnostic VPC naming: includes project name if provided
+    const finalVpcName =
+      vpcName ||
+      (projectName ? `${envName}-${projectName}-vpc` : `${envName}-vpc`);
+
     // Create VPC with configured settings
     // Cost Optimisation: Using minimal NAT gateways (0 for non-production)
     // to reduce costs. Production environments should use at least 1 NAT gateway
     this.vpc = new ec2.Vpc(this, "Vpc", {
-      vpcName,
+      vpcName: finalVpcName,
       ipAddresses: ec2.IpAddresses.cidr(cidr),
       maxAzs,
       natGateways,
@@ -225,9 +234,12 @@ export class VpcConstruct extends Construct {
     this.privateSubnets = this.vpc.privateSubnets;
     this.isolatedSubnets = this.vpc.isolatedSubnets;
 
-    // Add standard tags for resource management
-    cdk.Tags.of(this.vpc).add("Name", vpcName);
+    // Add standard tags for resource management (project-agnostic)
+    cdk.Tags.of(this.vpc).add("Name", finalVpcName);
     cdk.Tags.of(this.vpc).add("Environment", envName);
+    if (projectName) {
+      cdk.Tags.of(this.vpc).add("Project", projectName);
+    }
     cdk.Tags.of(this.vpc).add("ManagedBy", "CDK");
   }
 
@@ -329,10 +341,18 @@ export class VpcFlowLogsConstruct extends Construct {
     const {
       vpc,
       envName,
+      projectName,
       trafficType = ec2.FlowLogTrafficType.ALL,
-      logGroupName = `/aws/vpc/flowlogs/${envName}`,
+      logGroupName,
       retentionDays = 7,
     } = props;
+
+    // Project-agnostic log group naming: includes project name if provided
+    const finalLogGroupName =
+      logGroupName ||
+      (projectName
+        ? `/aws/vpc/flowlogs/${envName}-${projectName}`
+        : `/aws/vpc/flowlogs/${envName}`);
 
     // Map retention days to RetentionDays enum
     // Maps common retention periods to CDK RetentionDays enum values
@@ -359,7 +379,7 @@ export class VpcFlowLogsConstruct extends Construct {
     // Cost Optimisation: Configurable retention balances cost with compliance requirements
     // Default 7-day retention for non-production, increase for production environments
     this.logGroup = new logs.LogGroup(this, "FlowLogsLogGroup", {
-      logGroupName,
+      logGroupName: finalLogGroupName,
       retention: getRetentionDays(retentionDays),
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
@@ -386,8 +406,11 @@ export class VpcFlowLogsConstruct extends Construct {
       trafficType,
     });
 
-    // Add tags for resource management
+    // Add tags for resource management (project-agnostic)
     cdk.Tags.of(this).add("Environment", envName);
+    if (projectName) {
+      cdk.Tags.of(this).add("Project", projectName);
+    }
     cdk.Tags.of(this).add("ManagedBy", "CDK");
   }
 }
@@ -440,6 +463,7 @@ export class NetworkingStack extends cdk.Stack {
 
     const {
       envName,
+      projectName,
       vpcCidr = "10.0.0.0/16",
       maxAzs = 2,
       natGateways = 0,
@@ -450,9 +474,13 @@ export class NetworkingStack extends cdk.Stack {
     // ========================================================================
     // 1. CREATE VPC
     // ========================================================================
+    // Project-agnostic VPC naming: includes project name if provided
     this.vpcConstruct = new VpcConstruct(this, "Vpc", {
       envName,
-      vpcName: `${envName}-vpc`,
+      projectName: projectName, // Pass project name for VPC naming and tagging
+      vpcName: projectName
+        ? `${envName}-${projectName}-vpc`
+        : `${envName}-vpc`,
       cidr: vpcCidr,
       maxAzs,
       natGateways,
@@ -472,6 +500,7 @@ export class NetworkingStack extends cdk.Stack {
       this.flowLogs = new VpcFlowLogsConstruct(this, "FlowLogs", {
         vpc: this.vpc,
         envName,
+        projectName: projectName, // Pass project name for log group naming
         trafficType: ec2.FlowLogTrafficType.ALL,
       });
     }
@@ -508,17 +537,24 @@ export class NetworkingStack extends cdk.Stack {
     // ========================================================================
     // Use SSM Parameter Store instead of CloudFormation exports to avoid
     // circular dependencies when peering VPCs across accounts
+    // Project-agnostic parameter paths: include project name if provided
+    // Note: For shared networking, use `/networking/${envName}/vpc-id`
+    // For project-specific networking, use `/networking/${projectName}/${envName}/vpc-id`
+    const ssmPrefix = projectName
+      ? `/networking/${projectName}/${envName}`
+      : `/networking/${envName}`;
+
     new ssm.StringParameter(this, "VpcIdParameter", {
-      parameterName: `/networking/${envName}/vpc-id`,
+      parameterName: `${ssmPrefix}/vpc-id`,
       stringValue: this.vpc.vpcId,
-      description: `VPC ID for ${envName} environment`,
+      description: `VPC ID for ${projectName || "shared"} networking in ${envName} environment`,
       tier: ssm.ParameterTier.STANDARD,
     });
 
     new ssm.StringParameter(this, "VpcCidrParameter", {
-      parameterName: `/networking/${envName}/vpc-cidr`,
+      parameterName: `${ssmPrefix}/vpc-cidr`,
       stringValue: this.vpc.vpcCidrBlock,
-      description: `VPC CIDR for ${envName} environment`,
+      description: `VPC CIDR for ${projectName || "shared"} networking in ${envName} environment`,
       tier: ssm.ParameterTier.STANDARD,
     });
 
@@ -527,22 +563,25 @@ export class NetworkingStack extends cdk.Stack {
     // ========================================================================
     // CloudFormation exports enable cross-stack references within the same account
     // For cross-account access, use SSM parameters instead
+    // Project-agnostic export naming: includes project name if provided
+    const exportPrefix = projectName ? `${envName}-${projectName}` : `${envName}`;
+
     new cdk.CfnOutput(this, "VpcId", {
       value: this.vpc.vpcId,
       description: "VPC ID",
-      exportName: `${envName}-vpc-id`,
+      exportName: `${exportPrefix}-vpc-id`,
     });
 
     new cdk.CfnOutput(this, "VpcCidr", {
       value: this.vpc.vpcCidrBlock,
       description: "VPC CIDR Block",
-      exportName: `${envName}-vpc-cidr`,
+      exportName: `${exportPrefix}-vpc-cidr`,
     });
 
     new cdk.CfnOutput(this, "AvailabilityZones", {
       value: this.vpc.availabilityZones.join(","),
       description: "Availability Zones",
-      exportName: `${envName}-azs`,
+      exportName: `${exportPrefix}-azs`,
     });
 
     // Public subnet outputs - exported for use by load balancers and bastion hosts
@@ -551,7 +590,7 @@ export class NetworkingStack extends cdk.Stack {
         new cdk.CfnOutput(this, `PublicSubnet${index + 1}Id`, {
           value: subnet.subnetId,
           description: `Public Subnet ${index + 1} ID`,
-          exportName: `${envName}-public-subnet-${index + 1}-id`,
+          exportName: `${exportPrefix}-public-subnet-${index + 1}-id`,
         });
       }
     );
@@ -562,7 +601,7 @@ export class NetworkingStack extends cdk.Stack {
         new cdk.CfnOutput(this, `PrivateSubnet${index + 1}Id`, {
           value: subnet.subnetId,
           description: `Private Subnet ${index + 1} ID`,
-          exportName: `${envName}-private-subnet-${index + 1}-id`,
+          exportName: `${exportPrefix}-private-subnet-${index + 1}-id`,
         });
       }
     );
@@ -572,7 +611,7 @@ export class NetworkingStack extends cdk.Stack {
       new cdk.CfnOutput(this, "FlowLogsLogGroup", {
         value: this.flowLogs.logGroup.logGroupName,
         description: "VPC Flow Logs CloudWatch Log Group",
-        exportName: `${envName}-flow-logs-log-group`,
+        exportName: `${exportPrefix}-flow-logs-log-group`,
       });
     }
 
@@ -580,7 +619,11 @@ export class NetworkingStack extends cdk.Stack {
     // 6. RESOURCE TAGGING
     // ========================================================================
     // Consistent tagging enables resource management, cost allocation, and automation
+    // Project-agnostic tagging: includes project name if provided
     cdk.Tags.of(this).add("Stack", "Networking");
+    if (projectName) {
+      cdk.Tags.of(this).add("Project", projectName);
+    }
     cdk.Tags.of(this).add("Environment", envName);
     cdk.Tags.of(this).add("ManagedBy", "CDK");
   }

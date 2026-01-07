@@ -16,6 +16,7 @@ import { SuppressionManager } from "../cdk-nag/suppression-manager";
 export interface AlbConstructProps {
   vpc: ec2.IVpc;
   envName: string;
+  projectName?: string; // Project name for resource naming and tagging
   loadBalancerName: string;
   internetFacing?: boolean;
   securityGroup?: ec2.ISecurityGroup;
@@ -111,8 +112,11 @@ export class AlbConstruct extends Construct {
       );
     }
 
-    // Add tags
+    // Add tags (project-agnostic)
     cdk.Tags.of(this.loadBalancer).add("Environment", props.envName);
+    if (props.projectName) {
+      cdk.Tags.of(this.loadBalancer).add("Project", props.projectName);
+    }
     cdk.Tags.of(this.loadBalancer).add("ManagedBy", "CDK");
     cdk.Tags.of(this.loadBalancer).add("Name", props.loadBalancerName);
 
@@ -417,6 +421,11 @@ export interface ApplicationLoadBalancerConstructProps {
   envName: string;
 
   /**
+   * Project name for resource naming and tagging
+   */
+  projectName?: string;
+
+  /**
    * Whether the load balancer is internet-facing
    * @default true
    */
@@ -469,7 +478,7 @@ export interface ApplicationLoadBalancerConstructProps {
 }
 
 /**
- * Construct for creating an Application Load Balancer with monitoring-specific configuration
+ * Construct for creating an Application Load Balancer (project-agnostic)
  */
 export class ApplicationLoadBalancerConstruct extends Construct {
   public readonly loadBalancer: elbv2.ApplicationLoadBalancer;
@@ -485,6 +494,7 @@ export class ApplicationLoadBalancerConstruct extends Construct {
     const {
       vpc,
       envName,
+      projectName,
       internetFacing = true,
       securityGroups = [],
       subnets,
@@ -497,10 +507,15 @@ export class ApplicationLoadBalancerConstruct extends Construct {
     } = props;
 
     // Create default security group if none provided
+    // Project-agnostic naming: uses project name if provided
+    const albName = loadBalancerName || (projectName
+      ? `${envName}-${projectName}-alb`
+      : `${envName}-alb`);
+
     if (securityGroups.length === 0) {
       this.securityGroup = new ec2.SecurityGroup(this, "AlbSecurityGroup", {
         vpc,
-        description: `Security group for ${envName} monitoring ALB`,
+        description: `Security group for ${albName}`,
         allowAllOutbound: true,
       });
 
@@ -530,9 +545,10 @@ export class ApplicationLoadBalancerConstruct extends Construct {
     };
 
     // Create Application Load Balancer
+    // Project-agnostic naming: uses project name if provided
     this.loadBalancer = new elbv2.ApplicationLoadBalancer(
       this,
-      "MonitoringAlb",
+      "ApplicationAlb",
       {
         vpc,
         internetFacing,
@@ -540,7 +556,7 @@ export class ApplicationLoadBalancerConstruct extends Construct {
         vpcSubnets: subnetSelection,
         idleTimeout,
         deletionProtection,
-        loadBalancerName: loadBalancerName || `${envName}-monitoring-alb`,
+        loadBalancerName: albName,
       }
     );
 
@@ -549,39 +565,45 @@ export class ApplicationLoadBalancerConstruct extends Construct {
       this.loadBalancer.logAccessLogs(accessLogsBucket, accessLogsPrefix);
     }
 
-    // Add tags
-    cdk.Tags.of(this.loadBalancer).add("Name", `${envName}-monitoring-alb`);
+    // Add tags (project-agnostic)
+    cdk.Tags.of(this.loadBalancer).add("Name", albName);
     cdk.Tags.of(this.loadBalancer).add("Environment", envName);
-    cdk.Tags.of(this.loadBalancer).add("Purpose", "MonitoringLoadBalancer");
+    if (projectName) {
+      cdk.Tags.of(this.loadBalancer).add("Project", projectName);
+    }
     cdk.Tags.of(this.loadBalancer).add("ManagedBy", "CDK");
 
     if (this.securityGroup) {
-      cdk.Tags.of(this.securityGroup).add(
-        "Name",
-        `${envName}-monitoring-alb-sg`
-      );
+      const sgName = projectName
+        ? `${envName}-${projectName}-alb-sg`
+        : `${envName}-alb-sg`;
+      cdk.Tags.of(this.securityGroup).add("Name", sgName);
       cdk.Tags.of(this.securityGroup).add("Environment", envName);
-      cdk.Tags.of(this.securityGroup).add("Purpose", "MonitoringALBSecurity");
+      if (projectName) {
+        cdk.Tags.of(this.securityGroup).add("Project", projectName);
+      }
       cdk.Tags.of(this.securityGroup).add("ManagedBy", "CDK");
     }
 
     // Output load balancer information (without export names to avoid conflicts)
     // Export names are managed at the stack level to prevent duplicate exports
+    // Project-agnostic descriptions
+    const projectLabel = projectName || "application";
     new cdk.CfnOutput(this, "LoadBalancerArn", {
       value: this.loadBalancer.loadBalancerArn,
-      description: `ALB ARN for ${envName} monitoring`,
+      description: `ALB ARN for ${envName} ${projectLabel}`,
       // exportName removed - managed at stack level to avoid duplicate exports
     });
 
     new cdk.CfnOutput(this, "LoadBalancerDnsName", {
       value: this.loadBalancer.loadBalancerDnsName,
-      description: `ALB DNS name for ${envName} monitoring`,
+      description: `ALB DNS name for ${envName} ${projectLabel}`,
       // exportName removed - managed at stack level to avoid duplicate exports
     });
 
     new cdk.CfnOutput(this, "LoadBalancerHostedZoneId", {
       value: this.loadBalancer.loadBalancerCanonicalHostedZoneId,
-      description: `ALB hosted zone ID for ${envName} monitoring`,
+      description: `ALB hosted zone ID for ${envName} ${projectLabel}`,
       // exportName removed - managed at stack level to avoid duplicate exports
     });
   }
@@ -610,6 +632,7 @@ export interface ListenerRuleConfig {
 
 export interface LoadBalancerStackProps extends cdk.StackProps {
   envName: string;
+  projectName?: string; // Project name for resource naming and tagging
   vpc: ec2.IVpc;
   loadBalancerName?: string;
   internetFacing?: boolean;
@@ -651,8 +674,9 @@ export class LoadBalancerStack extends cdk.Stack {
 
     const {
       envName,
+      projectName,
       vpc,
-      loadBalancerName = `${envName}-alb`,
+      loadBalancerName,
       internetFacing = true,
       enableHttps = false,
       certificateArn,
@@ -662,17 +686,25 @@ export class LoadBalancerStack extends cdk.Stack {
       allowedCidrs = ["0.0.0.0/0"],
     } = props;
 
+    // Project-agnostic load balancer name
+    const albName =
+      loadBalancerName ||
+      (projectName ? `${envName}-${projectName}-alb` : `${envName}-alb`);
+
     // ========================================================================
     // 1. CREATE APPLICATION LOAD BALANCER
     // ========================================================================
     this.alb = new AlbConstruct(this, "ALB", {
       vpc,
       envName,
-      loadBalancerName,
+      projectName: projectName, // Pass project name for tagging
+      loadBalancerName: albName,
       internetFacing,
       deletionProtection,
       accessLogEnabled,
-      accessLogPrefix: `${envName}/alb`,
+      accessLogPrefix: projectName
+        ? `${envName}/${projectName}/alb`
+        : `${envName}/alb`,
     });
 
     // ========================================================================
@@ -712,29 +744,32 @@ export class LoadBalancerStack extends cdk.Stack {
     // ========================================================================
     // 4. CLOUDFORMATION OUTPUTS
     // ========================================================================
+    // Project-agnostic export naming: includes project name if provided
+    const exportPrefix = projectName ? `${envName}-${projectName}` : `${envName}`;
+
     new cdk.CfnOutput(this, "LoadBalancerArn", {
       value: this.alb.loadBalancerArn,
       description: "Application Load Balancer ARN",
-      exportName: `${envName}-alb-arn`,
+      exportName: `${exportPrefix}-alb-arn`,
     });
 
     new cdk.CfnOutput(this, "LoadBalancerDnsName", {
       value: this.alb.dnsName,
       description: "Application Load Balancer DNS Name",
-      exportName: `${envName}-alb-dns`,
+      exportName: `${exportPrefix}-alb-dns`,
     });
 
     new cdk.CfnOutput(this, "SecurityGroupId", {
       value: this.alb.securityGroup.securityGroupId,
       description: "ALB Security Group ID",
-      exportName: `${envName}-alb-sg-id`,
+      exportName: `${exportPrefix}-alb-sg-id`,
     });
 
     if (this.listeners.httpListener) {
       new cdk.CfnOutput(this, "HttpListenerArn", {
         value: this.listeners.httpListener.listenerArn,
         description: "HTTP Listener ARN",
-        exportName: `${envName}-http-listener-arn`,
+        exportName: `${exportPrefix}-http-listener-arn`,
       });
     }
 
@@ -742,7 +777,7 @@ export class LoadBalancerStack extends cdk.Stack {
       new cdk.CfnOutput(this, "HttpsListenerArn", {
         value: this.listeners.httpsListener.listenerArn,
         description: "HTTPS Listener ARN",
-        exportName: `${envName}-https-listener-arn`,
+        exportName: `${exportPrefix}-https-listener-arn`,
       });
     }
 
@@ -757,7 +792,11 @@ export class LoadBalancerStack extends cdk.Stack {
     // ========================================================================
     // 6. RESOURCE TAGGING
     // ========================================================================
+    // Project-agnostic tagging: includes project name if provided
     cdk.Tags.of(this).add("Stack", "LoadBalancer");
+    if (projectName) {
+      cdk.Tags.of(this).add("Project", projectName);
+    }
     cdk.Tags.of(this).add("Environment", envName);
     cdk.Tags.of(this).add("ManagedBy", "CDK");
   }
