@@ -100,6 +100,56 @@ describe("VpcConstruct", () => {
         ])
       );
     });
+
+    test("VPC has project tag when projectName is provided", () => {
+      new VpcConstruct(stack, "TestVpc", {
+        envName: "test",
+        projectName: "monitoring",
+      });
+      const template = Template.fromStack(stack);
+
+      const vpcResources = template.findResources("AWS::EC2::VPC");
+      const vpcResource = Object.values(vpcResources)[0] as any;
+      const tags = vpcResource.Properties.Tags || [];
+
+      expect(tags).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            Key: "Project",
+            Value: "monitoring",
+          }),
+        ])
+      );
+    });
+
+    test("VPC name includes project name when projectName is provided", () => {
+      new VpcConstruct(stack, "TestVpc", {
+        envName: "test",
+        projectName: "monitoring",
+      });
+      const template = Template.fromStack(stack);
+
+      const vpcResources = template.findResources("AWS::EC2::VPC");
+      const vpcResource = Object.values(vpcResources)[0] as any;
+      const tags = vpcResource.Properties.Tags || [];
+      const nameTag = tags.find((tag: any) => tag.Key === "Name");
+
+      expect(nameTag?.Value).toBe("test-monitoring-vpc");
+    });
+
+    test("VPC name uses default when projectName is not provided", () => {
+      new VpcConstruct(stack, "TestVpc", {
+        envName: "test",
+      });
+      const template = Template.fromStack(stack);
+
+      const vpcResources = template.findResources("AWS::EC2::VPC");
+      const vpcResource = Object.values(vpcResources)[0] as any;
+      const tags = vpcResource.Properties.Tags || [];
+      const nameTag = tags.find((tag: any) => tag.Key === "Name");
+
+      expect(nameTag?.Value).toBe("test-vpc");
+    });
   });
 
   // ============================================
@@ -644,7 +694,7 @@ describe("NetworkingStack", () => {
   });
 
   describe("VPC Flow Logs", () => {
-    test("creates flow logs log group", () => {
+    test("creates flow logs log group without project name", () => {
       template.hasResourceProperties("AWS::Logs::LogGroup", {
         LogGroupName: "/aws/vpc/flowlogs/test",
         RetentionInDays: 7,
@@ -727,7 +777,7 @@ describe("NetworkingStack", () => {
   });
 
   describe("SSM Parameters", () => {
-    test("creates VPC ID parameter", () => {
+    test("creates VPC ID parameter without project name", () => {
       template.hasResourceProperties("AWS::SSM::Parameter", {
         Name: "/networking/test/vpc-id",
         Type: "String",
@@ -735,7 +785,7 @@ describe("NetworkingStack", () => {
       });
     });
 
-    test("creates VPC CIDR parameter", () => {
+    test("creates VPC CIDR parameter without project name", () => {
       template.hasResourceProperties("AWS::SSM::Parameter", {
         Name: "/networking/test/vpc-cidr",
         Type: "String",
@@ -745,7 +795,7 @@ describe("NetworkingStack", () => {
   });
 
   describe("Stack Outputs", () => {
-    test("exports VPC ID", () => {
+    test("exports VPC ID without project name", () => {
       template.hasOutput("VpcId", {
         Description: "VPC ID",
         Export: {
@@ -754,7 +804,7 @@ describe("NetworkingStack", () => {
       });
     });
 
-    test("exports VPC CIDR", () => {
+    test("exports VPC CIDR without project name", () => {
       template.hasOutput("VpcCidr", {
         Description: "VPC CIDR Block",
         Export: {
@@ -763,7 +813,7 @@ describe("NetworkingStack", () => {
       });
     });
 
-    test("exports subnet IDs", () => {
+    test("exports subnet IDs without project name", () => {
       template.hasOutput("PublicSubnet1Id", {
         Description: "Public Subnet 1 ID",
         Export: {
@@ -793,7 +843,7 @@ describe("NetworkingStack", () => {
       });
     });
 
-    test("exports availability zones", () => {
+    test("exports availability zones without project name", () => {
       template.hasOutput("AvailabilityZones", {
         Description: "Availability Zones",
         Export: {
@@ -802,7 +852,7 @@ describe("NetworkingStack", () => {
       });
     });
 
-    test("exports flow logs log group name", () => {
+    test("exports flow logs log group name without project name", () => {
       template.hasOutput("FlowLogsLogGroup", {
         Description: "VPC Flow Logs CloudWatch Log Group",
         Export: {
@@ -906,6 +956,188 @@ describe("NetworkingStack", () => {
       // Should not have any VPC endpoints
       const endpoints = testTemplate.findResources("AWS::EC2::VPCEndpoint");
       expect(Object.keys(endpoints).length).toBe(0);
+    });
+  });
+
+  describe("Multi-Project Infrastructure Pattern", () => {
+    test("creates project-specific VPC name when projectName is provided", () => {
+      const testApp = new cdk.App();
+      const testStack = new NetworkingStack(testApp, "TestStackWithProject", {
+        env: {
+          account: "123456789012",
+          region: "eu-west-1",
+        },
+        envName: "test",
+        projectName: "monitoring",
+      });
+      const testTemplate = Template.fromStack(testStack);
+
+      const vpcResources = testTemplate.findResources("AWS::EC2::VPC");
+      const vpcResource = Object.values(vpcResources)[0] as any;
+      const tags = vpcResource.Properties.Tags || [];
+      const nameTag = tags.find((tag: any) => tag.Key === "Name");
+
+      expect(nameTag?.Value).toBe("test-monitoring-vpc");
+    });
+
+    test("creates project-specific SSM parameters when projectName is provided", () => {
+      const testApp = new cdk.App();
+      const testStack = new NetworkingStack(testApp, "TestStackWithProject", {
+        env: {
+          account: "123456789012",
+          region: "eu-west-1",
+        },
+        envName: "test",
+        projectName: "monitoring",
+      });
+      const testTemplate = Template.fromStack(testStack);
+
+      testTemplate.hasResourceProperties("AWS::SSM::Parameter", {
+        Name: "/networking/monitoring/test/vpc-id",
+        Type: "String",
+        Tier: "Standard",
+      });
+
+      testTemplate.hasResourceProperties("AWS::SSM::Parameter", {
+        Name: "/networking/monitoring/test/vpc-cidr",
+        Type: "String",
+        Tier: "Standard",
+      });
+    });
+
+    test("creates project-specific CloudFormation exports when projectName is provided", () => {
+      const testApp = new cdk.App();
+      const testStack = new NetworkingStack(testApp, "TestStackWithProject", {
+        env: {
+          account: "123456789012",
+          region: "eu-west-1",
+        },
+        envName: "test",
+        projectName: "monitoring",
+      });
+      const testTemplate = Template.fromStack(testStack);
+
+      testTemplate.hasOutput("VpcId", {
+        Description: "VPC ID",
+        Export: {
+          Name: "test-monitoring-vpc-id",
+        },
+      });
+
+      testTemplate.hasOutput("VpcCidr", {
+        Description: "VPC CIDR Block",
+        Export: {
+          Name: "test-monitoring-vpc-cidr",
+        },
+      });
+
+      testTemplate.hasOutput("AvailabilityZones", {
+        Description: "Availability Zones",
+        Export: {
+          Name: "test-monitoring-azs",
+        },
+      });
+    });
+
+    test("creates project-specific flow logs log group when projectName is provided", () => {
+      const testApp = new cdk.App();
+      const testStack = new NetworkingStack(testApp, "TestStackWithProject", {
+        env: {
+          account: "123456789012",
+          region: "eu-west-1",
+        },
+        envName: "test",
+        projectName: "monitoring",
+        enableVpcFlowLogs: true,
+      });
+      const testTemplate = Template.fromStack(testStack);
+
+      testTemplate.hasResourceProperties("AWS::Logs::LogGroup", {
+        LogGroupName: "/aws/vpc/flowlogs/test-monitoring",
+        RetentionInDays: 7,
+      });
+    });
+
+    test("creates project-specific subnet exports when projectName is provided", () => {
+      const testApp = new cdk.App();
+      const testStack = new NetworkingStack(testApp, "TestStackWithProject", {
+        env: {
+          account: "123456789012",
+          region: "eu-west-1",
+        },
+        envName: "test",
+        projectName: "monitoring",
+        maxAzs: 2,
+      });
+      const testTemplate = Template.fromStack(testStack);
+
+      testTemplate.hasOutput("PublicSubnet1Id", {
+        Description: "Public Subnet 1 ID",
+        Export: {
+          Name: "test-monitoring-public-subnet-1-id",
+        },
+      });
+
+      testTemplate.hasOutput("PrivateSubnet1Id", {
+        Description: "Private Subnet 1 ID",
+        Export: {
+          Name: "test-monitoring-private-subnet-1-id",
+        },
+      });
+    });
+
+    test("adds Project tag to stack when projectName is provided", () => {
+      const testApp = new cdk.App();
+      const testStack = new NetworkingStack(testApp, "TestStackWithProject", {
+        env: {
+          account: "123456789012",
+          region: "eu-west-1",
+        },
+        envName: "test",
+        projectName: "monitoring",
+      });
+      const testTemplate = Template.fromStack(testStack);
+
+      // Check VPC has Project tag
+      const vpcResources = testTemplate.findResources("AWS::EC2::VPC");
+      const vpcResource = Object.values(vpcResources)[0] as any;
+      const tags = vpcResource.Properties.Tags || [];
+
+      expect(tags).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            Key: "Project",
+            Value: "monitoring",
+          }),
+        ])
+      );
+    });
+
+    test("maintains backward compatibility when projectName is not provided", () => {
+      const testApp = new cdk.App();
+      const testStack = new NetworkingStack(testApp, "TestStackNoProject", {
+        env: {
+          account: "123456789012",
+          region: "eu-west-1",
+        },
+        envName: "test",
+      });
+      const testTemplate = Template.fromStack(testStack);
+
+      // Should use default naming without project name
+      testTemplate.hasResourceProperties("AWS::SSM::Parameter", {
+        Name: "/networking/test/vpc-id",
+      });
+
+      testTemplate.hasOutput("VpcId", {
+        Export: {
+          Name: "test-vpc-id",
+        },
+      });
+
+      testTemplate.hasResourceProperties("AWS::Logs::LogGroup", {
+        LogGroupName: "/aws/vpc/flowlogs/test",
+      });
     });
   });
 });

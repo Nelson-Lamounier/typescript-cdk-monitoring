@@ -54,7 +54,7 @@ describe("LoadBalancerStack Test Suite", () => {
       );
     });
 
-    test("ALB has correct tags", () => {
+    test("ALB has correct tags without project name", () => {
       const tagsCapture = new Capture();
       template.hasResourceProperties(
         "AWS::ElasticLoadBalancingV2::LoadBalancer",
@@ -217,27 +217,39 @@ describe("LoadBalancerStack Test Suite", () => {
   });
 
   describe("Stack Outputs", () => {
-    test("exports load balancer ARN", () => {
+    test("exports load balancer ARN without project name", () => {
       template.hasOutput("LoadBalancerArn", {
         Description: "Application Load Balancer ARN",
+        Export: {
+          Name: "test-alb-arn",
+        },
       });
     });
 
-    test("exports load balancer DNS name", () => {
+    test("exports load balancer DNS name without project name", () => {
       template.hasOutput("LoadBalancerDnsName", {
         Description: "Application Load Balancer DNS Name",
+        Export: {
+          Name: "test-alb-dns",
+        },
       });
     });
 
-    test("exports security group ID", () => {
+    test("exports security group ID without project name", () => {
       template.hasOutput("SecurityGroupId", {
         Description: "ALB Security Group ID",
+        Export: {
+          Name: "test-alb-sg-id",
+        },
       });
     });
 
-    test("exports HTTP listener ARN", () => {
+    test("exports HTTP listener ARN without project name", () => {
       template.hasOutput("HttpListenerArn", {
         Description: "HTTP Listener ARN",
+        Export: {
+          Name: "test-http-listener-arn",
+        },
       });
     });
 
@@ -260,6 +272,249 @@ describe("LoadBalancerStack Test Suite", () => {
 
       // Should have ALB, listener, security group, S3 bucket, etc.
       expect(resourceCount).toBeGreaterThanOrEqual(5);
+    });
+  });
+
+  describe("Multi-Project Infrastructure Pattern", () => {
+    test("creates project-specific load balancer name when projectName is provided", () => {
+      const testApp = new App();
+      const testVpcStack = new Stack(testApp, "TestVpcStackProject", {
+        env: { account: "123456789012", region: "eu-west-1" },
+      });
+      const testVpc = new ec2.Vpc(testVpcStack, "TestVpc", {
+        maxAzs: 2,
+        natGateways: 0,
+      });
+
+      const testStack = new LoadBalancerStack(
+        testApp,
+        "TestLoadBalancerStackProject",
+        {
+          env: {
+            account: "123456789012",
+            region: "eu-west-1",
+          },
+          envName: "test",
+          projectName: "monitoring",
+          vpc: testVpc,
+          enableHttps: false,
+          redirectHttpToHttps: false,
+          allowedCidrs: ["0.0.0.0/0"],
+          deletionProtection: false,
+          accessLogEnabled: true,
+        }
+      );
+
+      const testTemplate = Template.fromStack(testStack);
+
+      testTemplate.hasResourceProperties(
+        "AWS::ElasticLoadBalancingV2::LoadBalancer",
+        {
+          Name: "test-monitoring-alb",
+        }
+      );
+    });
+
+    test("creates project-specific CloudFormation exports when projectName is provided", () => {
+      const testApp = new App();
+      const testVpcStack = new Stack(testApp, "TestVpcStackProject2", {
+        env: { account: "123456789012", region: "eu-west-1" },
+      });
+      const testVpc = new ec2.Vpc(testVpcStack, "TestVpc", {
+        maxAzs: 2,
+        natGateways: 0,
+      });
+
+      const testStack = new LoadBalancerStack(
+        testApp,
+        "TestLoadBalancerStackProject2",
+        {
+          env: {
+            account: "123456789012",
+            region: "eu-west-1",
+          },
+          envName: "test",
+          projectName: "monitoring",
+          vpc: testVpc,
+          enableHttps: false,
+          redirectHttpToHttps: false,
+          allowedCidrs: ["0.0.0.0/0"],
+          deletionProtection: false,
+          accessLogEnabled: true,
+        }
+      );
+
+      const testTemplate = Template.fromStack(testStack);
+
+      testTemplate.hasOutput("LoadBalancerArn", {
+        Description: "Application Load Balancer ARN",
+        Export: {
+          Name: "test-monitoring-alb-arn",
+        },
+      });
+
+      testTemplate.hasOutput("LoadBalancerDnsName", {
+        Description: "Application Load Balancer DNS Name",
+        Export: {
+          Name: "test-monitoring-alb-dns",
+        },
+      });
+
+      testTemplate.hasOutput("SecurityGroupId", {
+        Description: "ALB Security Group ID",
+        Export: {
+          Name: "test-monitoring-alb-sg-id",
+        },
+      });
+    });
+
+    test("adds Project tag when projectName is provided", () => {
+      const testApp = new App();
+      const testVpcStack = new Stack(testApp, "TestVpcStackProject3", {
+        env: { account: "123456789012", region: "eu-west-1" },
+      });
+      const testVpc = new ec2.Vpc(testVpcStack, "TestVpc", {
+        maxAzs: 2,
+        natGateways: 0,
+      });
+
+      const testStack = new LoadBalancerStack(
+        testApp,
+        "TestLoadBalancerStackProject3",
+        {
+          env: {
+            account: "123456789012",
+            region: "eu-west-1",
+          },
+          envName: "test",
+          projectName: "monitoring",
+          vpc: testVpc,
+          enableHttps: false,
+          redirectHttpToHttps: false,
+          allowedCidrs: ["0.0.0.0/0"],
+          deletionProtection: false,
+          accessLogEnabled: true,
+        }
+      );
+
+      const testTemplate = Template.fromStack(testStack);
+
+      const tagsCapture = new Capture();
+      testTemplate.hasResourceProperties(
+        "AWS::ElasticLoadBalancingV2::LoadBalancer",
+        {
+          Tags: tagsCapture,
+        }
+      );
+
+      const tags = tagsCapture.asArray();
+      expect(tags).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            Key: "Project",
+            Value: "monitoring",
+          }),
+        ])
+      );
+    });
+
+    test("uses project-specific access log prefix when projectName is provided", () => {
+      const testApp = new App();
+      const testVpcStack = new Stack(testApp, "TestVpcStackProject4", {
+        env: { account: "123456789012", region: "eu-west-1" },
+      });
+      const testVpc = new ec2.Vpc(testVpcStack, "TestVpc", {
+        maxAzs: 2,
+        natGateways: 0,
+      });
+
+      const testStack = new LoadBalancerStack(
+        testApp,
+        "TestLoadBalancerStackProject4",
+        {
+          env: {
+            account: "123456789012",
+            region: "eu-west-1",
+          },
+          envName: "test",
+          projectName: "monitoring",
+          vpc: testVpc,
+          enableHttps: false,
+          redirectHttpToHttps: false,
+          allowedCidrs: ["0.0.0.0/0"],
+          deletionProtection: false,
+          accessLogEnabled: true,
+        }
+      );
+
+      const testTemplate = Template.fromStack(testStack);
+
+      // Check that ALB has access logs configured with project-specific prefix
+      testTemplate.hasResourceProperties(
+        "AWS::ElasticLoadBalancingV2::LoadBalancer",
+        {
+          LoadBalancerAttributes: Match.arrayWith([
+            Match.objectLike({
+              Key: "access_logs.s3.prefix",
+              Value: "test/monitoring/alb",
+            }),
+          ]),
+        }
+      );
+    });
+
+    test("maintains backward compatibility when projectName is not provided", () => {
+      const testApp = new App();
+      const testVpcStack = new Stack(testApp, "TestVpcStackNoProject", {
+        env: { account: "123456789012", region: "eu-west-1" },
+      });
+      const testVpc = new ec2.Vpc(testVpcStack, "TestVpc", {
+        maxAzs: 2,
+        natGateways: 0,
+      });
+
+      const testStack = new LoadBalancerStack(
+        testApp,
+        "TestLoadBalancerStackNoProject",
+        {
+          env: {
+            account: "123456789012",
+            region: "eu-west-1",
+          },
+          envName: "test",
+          vpc: testVpc,
+          loadBalancerName: "test-alb",
+          enableHttps: false,
+          redirectHttpToHttps: false,
+          allowedCidrs: ["0.0.0.0/0"],
+          deletionProtection: false,
+          accessLogEnabled: true,
+        }
+      );
+
+      const testTemplate = Template.fromStack(testStack);
+
+      // Should use default naming without project name
+      testTemplate.hasOutput("LoadBalancerArn", {
+        Export: {
+          Name: "test-alb-arn",
+        },
+      });
+
+      // Should not have Project tag
+      const tagsCapture = new Capture();
+      testTemplate.hasResourceProperties(
+        "AWS::ElasticLoadBalancingV2::LoadBalancer",
+        {
+          Tags: tagsCapture,
+        }
+      );
+
+      const tags = tagsCapture.asArray();
+      const hasProjectTag = tags.some(
+        (tag: any) => tag.Key === "Project"
+      );
+      expect(hasProjectTag).toBe(false);
     });
   });
 
@@ -395,6 +650,9 @@ describe("LoadBalancerStack with HTTPS Test Suite", () => {
     test("exports HTTPS listener ARN", () => {
       template.hasOutput("HttpsListenerArn", {
         Description: "HTTPS Listener ARN",
+        Export: {
+          Name: "production-https-listener-arn",
+        },
       });
     });
   });
