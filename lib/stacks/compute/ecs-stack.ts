@@ -261,14 +261,47 @@ export class AutoScalingGroupConstruct extends Construct {
       .substring(0, 255);
 
     // Ensure name doesn't start with forbidden prefixes
+    // AWS rejects names that START with "aws", "ecs", or "fargate" (case-insensitive)
+    // This includes: "ecs-...", "ecs...", "ECS-...", etc.
     const forbiddenPrefixes = ["aws", "ecs", "fargate"];
+    const lowerName = capacityProviderName.toLowerCase();
+
+    // Check if name starts with any forbidden prefix (with or without hyphen)
+    let needsPrefix = false;
     for (const prefix of forbiddenPrefixes) {
+      // Check exact match or starts with prefix (with or without hyphen/underscore)
       if (
-        capacityProviderName.startsWith(`${prefix}-`) ||
-        capacityProviderName === prefix
+        lowerName === prefix ||
+        lowerName.startsWith(`${prefix}-`) ||
+        lowerName.startsWith(`${prefix}_`) ||
+        lowerName.startsWith(prefix) // Catches "ecsmonitoring", "aws123", etc.
       ) {
-        capacityProviderName = `cp-${capacityProviderName}`;
+        needsPrefix = true;
         break;
+      }
+    }
+
+    // Add "cp-" prefix if name starts with forbidden prefix
+    if (needsPrefix) {
+      capacityProviderName = `cp-${capacityProviderName}`;
+    }
+
+    // Final validation: ensure the name is valid after all transformations
+    if (!capacityProviderName || capacityProviderName.length === 0) {
+      throw new Error(
+        `Invalid capacity provider name: empty after transformations. ` +
+          `envName: "${envName}", applicationName: "${applicationName}"`
+      );
+    }
+
+    // Double-check: ensure final name doesn't start with forbidden prefix
+    const finalLowerName = capacityProviderName.toLowerCase();
+    for (const prefix of forbiddenPrefixes) {
+      if (finalLowerName.startsWith(prefix)) {
+        throw new Error(
+          `Capacity provider name "${capacityProviderName}" still starts with forbidden prefix "${prefix}" after transformations. ` +
+            `This should not happen - please report this as a bug.`
+        );
       }
     }
 
@@ -287,13 +320,34 @@ export class AutoScalingGroupConstruct extends Construct {
     const cfnCapacityProvider = capacityProvider.node
       .defaultChild as ecs.CfnCapacityProvider;
     if (cfnCapacityProvider) {
-      // Ensure the name is set and doesn't violate AWS constraints
+      // Final validation before setting the name
       if (!capacityProviderName || capacityProviderName.length === 0) {
         throw new Error(
-          `Invalid capacity provider name generated: "${capacityProviderName}". ` +
-            `Name must be 1-255 characters and not start with "aws", "ecs", or "fargate".`
+          `Invalid capacity provider name: empty. ` +
+            `envName: "${envName}", applicationName: "${applicationName}"`
         );
       }
+
+      // Final check: ensure name doesn't start with forbidden prefixes
+      const finalCheck = capacityProviderName.toLowerCase();
+      const forbiddenPrefixes = ["aws", "ecs", "fargate"];
+      for (const prefix of forbiddenPrefixes) {
+        if (finalCheck.startsWith(prefix)) {
+          throw new Error(
+            `Capacity provider name "${capacityProviderName}" starts with forbidden prefix "${prefix}". ` +
+              `This should have been caught earlier - please report this as a bug.`
+          );
+        }
+      }
+
+      // Ensure name only contains valid characters
+      if (!/^[a-zA-Z0-9_-]+$/.test(capacityProviderName)) {
+        throw new Error(
+          `Capacity provider name "${capacityProviderName}" contains invalid characters. ` +
+            `Only letters, numbers, underscores, and hyphens are allowed.`
+        );
+      }
+
       cfnCapacityProvider.name = capacityProviderName;
     }
 
@@ -745,14 +799,42 @@ export class EcsClusterConstruct extends Construct {
       .substring(0, 255);
 
     // Ensure name doesn't start with forbidden prefixes
+    // AWS rejects names that START with "aws", "ecs", or "fargate" (case-insensitive)
     const forbiddenPrefixes = ["aws", "ecs", "fargate"];
+    const lowerName = capacityProviderName.toLowerCase();
+
+    // Check if name starts with any forbidden prefix (with or without hyphen)
+    let needsPrefix = false;
     for (const prefix of forbiddenPrefixes) {
       if (
-        capacityProviderName.startsWith(`${prefix}-`) ||
-        capacityProviderName === prefix
+        lowerName === prefix ||
+        lowerName.startsWith(`${prefix}-`) ||
+        lowerName.startsWith(`${prefix}_`) ||
+        lowerName.startsWith(prefix)
       ) {
-        capacityProviderName = `cp-${capacityProviderName}`;
+        needsPrefix = true;
         break;
+      }
+    }
+
+    if (needsPrefix) {
+      capacityProviderName = `cp-${capacityProviderName}`;
+    }
+
+    // Final validation
+    if (!capacityProviderName || capacityProviderName.length === 0) {
+      throw new Error(
+        `Invalid capacity provider name: empty after transformations. ` +
+          `envName: "${envName}", clusterName: "${clusterName}"`
+      );
+    }
+
+    const finalLowerName = capacityProviderName.toLowerCase();
+    for (const prefix of forbiddenPrefixes) {
+      if (finalLowerName.startsWith(prefix)) {
+        throw new Error(
+          `Capacity provider name "${capacityProviderName}" still starts with forbidden prefix "${prefix}" after transformations.`
+        );
       }
     }
 
@@ -775,13 +857,34 @@ export class EcsClusterConstruct extends Construct {
     const cfnCapacityProvider = capacityProvider.node
       .defaultChild as ecs.CfnCapacityProvider;
     if (cfnCapacityProvider) {
-      // Ensure the name is set and doesn't violate AWS constraints
+      // Final validation before setting the name
       if (!capacityProviderName || capacityProviderName.length === 0) {
         throw new Error(
-          `Invalid capacity provider name generated: "${capacityProviderName}". ` +
-            `Name must be 1-255 characters and not start with "aws", "ecs", or "fargate".`
+          `Invalid capacity provider name: empty. ` +
+            `envName: "${envName}", clusterName: "${clusterName}"`
         );
       }
+
+      // Final check: ensure name doesn't start with forbidden prefixes
+      const finalCheck = capacityProviderName.toLowerCase();
+      const forbiddenPrefixes = ["aws", "ecs", "fargate"];
+      for (const prefix of forbiddenPrefixes) {
+        if (finalCheck.startsWith(prefix)) {
+          throw new Error(
+            `Capacity provider name "${capacityProviderName}" starts with forbidden prefix "${prefix}". ` +
+              `This should have been caught earlier - please report this as a bug.`
+          );
+        }
+      }
+
+      // Ensure name only contains valid characters
+      if (!/^[a-zA-Z0-9_-]+$/.test(capacityProviderName)) {
+        throw new Error(
+          `Capacity provider name "${capacityProviderName}" contains invalid characters. ` +
+            `Only letters, numbers, underscores, and hyphens are allowed.`
+        );
+      }
+
       cfnCapacityProvider.name = capacityProviderName;
     }
 
@@ -1739,14 +1842,42 @@ export class EcsStack extends cdk.Stack {
       .substring(0, 255);
 
     // Ensure name doesn't start with forbidden prefixes
+    // AWS rejects names that START with "aws", "ecs", or "fargate" (case-insensitive)
     const forbiddenPrefixes = ["aws", "ecs", "fargate"];
+    const lowerName = capacityProviderName.toLowerCase();
+
+    // Check if name starts with any forbidden prefix (with or without hyphen)
+    let needsPrefix = false;
     for (const prefix of forbiddenPrefixes) {
       if (
-        capacityProviderName.startsWith(`${prefix}-`) ||
-        capacityProviderName === prefix
+        lowerName === prefix ||
+        lowerName.startsWith(`${prefix}-`) ||
+        lowerName.startsWith(`${prefix}_`) ||
+        lowerName.startsWith(prefix)
       ) {
-        capacityProviderName = `cp-${capacityProviderName}`;
+        needsPrefix = true;
         break;
+      }
+    }
+
+    if (needsPrefix) {
+      capacityProviderName = `cp-${capacityProviderName}`;
+    }
+
+    // Final validation
+    if (!capacityProviderName || capacityProviderName.length === 0) {
+      throw new Error(
+        `Invalid capacity provider name: empty after transformations. ` +
+          `envName: "${envName}", applicationName: "${applicationName}"`
+      );
+    }
+
+    const finalLowerName = capacityProviderName.toLowerCase();
+    for (const prefix of forbiddenPrefixes) {
+      if (finalLowerName.startsWith(prefix)) {
+        throw new Error(
+          `Capacity provider name "${capacityProviderName}" still starts with forbidden prefix "${prefix}" after transformations.`
+        );
       }
     }
 
@@ -1765,13 +1896,34 @@ export class EcsStack extends cdk.Stack {
     const cfnCapacityProvider = capacityProvider.node
       .defaultChild as ecs.CfnCapacityProvider;
     if (cfnCapacityProvider) {
-      // Ensure the name is set and doesn't violate AWS constraints
+      // Final validation before setting the name
       if (!capacityProviderName || capacityProviderName.length === 0) {
         throw new Error(
-          `Invalid capacity provider name generated: "${capacityProviderName}". ` +
-            `Name must be 1-255 characters and not start with "aws", "ecs", or "fargate".`
+          `Invalid capacity provider name: empty. ` +
+            `envName: "${envName}", applicationName: "${applicationName}"`
         );
       }
+
+      // Final check: ensure name doesn't start with forbidden prefixes
+      const finalCheck = capacityProviderName.toLowerCase();
+      const forbiddenPrefixes = ["aws", "ecs", "fargate"];
+      for (const prefix of forbiddenPrefixes) {
+        if (finalCheck.startsWith(prefix)) {
+          throw new Error(
+            `Capacity provider name "${capacityProviderName}" starts with forbidden prefix "${prefix}". ` +
+              `This should have been caught earlier - please report this as a bug.`
+          );
+        }
+      }
+
+      // Ensure name only contains valid characters
+      if (!/^[a-zA-Z0-9_-]+$/.test(capacityProviderName)) {
+        throw new Error(
+          `Capacity provider name "${capacityProviderName}" contains invalid characters. ` +
+            `Only letters, numbers, underscores, and hyphens are allowed.`
+        );
+      }
+
       cfnCapacityProvider.name = capacityProviderName;
     }
 
