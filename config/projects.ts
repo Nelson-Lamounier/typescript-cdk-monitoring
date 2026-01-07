@@ -129,7 +129,7 @@ export const projects: Record<string, ProjectConfig> = {
       enableVpcEndpoints: true,
     },
     compute: {
-      instanceType: "t3.medium",
+      instanceType: "t3.small",
       minCapacity: 1,
       maxCapacity: 2,
       desiredCapacity: 1,
@@ -166,7 +166,7 @@ export const projects: Record<string, ProjectConfig> = {
       },
       production: {
         compute: {
-          instanceType: "t3.large",
+          instanceType: "t3.medium", // Production uses larger instances
           minCapacity: 2,
           maxCapacity: 4,
         },

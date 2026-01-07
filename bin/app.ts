@@ -128,11 +128,11 @@ const stackProps: cdk.StackProps = {
 };
 
 // Environment-specific NAT gateway configuration
-// Production uses HA NAT gateways, others use cost-optimised single gateway
+// Production uses HA NAT gateways, others use cost-optimised configuration
 // Project-specific config can override this via projectConfig.networking.natGateways
 const natGatewaysConfig: Record<string, number> = {
   pipeline: 0, // Pipeline account - no internet access needed
-  development: 1, // Single NAT gateway for cost optimisation
+  development: 0, // No NAT gateway for cost optimisation in development
   staging: 1, // Single NAT gateway for cost optimisation
   production: 2, // High availability NAT gateways across AZs
 };
