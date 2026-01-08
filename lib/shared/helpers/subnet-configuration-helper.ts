@@ -85,11 +85,12 @@ export class SubnetConfigurationHelper {
   ): SubnetConfiguration {
     validateSubnetCidrMask(cidrMask);
 
+    // Note: mapPublicIpOnLaunch is not included for private subnets
+    // CDK does not allow this property for PRIVATE_WITH_EGRESS or PRIVATE_ISOLATED subnets
     return {
       name: "Private",
       subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
       cidrMask,
-      mapPublicIpOnLaunch: false,
       tags: {
         Type: "Private",
         "Network-Tier": "Private",
@@ -123,11 +124,12 @@ export class SubnetConfigurationHelper {
   ): SubnetConfiguration {
     validateSubnetCidrMask(cidrMask);
 
+    // Note: mapPublicIpOnLaunch is not included for isolated subnets
+    // CDK does not allow this property for PRIVATE_WITH_EGRESS or PRIVATE_ISOLATED subnets
     return {
       name: "Isolated",
       subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
       cidrMask,
-      mapPublicIpOnLaunch: false,
       tags: {
         Type: "Isolated",
         "Network-Tier": "Isolated",

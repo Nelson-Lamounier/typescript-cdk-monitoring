@@ -59,3 +59,20 @@ export const SUBNET_CIDR_RECOMMENDATIONS = {
    */
   EXTRA_LARGE: 18,
 } as const;
+
+/**
+ * Default VPC CIDR block
+ * /16 provides 65,536 IP addresses
+ */
+export const DEFAULT_VPC_CIDR = "10.0.0.0/16";
+
+/**
+ * Default number of availability zones
+ */
+export const DEFAULT_MAX_AZS = 2;
+
+/**
+ * Default number of NAT gateways
+ * 0 = no NAT gateways (no internet access for private subnets)
+ */
+export const DEFAULT_NAT_GATEWAYS = 0;

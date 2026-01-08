@@ -84,7 +84,8 @@ describe("SubnetConfigurationHelper", () => {
 
       expect(config.cidrMask).toBe(20);
       expect(config.subnetType).toBe(ec2.SubnetType.PRIVATE_WITH_EGRESS);
-      expect(config.mapPublicIpOnLaunch).toBe(false);
+      // mapPublicIpOnLaunch should not be set for private subnets (CDK doesn't allow it)
+      expect(config.mapPublicIpOnLaunch).toBeUndefined();
     });
 
     it("should throw error for invalid CIDR mask", () => {
@@ -110,7 +111,8 @@ describe("SubnetConfigurationHelper", () => {
       expect(config.name).toBe("Isolated");
       expect(config.subnetType).toBe(ec2.SubnetType.PRIVATE_ISOLATED);
       expect(config.cidrMask).toBe(24);
-      expect(config.mapPublicIpOnLaunch).toBe(false);
+      // mapPublicIpOnLaunch should not be set for isolated subnets (CDK doesn't allow it)
+      expect(config.mapPublicIpOnLaunch).toBeUndefined();
       expect(config.tags).toHaveProperty("Type", "Isolated");
       expect(config.tags).toHaveProperty("Network-Tier", "Isolated");
     });
@@ -120,7 +122,8 @@ describe("SubnetConfigurationHelper", () => {
 
       expect(config.cidrMask).toBe(20);
       expect(config.subnetType).toBe(ec2.SubnetType.PRIVATE_ISOLATED);
-      expect(config.mapPublicIpOnLaunch).toBe(false);
+      // mapPublicIpOnLaunch should not be set for isolated subnets (CDK doesn't allow it)
+      expect(config.mapPublicIpOnLaunch).toBeUndefined();
     });
 
     it("should throw error for invalid CIDR mask", () => {
@@ -136,6 +139,8 @@ describe("SubnetConfigurationHelper", () => {
       expect(config.tags).toHaveProperty("Type", "Isolated");
       expect(config.tags).toHaveProperty("Network-Tier", "Isolated");
       expect(config.tags).toHaveProperty("Purpose", "Databases");
+      // mapPublicIpOnLaunch should not be set for isolated subnets
+      expect(config.mapPublicIpOnLaunch).toBeUndefined();
     });
   });
 

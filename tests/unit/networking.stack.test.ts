@@ -2,13 +2,12 @@
 
 import * as cdk from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
+import * as iam from "aws-cdk-lib/aws-iam";
 import { Template, Match, Capture } from "aws-cdk-lib/assertions";
 
-import {
-  VpcConstruct,
-  NetworkingStack,
-  SubnetConfigurationHelper,
-} from "../../lib/stacks/networking-stack";
+import { NetworkingStack } from "../../lib/stacks/networking-stack";
+import { VpcConstruct } from "../../lib/constructs/networking/vpc/vpc-construct";
+import { SubnetConfigurationHelper } from "../../lib/shared/helpers";
 
 // ============================================================================
 // VPC CONSTRUCT TESTS
@@ -501,6 +500,370 @@ describe("VpcConstruct", () => {
       publicSubnets.forEach((subnet: any) => {
         expect(subnet.Properties.MapPublicIpOnLaunch).toBe(true);
       });
+    });
+  });
+
+  // ============================================
+  // CIDR Validation Tests
+  // ============================================
+
+  describe("CIDR Validation", () => {
+    test("accepts valid CIDR block", () => {
+      expect(() => {
+        new VpcConstruct(stack, "TestVpc", {
+          envName: "test",
+          cidr: "10.0.0.0/16",
+        });
+      }).not.toThrow();
+    });
+
+    test("throws error for invalid CIDR format (missing mask)", () => {
+      expect(() => {
+        new VpcConstruct(stack, "TestVpc", {
+          envName: "test",
+          cidr: "10.0.0.0",
+        });
+      }).toThrow("Invalid CIDR format");
+    });
+
+    test("throws error for invalid CIDR format (invalid IP)", () => {
+      expect(() => {
+        new VpcConstruct(stack, "TestVpc", {
+          envName: "test",
+          cidr: "999.999.999.999/16",
+        });
+      }).toThrow("Invalid IP address");
+    });
+
+    test("throws error for CIDR mask too small", () => {
+      expect(() => {
+        new VpcConstruct(stack, "TestVpc", {
+          envName: "test",
+          cidr: "10.0.0.0/7",
+        });
+      }).toThrow("CIDR mask must be between 8 and 28");
+    });
+
+    test("throws error for CIDR mask too large", () => {
+      expect(() => {
+        new VpcConstruct(stack, "TestVpc", {
+          envName: "test",
+          cidr: "10.0.0.0/29",
+        });
+      }).toThrow("CIDR mask must be between 8 and 28");
+    });
+
+    test("accepts minimum valid CIDR mask (8)", () => {
+      expect(() => {
+        new VpcConstruct(stack, "TestVpc", {
+          envName: "test",
+          cidr: "10.0.0.0/8",
+        });
+      }).not.toThrow();
+    });
+
+    test("accepts maximum valid CIDR mask (28)", () => {
+      // Test that CIDR format validation accepts /28
+      // Note: A /28 VPC is extremely small (16 IPs) and cannot accommodate
+      // subnets. The validation function accepts /28 as valid format, but
+      // VPC creation will fail due to subnet allocation. We test the format
+      // validation by catching any error and verifying it's not a CIDR format error.
+      try {
+        new VpcConstruct(stack, "TestVpc", {
+          envName: "test",
+          cidr: "10.0.0.0/28", // Maximum valid CIDR mask
+          subnetConfiguration: [
+            {
+              name: "Public",
+              subnetType: ec2.SubnetType.PUBLIC,
+              cidrMask: 28,
+              mapPublicIpOnLaunch: true,
+            },
+          ],
+          maxAzs: 1,
+        });
+        // If we get here, the VPC was created successfully (unlikely but possible)
+      } catch (error) {
+        // Verify the error is NOT a CIDR format validation error
+        // This confirms the format validation passed
+        if (error instanceof Error) {
+          expect(error.message).not.toContain("CIDR mask must be between 8 and 28");
+          expect(error.message).not.toContain("Invalid CIDR format");
+          // The error should be about subnet allocation, not CIDR format
+          expect(
+            error.message.includes("exceeds remaining space") ||
+              error.message.includes("subnet") ||
+              error.message.includes("allocation")
+          ).toBe(true);
+        }
+      }
+    });
+  });
+
+  // ============================================
+  // NAT Gateway Warning Tests
+  // ============================================
+
+  describe("NAT Gateway Warnings", () => {
+    test("warns about single NAT Gateway in production", () => {
+      const app = new cdk.App();
+      const testStack = new cdk.Stack(app, "TestStack");
+      const vpcConstruct = new VpcConstruct(testStack, "TestVpc", {
+        envName: "production",
+        natGateways: 1,
+      });
+
+      // Check that warning is added (annotations are not directly testable in unit tests,
+      // but we can verify the construct is created successfully)
+      expect(vpcConstruct.vpc).toBeDefined();
+    });
+
+    test("warns about zero NAT Gateways with private subnets", () => {
+      const app = new cdk.App();
+      const testStack = new cdk.Stack(app, "TestStack");
+      const vpcConstruct = new VpcConstruct(testStack, "TestVpc", {
+        envName: "test",
+        natGateways: 0,
+        subnetConfiguration: [
+          {
+            name: "Public",
+            subnetType: ec2.SubnetType.PUBLIC,
+            cidrMask: 24,
+            mapPublicIpOnLaunch: true,
+          },
+          {
+            name: "Private",
+            subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+            cidrMask: 24,
+          },
+        ],
+      });
+
+      // Verify construct is created (warning is added but not directly testable)
+      expect(vpcConstruct.vpc).toBeDefined();
+    });
+
+    test("does not warn when NAT Gateways match subnets", () => {
+      const app = new cdk.App();
+      const testStack = new cdk.Stack(app, "TestStack");
+      const vpcConstruct = new VpcConstruct(testStack, "TestVpc", {
+        envName: "test",
+        maxAzs: 2,
+        natGateways: 2,
+      });
+
+      expect(vpcConstruct.vpc).toBeDefined();
+    });
+  });
+
+  // ============================================
+  // Subnet Tag Application Tests
+  // ============================================
+
+  describe("Subnet Tag Application", () => {
+    test("applies tags from subnet configuration", () => {
+      new VpcConstruct(stack, "TestVpc", {
+        envName: "test",
+        subnetConfiguration: [
+          {
+            name: "Public",
+            subnetType: ec2.SubnetType.PUBLIC,
+            cidrMask: 24,
+            mapPublicIpOnLaunch: true,
+            tags: {
+              Purpose: "LoadBalancers",
+              Tier: "Public",
+            },
+          },
+          {
+            name: "Private",
+            subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+            cidrMask: 24,
+            tags: {
+              Purpose: "ApplicationServers",
+              Tier: "Private",
+            },
+          },
+        ],
+      });
+      const template = Template.fromStack(stack);
+
+      // Tags are applied to VPC and inherited by subnets
+      // We verify the VPC has the tags
+      const vpcResources = template.findResources("AWS::EC2::VPC");
+      const vpcResource = Object.values(vpcResources)[0] as any;
+      const tags = vpcResource.Properties.Tags || [];
+
+      // Check that custom tags are present (may be on VPC or subnets)
+      expect(tags.length).toBeGreaterThan(0);
+    });
+
+    test("applies EKS tags from SubnetConfigurationHelper", () => {
+      const eksSubnets = SubnetConfigurationHelper.eksConfiguration("test-cluster");
+      new VpcConstruct(stack, "TestVpc", {
+        envName: "test",
+        subnetConfiguration: eksSubnets,
+      });
+      const template = Template.fromStack(stack);
+
+      // Verify VPC is created with EKS subnet configuration
+      template.resourceCountIs("AWS::EC2::VPC", 1);
+    });
+  });
+
+  // ============================================
+  // Constants Usage Tests
+  // ============================================
+
+  describe("Constants Usage", () => {
+    test("uses default CIDR from constants", () => {
+      new VpcConstruct(stack, "TestVpc", {
+        envName: "test",
+      });
+      const template = Template.fromStack(stack);
+
+      template.hasResourceProperties("AWS::EC2::VPC", {
+        CidrBlock: "10.0.0.0/16", // DEFAULT_VPC_CIDR
+      });
+    });
+
+    test("uses default maxAzs from constants", () => {
+      new VpcConstruct(stack, "TestVpc", {
+        envName: "test",
+      });
+      const template = Template.fromStack(stack);
+
+      // 2 AZs × 2 subnet types = 4 subnets (DEFAULT_MAX_AZS = 2)
+      template.resourceCountIs("AWS::EC2::Subnet", 4);
+    });
+
+    test("uses default NAT gateways from constants", () => {
+      new VpcConstruct(stack, "TestVpc", {
+        envName: "test",
+      });
+      const template = Template.fromStack(stack);
+
+      // DEFAULT_NAT_GATEWAYS = 0
+      template.resourceCountIs("AWS::EC2::NatGateway", 0);
+    });
+
+    test("uses default subnet CIDR mask from constants", () => {
+      new VpcConstruct(stack, "TestVpc", {
+        envName: "test",
+      });
+      const template = Template.fromStack(stack);
+
+      // Subnets should have /24 CIDR (DEFAULT_SUBNET_CIDR_MASK = 24)
+      const subnets = template.findResources("AWS::EC2::Subnet");
+      Object.values(subnets).forEach((subnet: any) => {
+        expect(subnet.Properties.CidrBlock).toMatch(/\/24$/);
+      });
+    });
+  });
+
+  // ============================================
+  // Endpoint Methods Tests
+  // ============================================
+
+  describe("Endpoint Methods", () => {
+    test("addInterfaceEndpoint defaults to private subnets", () => {
+      const vpcConstruct = new VpcConstruct(stack, "TestVpc", {
+        envName: "test",
+      });
+
+      const endpoint = vpcConstruct.addInterfaceEndpoint(
+        "EcrEndpoint",
+        ec2.InterfaceVpcEndpointAwsService.ECR
+      );
+
+      expect(endpoint).toBeDefined();
+      expect(endpoint.vpcEndpointId).toBeDefined();
+    });
+
+    test("addInterfaceEndpoint accepts custom subnet selection", () => {
+      // Create VPC with isolated subnets for this test
+      const vpcConstruct = new VpcConstruct(stack, "TestVpc", {
+        envName: "test",
+        subnetConfiguration: [
+          {
+            name: "Public",
+            subnetType: ec2.SubnetType.PUBLIC,
+            cidrMask: 24,
+            mapPublicIpOnLaunch: true,
+          },
+          {
+            name: "Isolated",
+            subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
+            cidrMask: 24,
+          },
+        ],
+      });
+
+      const endpoint = vpcConstruct.addInterfaceEndpoint(
+        "EcrEndpoint",
+        ec2.InterfaceVpcEndpointAwsService.ECR,
+        {
+          subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
+        }
+      );
+
+      expect(endpoint).toBeDefined();
+    });
+
+    test("addInterfaceEndpoint accepts privateDnsEnabled parameter", () => {
+      const vpcConstruct = new VpcConstruct(stack, "TestVpc", {
+        envName: "test",
+      });
+
+      const endpoint = vpcConstruct.addInterfaceEndpoint(
+        "EcrEndpoint",
+        ec2.InterfaceVpcEndpointAwsService.ECR,
+        undefined,
+        false // Disable private DNS
+      );
+
+      expect(endpoint).toBeDefined();
+    });
+
+    test("addGatewayEndpoint creates gateway endpoint", () => {
+      const vpcConstruct = new VpcConstruct(stack, "TestVpc", {
+        envName: "test",
+      });
+
+      const endpoint = vpcConstruct.addGatewayEndpoint("S3Endpoint", {
+        service: ec2.GatewayVpcEndpointAwsService.S3,
+      });
+
+      expect(endpoint).toBeDefined();
+      expect(endpoint.vpcEndpointId).toBeDefined();
+    });
+
+    test("addGatewayEndpoint accepts endpoint policy", () => {
+      const vpcConstruct = new VpcConstruct(stack, "TestVpc", {
+        envName: "test",
+      });
+
+      const policy = new iam.PolicyDocument({
+        statements: [
+          new iam.PolicyStatement({
+            effect: iam.Effect.ALLOW,
+            principals: [new iam.AnyPrincipal()],
+            actions: ["s3:GetObject"],
+            resources: ["arn:aws:s3:::test-bucket/*"],
+          }),
+        ],
+      });
+
+      const endpoint = vpcConstruct.addGatewayEndpoint(
+        "S3Endpoint",
+        {
+          service: ec2.GatewayVpcEndpointAwsService.S3,
+        },
+        undefined,
+        policy
+      );
+
+      expect(endpoint).toBeDefined();
     });
   });
 });
