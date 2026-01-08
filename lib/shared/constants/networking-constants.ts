@@ -131,3 +131,220 @@ export const DEFAULT_VPC_PEERING_LAMBDA_TIMEOUT_SECONDS = 60;
  * Default SSM parameter path prefix for VPC peering connections
  */
 export const DEFAULT_VPC_PEERING_SSM_PREFIX = "/vpc-peering";
+
+/**
+ * Common network ports for security group rules
+ *
+ * These constants help avoid magic numbers and improve code readability.
+ * Use these when creating security group ingress/egress rules.
+ */
+export const COMMON_PORTS = {
+  /**
+   * HTTP - Standard web traffic
+   */
+  HTTP: 80,
+
+  /**
+   * HTTPS - Secure web traffic (TLS/SSL)
+   */
+  HTTPS: 443,
+
+  /**
+   * SSH - Secure shell access
+   */
+  SSH: 22,
+
+  /**
+   * RDP - Remote Desktop Protocol
+   */
+  RDP: 3389,
+
+  /**
+   * MySQL - MySQL database server
+   */
+  MYSQL: 3306,
+
+  /**
+   * PostgreSQL - PostgreSQL database server
+   */
+  POSTGRESQL: 5432,
+
+  /**
+   * MongoDB - MongoDB database server
+   */
+  MONGODB: 27017,
+
+  /**
+   * Redis - Redis cache server
+   */
+  REDIS: 6379,
+
+  /**
+   * Memcached - Memcached cache server
+   */
+  MEMCACHED: 11211,
+
+  /**
+   * SMTP - Simple Mail Transfer Protocol
+   */
+  SMTP: 25,
+
+  /**
+   * SMTP Submission - SMTP submission port
+   */
+  SMTP_SUBMISSION: 587,
+
+  /**
+   * IMAP - Internet Message Access Protocol
+   */
+  IMAP: 143,
+
+  /**
+   * IMAPS - IMAP over SSL
+   */
+  IMAPS: 993,
+
+  /**
+   * POP3 - Post Office Protocol 3
+   */
+  POP3: 110,
+
+  /**
+   * POP3S - POP3 over SSL
+   */
+  POP3S: 995,
+
+  /**
+   * DNS - Domain Name System
+   */
+  DNS: 53,
+
+  /**
+   * NTP - Network Time Protocol
+   */
+  NTP: 123,
+
+  /**
+   * LDAP - Lightweight Directory Access Protocol
+   */
+  LDAP: 389,
+
+  /**
+   * LDAPS - LDAP over SSL
+   */
+  LDAPS: 636,
+
+  /**
+   * FTP - File Transfer Protocol
+   */
+  FTP: 21,
+
+  /**
+   * FTPS - FTP over SSL
+   */
+  FTPS: 990,
+
+  /**
+   * SFTP - SSH File Transfer Protocol
+   */
+  SFTP: 22, // Same as SSH
+
+  /**
+   * Telnet - Telnet protocol (not recommended for security)
+   */
+  TELNET: 23,
+
+  /**
+   * Node Exporter - Prometheus Node Exporter metrics endpoint
+   */
+  NODE_EXPORTER: 9100,
+
+  /**
+   * Prometheus - Prometheus server metrics endpoint
+   */
+  PROMETHEUS: 9090,
+
+  /**
+   * Grafana - Grafana web interface
+   */
+  GRAFANA: 3000,
+
+  /**
+   * Elasticsearch - Elasticsearch HTTP API
+   */
+  ELASTICSEARCH: 9200,
+
+  /**
+   * Kibana - Kibana web interface
+   */
+  KIBANA: 5601,
+
+  /**
+   * Consul - Consul service discovery
+   */
+  CONSUL: 8500,
+
+  /**
+   * Vault - HashiCorp Vault API
+   */
+  VAULT: 8200,
+
+  /**
+   * Nomad - HashiCorp Nomad API
+   */
+  NOMAD: 4646,
+
+  /**
+   * Docker Registry - Docker registry API
+   */
+  DOCKER_REGISTRY: 5000,
+
+  /**
+   * Kubernetes API Server
+   */
+  KUBERNETES_API: 6443,
+
+  /**
+   * Kubernetes Kubelet API
+   */
+  KUBERNETES_KUBELET: 10250,
+
+  /**
+   * Kubernetes etcd client
+   */
+  KUBERNETES_ETCD_CLIENT: 2379,
+
+  /**
+   * Kubernetes etcd peer
+   */
+  KUBERNETES_ETCD_PEER: 2380,
+} as const;
+
+/**
+ * Common port ranges for security group rules
+ */
+export const COMMON_PORT_RANGES = {
+  /**
+   * Ephemeral port range for Linux (commonly used for outbound connections)
+   * Range: 32768-65535
+   */
+  LINUX_EPHEMERAL: { from: 32768, to: 65535 },
+
+  /**
+   * Ephemeral port range for Windows
+   * Range: 49152-65535
+   */
+  WINDOWS_EPHEMERAL: { from: 49152, to: 65535 },
+
+  /**
+   * Well-known ports range
+   * Range: 0-1023
+   */
+  WELL_KNOWN: { from: 0, to: 1023 },
+
+  /**
+   * Registered ports range
+   * Range: 1024-49151
+   */
+  REGISTERED: { from: 1024, to: 49151 },
+} as const;

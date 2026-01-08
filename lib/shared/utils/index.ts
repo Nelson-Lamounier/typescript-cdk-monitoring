@@ -18,4 +18,10 @@ export {
   validateCidr,
   validateSubnetCidrMask,
   validateSubnetConfiguration,
+  cidrOverlaps,
+  validateAccountId,
+  validateRegion,
 } from "./validation";
+
+export { createVpcPeeringProvider } from "./lambda-helpers";
+export { getUniqueRouteTables } from "./route-table-helpers";

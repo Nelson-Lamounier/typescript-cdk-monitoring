@@ -101,3 +101,69 @@ export interface VpcPeeringConstructProps {
    */
   enableDnsResolution?: boolean;
 }
+
+/**
+ * Security Group rule configuration
+ */
+export interface SecurityGroupRule {
+  peer: ec2.IPeer;
+  port: ec2.Port;
+  description?: string;
+}
+
+/**
+ * Security Group construct properties
+ */
+export interface SecurityGroupConstructProps {
+  /**
+   * VPC where the security group will be created
+   * Required - cannot be undefined
+   */
+  vpc: ec2.IVpc;
+
+  /**
+   * Name for the security group
+   * Must be non-empty and follow AWS naming conventions
+   */
+  groupName: string;
+
+  /**
+   * Description for the security group
+   * Must be at least 10 characters and provide meaningful context
+   */
+  description: string;
+
+  /**
+   * Environment name for tagging and resource naming
+   * Used for standard tagging (Environment tag)
+   */
+  envName: string;
+
+  /**
+   * Project name for resource naming and tagging (optional)
+   * Used for project-specific tagging when provided
+   */
+  projectName?: string;
+
+  /**
+   * Allow all outbound traffic
+   * @default false (security best practice - requires explicit egress rules)
+   *
+   * WARNING: Setting to true allows unrestricted outbound access.
+   * In production environments, prefer explicit egress rules for better security.
+   */
+  allowAllOutbound?: boolean;
+
+  /**
+   * Ingress rules to add to the security group
+   * @default []
+   */
+  ingressRules?: SecurityGroupRule[];
+
+  /**
+   * Egress rules to add to the security group
+   * Note: These are always respected, even if allowAllOutbound=true
+   * @default []
+   */
+  egressRules?: SecurityGroupRule[];
+}
