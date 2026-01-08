@@ -348,3 +348,78 @@ export const COMMON_PORT_RANGES = {
    */
   REGISTERED: { from: 1024, to: 49151 },
 } as const;
+
+/**
+ * Application Load Balancer default configuration constants
+ */
+
+/**
+ * Default ALB idle timeout (seconds)
+ * 60 seconds is the AWS default and suitable for most web applications
+ */
+export const DEFAULT_ALB_IDLE_TIMEOUT_SECONDS = 60;
+
+/**
+ * Minimum ALB idle timeout (seconds)
+ * AWS minimum is 1 second
+ */
+export const MIN_ALB_IDLE_TIMEOUT_SECONDS = 1;
+
+/**
+ * Maximum ALB idle timeout (seconds)
+ * AWS maximum is 4000 seconds
+ */
+export const MAX_ALB_IDLE_TIMEOUT_SECONDS = 4000;
+
+/**
+ * Default ALB access log retention period (days)
+ * 90 days balances cost with compliance requirements
+ * Production environments may require longer retention
+ */
+export const DEFAULT_ALB_ACCESS_LOG_RETENTION_DAYS = 90;
+
+/**
+ * Minimum recommended ALB access log retention for production environments
+ * 30 days is the minimum for compliance and security analysis
+ */
+export const MIN_PRODUCTION_ALB_ACCESS_LOG_RETENTION_DAYS = 30;
+
+/**
+ * Default ALB access log transition to Infrequent Access (days)
+ * Transition logs to IA after 30 days to reduce storage costs
+ */
+export const DEFAULT_ALB_ACCESS_LOG_TRANSITION_TO_IA_DAYS = 30;
+
+/**
+ * Default ALB access log prefix in S3 bucket
+ */
+export const DEFAULT_ALB_ACCESS_LOG_PREFIX = "alb-logs";
+
+/**
+ * Recommended ALB access log retention periods for different environments
+ */
+export const ALB_ACCESS_LOG_RETENTION_RECOMMENDATIONS = {
+  /**
+   * Development environments
+   * Short retention for cost optimisation
+   */
+  DEVELOPMENT: 30,
+
+  /**
+   * Staging environments
+   * Moderate retention for testing and validation
+   */
+  STAGING: 60,
+
+  /**
+   * Production environments
+   * Extended retention for compliance and security analysis
+   */
+  PRODUCTION: 90,
+
+  /**
+   * High-compliance production environments
+   * Maximum retention for audit and forensic analysis
+   */
+  HIGH_COMPLIANCE: 365,
+} as const;

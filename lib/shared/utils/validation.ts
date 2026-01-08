@@ -1,5 +1,7 @@
 /** @format */
 
+import * as ec2 from "aws-cdk-lib/aws-ec2";
+
 import {
   MIN_SUBNET_CIDR_MASK,
   MAX_SUBNET_CIDR_MASK,
@@ -396,6 +398,110 @@ export function validateVpcProvided(vpc: unknown): void {
         "  const sg = new SecurityGroupConstruct(this, 'SG', {\n" +
         "    vpc: vpc.vpc, // Ensure vpc property is set\n" +
         "    ...\n" +
+        "  });"
+    );
+  }
+}
+
+/**
+ * Validate load balancer name format
+ *
+ * AWS load balancer names must:
+ * - Be 1-32 characters long
+ * - Contain only alphanumeric characters and hyphens
+ * - Not start or end with a hyphen
+ * - Be unique within the account and region
+ *
+ * @param loadBalancerName - Load balancer name to validate
+ * @throws Error if name format is invalid
+ *
+ * @example
+ * ```typescript
+ * validateLoadBalancerName("my-alb"); // Valid
+ * validateLoadBalancerName(""); // Throws error (empty)
+ * validateLoadBalancerName("-invalid"); // Throws error (starts with hyphen)
+ * ```
+ */
+export function validateLoadBalancerName(loadBalancerName: string): void {
+  if (!loadBalancerName || typeof loadBalancerName !== "string") {
+    throw new Error(
+      "Load balancer name is required and must be a non-empty string.\n\n" +
+        "Troubleshooting Steps:\n" +
+        " 1. Ensure loadBalancerName is provided in AlbConstructProps\n" +
+        " 2. Verify the name is not undefined or null\n" +
+        " 3. Check that the name follows AWS naming conventions"
+    );
+  }
+
+  const trimmedName = loadBalancerName.trim();
+  if (trimmedName.length === 0) {
+    throw new Error(
+      "Load balancer name cannot be empty or contain only whitespace.\n\n" +
+        "Troubleshooting Steps:\n" +
+        " 1. Provide a meaningful name for the load balancer\n" +
+        " 2. Use alphanumeric characters and hyphens only\n" +
+        " 3. Example: 'web-alb' or 'api-load-balancer'"
+    );
+  }
+
+  if (trimmedName.length > 32) {
+    throw new Error(
+      `Load balancer name exceeds maximum length of 32 characters.\n\n` +
+        `Received: ${trimmedName.length} characters.\n` +
+        `Please shorten the name to comply with AWS limits.`
+    );
+  }
+
+  if (loadBalancerName !== trimmedName) {
+    throw new Error(
+      "Load balancer name cannot have leading or trailing spaces.\n\n" +
+        `Received: "${loadBalancerName}"\n` +
+        `Trimmed: "${trimmedName}"\n\n` +
+        "Please remove leading/trailing whitespace."
+    );
+  }
+
+  // AWS allows: alphanumeric and hyphens, but cannot start or end with hyphen
+  const validNameRegex = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$/;
+  if (!validNameRegex.test(trimmedName)) {
+    throw new Error(
+      `Load balancer name contains invalid characters or format: "${trimmedName}"\n\n` +
+        "Allowed characters: alphanumeric and hyphens\n" +
+        "Cannot start or end with a hyphen\n" +
+        "Example valid names: 'web-alb', 'api-load-balancer', 'alb01'"
+    );
+  }
+}
+
+/**
+ * Validate that public subnets exist for internet-facing load balancer
+ *
+ * @param vpc - VPC to check for public subnets
+ * @throws Error if no public subnets found
+ *
+ * @example
+ * ```typescript
+ * validatePublicSubnetsForInternetFacing(vpc); // Valid if public subnets exist
+ * ```
+ */
+export function validatePublicSubnetsForInternetFacing(
+  vpc: ec2.IVpc
+): void {
+  const publicSubnets = vpc.publicSubnets;
+  if (!publicSubnets || publicSubnets.length === 0) {
+    throw new Error(
+      "Internet-facing load balancer requires public subnets, but none were found in the VPC.\n\n" +
+        "Troubleshooting Steps:\n" +
+        " 1. Ensure the VPC has public subnets configured\n" +
+        " 2. Verify subnet configuration includes PUBLIC subnet type\n" +
+        " 3. Check that subnets are in different availability zones\n" +
+        " 4. Consider using internal load balancer (internetFacing: false) if public subnets are not available\n\n" +
+        "Example VPC configuration:\n" +
+        "  const vpc = new ec2.Vpc(this, 'Vpc', {\n" +
+        "    subnetConfiguration: [\n" +
+        "      { name: 'Public', subnetType: ec2.SubnetType.PUBLIC, cidrMask: 24 },\n" +
+        "      { name: 'Private', subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS, cidrMask: 24 },\n" +
+        "    ],\n" +
         "  });"
     );
   }
