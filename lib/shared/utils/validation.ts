@@ -115,3 +115,127 @@ import {
     // Note: We don't enforce strict network address validation as some use cases
     // may require non-zero network addresses, but the format must be valid
   }
+
+  /**
+   * Check if two CIDR blocks overlap
+   *
+   * Two CIDR blocks overlap if one contains the other or they share any IP addresses.
+   * VPC peering connections cannot be established between VPCs with overlapping CIDRs.
+   *
+   * @param cidr1 - First CIDR block (e.g., "10.0.0.0/16")
+   * @param cidr2 - Second CIDR block (e.g., "10.0.0.0/24")
+   * @returns true if the CIDR blocks overlap, false otherwise
+   *
+   * @example
+   * ```typescript
+   * cidrOverlaps("10.0.0.0/16", "10.0.0.0/24"); // Returns true (overlaps)
+   * cidrOverlaps("10.0.0.0/16", "172.16.0.0/16"); // Returns false (no overlap)
+   * ```
+   */
+  export function cidrOverlaps(cidr1: string, cidr2: string): boolean {
+    // Validate both CIDR blocks first
+    validateCidr(cidr1);
+    validateCidr(cidr2);
+
+    // Parse CIDR blocks
+    const parseCidr = (cidr: string): { network: number; mask: number } => {
+      const [ipAddress, maskStr] = cidr.split("/");
+      const mask = parseInt(maskStr, 10);
+      const octets = ipAddress.split(".").map((octet) => parseInt(octet, 10));
+
+      // Convert IP to 32-bit integer
+      const network =
+        (octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3];
+
+      return { network, mask };
+    };
+
+    const cidr1Parsed = parseCidr(cidr1);
+    const cidr2Parsed = parseCidr(cidr2);
+
+    // Calculate network addresses (with mask applied)
+    const mask1 = 0xffffffff << (32 - cidr1Parsed.mask);
+    const mask2 = 0xffffffff << (32 - cidr2Parsed.mask);
+
+    const network1 = cidr1Parsed.network & mask1;
+    const network2 = cidr2Parsed.network & mask2;
+
+    // Calculate network ranges
+    const size1 = Math.pow(2, 32 - cidr1Parsed.mask);
+    const size2 = Math.pow(2, 32 - cidr2Parsed.mask);
+
+    const end1 = network1 + size1 - 1;
+    const end2 = network2 + size2 - 1;
+
+    // Check for overlap: ranges overlap if one starts before the other ends
+    return (
+      (network1 >= network2 && network1 <= end2) ||
+      (network2 >= network1 && network2 <= end1)
+    );
+  }
+
+  /**
+   * Validate AWS account ID format
+   *
+   * AWS account IDs are 12-digit numbers. This function validates the format
+   * and provides helpful error messages.
+   *
+   * @param accountId - AWS account ID to validate
+   * @throws Error if account ID format is invalid
+   *
+   * @example
+   * ```typescript
+   * validateAccountId("123456789012"); // Valid
+   * validateAccountId("123"); // Throws error (too short)
+   * validateAccountId("invalid"); // Throws error (not numeric)
+   * ```
+   */
+  export function validateAccountId(accountId: string): void {
+    if (!accountId || typeof accountId !== "string") {
+      throw new Error("AWS account ID must be a non-empty string");
+    }
+
+    // AWS account IDs are exactly 12 digits
+    const accountIdRegex = /^\d{12}$/;
+    if (!accountIdRegex.test(accountId)) {
+      throw new Error(
+        `Invalid AWS account ID format: "${accountId}". ` +
+          `Account IDs must be exactly 12 digits (e.g., "123456789012"). ` +
+          `Received: ${accountId.length} characters.`
+      );
+    }
+  }
+
+  /**
+   * Validate AWS region name
+   *
+   * Validates that the region name matches known AWS region patterns.
+   * AWS regions follow the pattern: {location}-{direction}-{number}
+   * Examples: us-east-1, eu-west-1, ap-southeast-2
+   *
+   * @param region - AWS region name to validate
+   * @throws Error if region format is invalid
+   *
+   * @example
+   * ```typescript
+   * validateRegion("us-east-1"); // Valid
+   * validateRegion("eu-west-1"); // Valid
+   * validateRegion("invalid"); // Throws error
+   * ```
+   */
+  export function validateRegion(region: string): void {
+    if (!region || typeof region !== "string") {
+      throw new Error("AWS region must be a non-empty string");
+    }
+
+    // AWS region pattern: {location}-{direction}-{number}
+    // Examples: us-east-1, eu-west-1, ap-southeast-2, cn-north-1
+    const regionRegex = /^[a-z]{2}-[a-z]+-\d+$/;
+    if (!regionRegex.test(region)) {
+      throw new Error(
+        `Invalid AWS region format: "${region}". ` +
+          `Regions must follow the pattern: {location}-{direction}-{number} ` +
+          `(e.g., "us-east-1", "eu-west-1", "ap-southeast-2").`
+      );
+    }
+  }

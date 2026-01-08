@@ -105,3 +105,29 @@ export const FLOW_LOGS_RETENTION_RECOMMENDATIONS = {
    */
   HIGH_COMPLIANCE: 365,
 } as const;
+
+/**
+ * VPC Peering Lambda handler paths
+ */
+export const VPC_PEERING_LAMBDA_HANDLERS = {
+  /**
+   * Lambda handler for creating and accepting VPC peering connections
+   */
+  CREATE_ACCEPT: "handlers/vpc-peering-create-accept.ts",
+
+  /**
+   * Lambda handler for updating route tables in peer VPC
+   */
+  UPDATE_ROUTES: "handlers/vpc-peering-routes.ts",
+} as const;
+
+/**
+ * Default Lambda timeout for VPC peering operations (seconds)
+ * Peering operations typically complete in seconds, not minutes
+ */
+export const DEFAULT_VPC_PEERING_LAMBDA_TIMEOUT_SECONDS = 60;
+
+/**
+ * Default SSM parameter path prefix for VPC peering connections
+ */
+export const DEFAULT_VPC_PEERING_SSM_PREFIX = "/vpc-peering";
