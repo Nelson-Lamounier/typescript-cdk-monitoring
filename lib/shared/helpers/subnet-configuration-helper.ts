@@ -2,11 +2,11 @@
 
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 
+import { SubnetConfiguration } from "../types/networking-types";
 import {
-  SubnetConfiguration,
   DEFAULT_SUBNET_CIDR_MASK,
   SUBNET_CIDR_RECOMMENDATIONS,
-} from "../types/networking-types";
+} from "../constants/networking-constants";
 import { validateSubnetCidrMask } from "../utils/validation";
 
 /**

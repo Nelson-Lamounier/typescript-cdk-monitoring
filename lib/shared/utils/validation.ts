@@ -3,7 +3,7 @@
 import {
   MIN_SUBNET_CIDR_MASK,
   MAX_SUBNET_CIDR_MASK,
-} from "../types/networking-types";
+} from "../constants/networking-constants";
   
   /**
    * Validate subnet CIDR mask is within acceptable range

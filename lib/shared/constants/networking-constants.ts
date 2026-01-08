@@ -46,3 +46,62 @@ export const SUBNET_CIDR_RECOMMENDATIONS = {
    */
   EXTRA_LARGE: 18,
 } as const;
+
+/**
+ * Default VPC CIDR block
+ * /16 provides 65,536 IP addresses
+ */
+export const DEFAULT_VPC_CIDR = "10.0.0.0/16";
+
+/**
+ * Default number of availability zones
+ */
+export const DEFAULT_MAX_AZS = 2;
+
+/**
+ * Default number of NAT gateways
+ * 0 = no NAT gateways (no internet access for private subnets)
+ */
+export const DEFAULT_NAT_GATEWAYS = 0;
+
+/**
+ * Default VPC Flow Logs retention period (days)
+ * 7 days balances cost with basic compliance requirements
+ * Production environments should use at least 30 days
+ */
+export const DEFAULT_FLOW_LOGS_RETENTION_DAYS = 7;
+
+/**
+ * Minimum recommended VPC Flow Logs retention for production environments
+ * 30 days is the minimum for compliance and security analysis
+ */
+export const MIN_PRODUCTION_FLOW_LOGS_RETENTION_DAYS = 30;
+
+/**
+ * Recommended VPC Flow Logs retention periods for different environments
+ */
+export const FLOW_LOGS_RETENTION_RECOMMENDATIONS = {
+  /**
+   * Development environments
+   * Short retention for cost optimisation
+   */
+  DEVELOPMENT: 7,
+
+  /**
+   * Staging environments
+   * Moderate retention for testing and validation
+   */
+  STAGING: 30,
+
+  /**
+   * Production environments
+   * Extended retention for compliance and security analysis
+   */
+  PRODUCTION: 90,
+
+  /**
+   * High-compliance production environments
+   * Maximum retention for audit and forensic analysis
+   */
+  HIGH_COMPLIANCE: 365,
+} as const;
