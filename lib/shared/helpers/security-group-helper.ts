@@ -100,7 +100,7 @@ export function isOverlyBroadPort(port: ec2.Port): boolean {
  * @param peer - IP peer for the rule
  * @param port - Port for the rule
  * @param direction - Direction of the rule ('ingress' or 'egress')
- * @param fallbackDescription - Optional fallback description if auto-generation fails
+ * @param _fallbackDescription - Optional fallback description (currently unused - kept for API compatibility)
  * @returns Generated description
  *
  * @example
@@ -116,7 +116,7 @@ export function generateRuleDescription(
   peer: ec2.IPeer,
   port: ec2.Port,
   direction: "ingress" | "egress",
-  fallbackDescription?: string
+  _fallbackDescription?: string
 ): string {
   const peerString = peer.toString();
   const portString = port.toString();
