@@ -1,6 +1,8 @@
 /** @format */
 
 import * as ec2 from "aws-cdk-lib/aws-ec2";
+import * as kms from "aws-cdk-lib/aws-kms";
+import * as cdk from "aws-cdk-lib";
 
 /**
  * Subnet configuration interface for VPC subnet creation
@@ -14,65 +16,17 @@ export interface SubnetConfiguration {
 }
 
 /**
- * Default CIDR mask for subnets
- * /24 provides 251 usable IP addresses per subnet
+ * VPC Flow Logs configuration properties
  */
-export const DEFAULT_SUBNET_CIDR_MASK = 24;
-
-/**
- * Minimum allowed CIDR mask for subnets
- * /16 provides maximum subnet size
- */
-export const MIN_SUBNET_CIDR_MASK = 16;
-
-/**
- * Maximum allowed CIDR mask for subnets
- * /28 provides minimum subnet size (11 usable IPs)
- */
-export const MAX_SUBNET_CIDR_MASK = 28;
-
-/**
- * Recommended CIDR masks for different use cases
- */
-export const SUBNET_CIDR_RECOMMENDATIONS = {
-  /**
-   * Small workloads, development environments
-   * Provides ~11 usable IPs
-   */
-  SMALL: 28,
-
-  /**
-   * Standard workloads, most production environments
-   * Provides ~251 usable IPs
-   */
-  STANDARD: 24,
-
-  /**
-   * Large EKS clusters, high-density workloads
-   * Provides ~4091 usable IPs
-   */
-  LARGE: 20,
-
-  /**
-   * Very large deployments
-   * Provides ~16,379 usable IPs
-   */
-  EXTRA_LARGE: 18,
-} as const;
-
-/**
- * Default VPC CIDR block
- * /16 provides 65,536 IP addresses
- */
-export const DEFAULT_VPC_CIDR = "10.0.0.0/16";
-
-/**
- * Default number of availability zones
- */
-export const DEFAULT_MAX_AZS = 2;
-
-/**
- * Default number of NAT gateways
- * 0 = no NAT gateways (no internet access for private subnets)
- */
-export const DEFAULT_NAT_GATEWAYS = 0;
+export interface VpcFlowLogsConstructProps {
+  vpc: ec2.IVpc;
+  envName: string;
+  projectName?: string; // Project name for log group naming
+  trafficType?: ec2.FlowLogTrafficType;
+  logGroupName?: string;
+  retentionDays?: number;
+  encryptionKey?: kms.IKey; // KMS key for log encryption
+  logFormat?: ec2.LogFormat[]; // Custom log format fields for cost optimisation (e.g., [ec2.LogFormat.VERSION, ec2.LogFormat.SRC_ADDR])
+  maxAggregationInterval?: ec2.FlowLogMaxAggregationInterval; // 1min vs 10min granularity
+  removalPolicy?: cdk.RemovalPolicy; // Configurable removal policy
+}
