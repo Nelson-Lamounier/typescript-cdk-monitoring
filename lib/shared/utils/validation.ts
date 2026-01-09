@@ -22,6 +22,7 @@ import {
   MAX_CLUSTER_NAME_LENGTH,
   MIN_CLUSTER_NAME_LENGTH,
 } from "../constants/compute-constants";
+import { SSM_PARAMETER_VALIDATION } from "../constants/config-constants";
 import {
   ALLOWED_EFS_ARCHIVE_TRANSITIONS,
   DEFAULT_EFS_ACCESS_POINT_GID,
@@ -1280,6 +1281,197 @@ export function validateLogGroupName(name: string): void {
   if (!pattern.test(trimmed)) {
     throw new Error(
       "Log group name may only include alphanumeric characters and the symbols . - _ / #"
+    );
+  }
+}
+
+// ========================================
+// SSM Parameter Validation
+// ========================================
+
+/**
+ * Validate SSM Parameter name format
+ *
+ * SSM Parameter names must:
+ * - Start with a forward slash (/)
+ * - Contain only: a-z, A-Z, 0-9, period (.), hyphen (-), underscore (_), forward slash (/)
+ * - Not contain double slashes (//)
+ * - Not end with a forward slash
+ * - Be 1-1024 characters long
+ *
+ * @param parameterName - The full parameter name/path to validate
+ * @throws Error if the parameter name is invalid
+ *
+ * @example
+ * ```typescript
+ * validateSsmParameterName('/my-app/production/database/host'); // Valid
+ * validateSsmParameterName('my-param'); // Invalid - must start with /
+ * validateSsmParameterName('/my//param'); // Invalid - double slashes
+ * validateSsmParameterName('/my-param/'); // Invalid - trailing slash
+ * ```
+ */
+export function validateSsmParameterName(parameterName: string): void {
+  if (!parameterName || typeof parameterName !== "string") {
+    throw new Error(
+      "SSM parameter name is required and must be a non-empty string."
+    );
+  }
+
+  const trimmed = parameterName.trim();
+
+  // Check length
+  if (trimmed.length === 0) {
+    throw new Error("SSM parameter name cannot be empty.");
+  }
+
+  if (trimmed.length > SSM_PARAMETER_VALIDATION.MAX_NAME_LENGTH) {
+    throw new Error(
+      `SSM parameter name exceeds maximum length of ${SSM_PARAMETER_VALIDATION.MAX_NAME_LENGTH} characters.\n` +
+        `Received: ${trimmed.length} characters.\n` +
+        `Parameter: "${trimmed.substring(0, 100)}..."`
+    );
+  }
+
+  // Must start with /
+  if (!trimmed.startsWith("/")) {
+    throw new Error(
+      `SSM parameter name must start with a forward slash (/).\n` +
+        `Received: "${trimmed}"\n` +
+        `Suggestion: "/${trimmed}"`
+    );
+  }
+
+  // Check for valid characters
+  if (!SSM_PARAMETER_VALIDATION.NAME_REGEX.test(trimmed)) {
+    throw new Error(
+      `SSM parameter name contains invalid characters: "${trimmed}"\n\n` +
+        "Allowed characters:\n" +
+        "  - Letters (a-z, A-Z)\n" +
+        "  - Numbers (0-9)\n" +
+        "  - Forward slash (/)\n" +
+        "  - Period (.)\n" +
+        "  - Hyphen (-)\n" +
+        "  - Underscore (_)\n\n" +
+        "Example valid names:\n" +
+        '  - "/my-app/production/config"\n' +
+        '  - "/vpc/prod/vpc-id"\n' +
+        '  - "/ecs/staging/cluster_name"'
+    );
+  }
+
+  // Check for invalid patterns
+  for (const pattern of SSM_PARAMETER_VALIDATION.INVALID_PATTERNS) {
+    if (pattern.test(trimmed)) {
+      if (pattern.source === "\\/\\/") {
+        throw new Error(
+          `SSM parameter name cannot contain double slashes (//).\n` +
+            `Received: "${trimmed}"\n` +
+            `Suggestion: "${trimmed.replace(/\/\//g, "/")}"`
+        );
+      }
+      if (pattern.source === "\\/$") {
+        throw new Error(
+          `SSM parameter name cannot end with a forward slash.\n` +
+            `Received: "${trimmed}"\n` +
+            `Suggestion: "${trimmed.slice(0, -1)}"`
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Validate SSM Parameter value length based on tier
+ *
+ * @param value - Parameter value to validate
+ * @param tier - Parameter tier (STANDARD, ADVANCED)
+ * @throws Error if value exceeds maximum length for the tier
+ */
+export function validateSsmParameterValue(
+  value: string,
+  tier: ssm.ParameterTier = ssm.ParameterTier.STANDARD
+): void {
+  if (value === undefined || value === null) {
+    throw new Error("SSM parameter value is required.");
+  }
+
+  const valueStr = String(value);
+  const maxLength =
+    tier === ssm.ParameterTier.ADVANCED
+      ? SSM_PARAMETER_VALIDATION.MAX_VALUE_LENGTH_ADVANCED
+      : SSM_PARAMETER_VALIDATION.MAX_VALUE_LENGTH_STANDARD;
+
+  if (valueStr.length > maxLength) {
+    throw new Error(
+      `SSM parameter value exceeds maximum length of ${maxLength} characters for ${tier} tier.\n` +
+        `Received: ${valueStr.length} characters.\n` +
+        `Consider using ADVANCED tier for values up to ${SSM_PARAMETER_VALIDATION.MAX_VALUE_LENGTH_ADVANCED} characters.`
+    );
+  }
+}
+
+/**
+ * Validate custom SSM parameter name (without path prefix)
+ *
+ * Custom parameter names should not start with / and should be safe for use
+ * as the final segment of a parameter path.
+ *
+ * @param name - Custom parameter name (without prefix)
+ * @throws Error if the name is invalid
+ */
+export function validateCustomParameterName(name: string): void {
+  if (!name || typeof name !== "string") {
+    throw new Error("Custom parameter name is required and must be a string.");
+  }
+
+  const trimmed = name.trim();
+
+  if (trimmed.length === 0) {
+    throw new Error("Custom parameter name cannot be empty.");
+  }
+
+  // Should not start with /
+  if (trimmed.startsWith("/")) {
+    throw new Error(
+      `Custom parameter name should not start with a forward slash.\n` +
+        `The path prefix will be added automatically.\n` +
+        `Received: "${trimmed}"\n` +
+        `Suggestion: "${trimmed.slice(1)}"`
+    );
+  }
+
+  // Check for invalid characters (spaces are not allowed)
+  const validNameRegex = /^[A-Za-z0-9._\-/]+$/;
+  if (!validNameRegex.test(trimmed)) {
+    throw new Error(
+      `Custom parameter name contains invalid characters: "${trimmed}"\n\n` +
+        "Allowed characters:\n" +
+        "  - Letters (a-z, A-Z)\n" +
+        "  - Numbers (0-9)\n" +
+        "  - Forward slash (/) for nested paths\n" +
+        "  - Period (.)\n" +
+        "  - Hyphen (-)\n" +
+        "  - Underscore (_)\n\n" +
+        "NOT allowed: spaces, special characters"
+    );
+  }
+
+  // Check for double slashes
+  if (/\/\//.test(trimmed)) {
+    throw new Error(
+      `Custom parameter name cannot contain double slashes.\n` +
+        `Received: "${trimmed}"`
+    );
+  }
+
+  // Check total length won't exceed limit when prefix is added
+  // Assume typical prefix is ~50 chars: /project/environment/category/
+  const estimatedTotalLength = trimmed.length + 50;
+  if (estimatedTotalLength > SSM_PARAMETER_VALIDATION.MAX_NAME_LENGTH) {
+    throw new Error(
+      `Custom parameter name is too long.\n` +
+        `Maximum recommended length: ${SSM_PARAMETER_VALIDATION.MAX_NAME_LENGTH - 50} characters.\n` +
+        `Received: ${trimmed.length} characters.`
     );
   }
 }

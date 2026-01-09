@@ -8,21 +8,33 @@ import * as logs from "aws-cdk-lib/aws-logs";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 
 /**
+ * Base configuration for parameter categories
+ */
+export interface BaseParameterConfig {
+  /** Custom description override */
+  description?: string;
+  /** Parameter tier (STANDARD, ADVANCED, INTELLIGENT_TIERING) */
+  tier?: ssm.ParameterTier;
+}
+
+/**
  * Configuration for VPC-related SSM parameters
  */
-export interface VpcParameterConfig {
+export interface VpcParameterConfig extends BaseParameterConfig {
   /** VPC to store parameters for */
   vpc: ec2.IVpc;
-  /** Whether to store subnet IDs */
+  /** Whether to store subnet IDs (default: true) */
   includeSubnets?: boolean;
-  /** Whether to store availability zones */
+  /** Whether to store availability zones (default: false) */
   includeAvailabilityZones?: boolean;
+  /** Whether to use StringList for subnet IDs (default: false, uses comma-separated String) */
+  useStringList?: boolean;
 }
 
 /**
  * Configuration for ECR-related SSM parameters
  */
-export interface EcrParameterConfig {
+export interface EcrParameterConfig extends BaseParameterConfig {
   /** ECR repository to store parameters for */
   repository: ecr.IRepository;
 }
@@ -30,7 +42,7 @@ export interface EcrParameterConfig {
 /**
  * Configuration for ECS-related SSM parameters
  */
-export interface EcsParameterConfig {
+export interface EcsParameterConfig extends BaseParameterConfig {
   /** ECS cluster to store parameters for */
   cluster: ecs.ICluster;
   /** ECS service to store parameters for (optional) */
@@ -40,10 +52,10 @@ export interface EcsParameterConfig {
 /**
  * Configuration for Log Group-related SSM parameters
  */
-export interface LogGroupParameterConfig {
+export interface LogGroupParameterConfig extends BaseParameterConfig {
   /** Log group to store parameters for */
   logGroup: logs.ILogGroup;
-  /** Friendly name for the log group */
+  /** Friendly name for the log group (used in parameter path) */
   name: string;
 }
 
@@ -51,16 +63,18 @@ export interface LogGroupParameterConfig {
  * Custom parameter configuration
  */
 export interface CustomParameterConfig {
-  /** Parameter name (without prefix) */
+  /** Parameter name (without prefix) - must follow SSM naming rules */
   name: string;
-  /** Parameter value */
-  value: string;
+  /** Parameter value or array of values for StringList */
+  value: string | string[];
   /** Parameter description */
   description?: string;
   /** Parameter tier */
   tier?: ssm.ParameterTier;
-  /** Whether this is a secure string */
+  /** Whether this is a secure string (default: false) */
   secure?: boolean;
+  /** Parameter type: String (default) or StringList */
+  type?: "String" | "StringList";
 }
 
 /**
@@ -71,7 +85,12 @@ export interface SsmParametersConstructProps {
   envName: string;
   /** Project name for parameter path prefix */
   projectName?: string;
-  /** Custom path prefix (overrides default /{service}/{envName} pattern) */
+  /**
+   * Custom path prefix for ALL parameters.
+   * If provided, all parameters will be created under this prefix.
+   * Format: /prefix/category/parameter-name
+   * Default: /{envName} or /{projectName}/{envName} if projectName provided
+   */
   pathPrefix?: string;
 
   /** VPC parameter configuration */
@@ -89,6 +108,18 @@ export interface SsmParametersConstructProps {
   encryptionKey?: kms.IKey;
   /** Additional tags to apply to parameters */
   customTags?: Record<string, string>;
+
+  /**
+   * Whether to also create CloudFormation exports for cross-stack references.
+   * Default: false
+   */
+  createCfnExports?: boolean;
+
+  /**
+   * Whether to suppress production warnings (not recommended).
+   * Default: false
+   */
+  suppressWarnings?: boolean;
 }
 
 /**
@@ -113,4 +144,18 @@ export interface StackOutputsConstructProps {
     value: string;
     description?: string;
   }[];
+}
+
+/**
+ * Result of parameter creation with full details
+ */
+export interface ParameterInfo {
+  /** Full parameter path */
+  path: string;
+  /** Parameter category (vpc, ecr, ecs, logs, custom) */
+  category: string;
+  /** Short key (last segment) */
+  key: string;
+  /** The CDK parameter construct */
+  parameter: ssm.IStringParameter;
 }

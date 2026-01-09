@@ -2,15 +2,26 @@
 
 import * as cdk from "aws-cdk-lib";
 import * as ssm from "aws-cdk-lib/aws-ssm";
+import { Annotations } from "aws-cdk-lib";
 import { Construct } from "constructs";
 
 import {
   DEFAULT_SSM_PARAMETER_TIER,
-  SSM_PARAMETER_PATH_PREFIXES,
+  SSM_DEFAULT_DESCRIPTIONS,
+  SSM_PARAMETER_CATEGORIES,
   SSM_PARAMETER_SUFFIXES,
+  SSM_PARAMETER_VALIDATION,
 } from "../../shared/constants/config-constants";
-import { SsmParametersConstructProps } from "../../shared/types/config-types";
-import { validateEnvName } from "../../shared/utils/validation";
+import {
+  ParameterInfo,
+  SsmParametersConstructProps,
+} from "../../shared/types/config-types";
+import {
+  validateCustomParameterName,
+  validateEnvName,
+  validateSsmParameterName,
+  validateSsmParameterValue,
+} from "../../shared/utils/validation";
 
 /**
  * SSM Parameters Construct
@@ -21,15 +32,17 @@ import { validateEnvName } from "../../shared/utils/validation";
  *
  * Features:
  * - Flexible parameter creation (VPC, ECR, ECS, Logs, Custom)
- * - Consistent naming convention: /{service}/{envName}/{parameter}
+ * - Consistent naming convention: {pathPrefix}/{category}/{parameter}
  * - Support for SecureString parameters with KMS encryption
+ * - Support for StringList parameter type
  * - Automatic tagging for resource management
+ * - Optional CloudFormation exports
+ * - Production safety warnings
  *
- * Benefits over CloudFormation Exports:
- * - Can be updated without stack updates
- * - Can be queried programmatically at runtime
- * - Better for cross-account access patterns
- * - No circular dependency limitations
+ * Path Structure:
+ * - Default: /{envName}/{category}/{parameter}
+ * - With project: /{projectName}/{envName}/{category}/{parameter}
+ * - With custom prefix: {pathPrefix}/{category}/{parameter}
  *
  * @example
  * ```typescript
@@ -39,25 +52,48 @@ import { validateEnvName } from "../../shared/utils/validation";
  *   vpc: {
  *     vpc: myVpc,
  *     includeSubnets: true,
+ *     useStringList: true, // Use StringList for subnet IDs
  *   },
  *   ecs: {
  *     cluster: myCluster,
  *     service: myService,
+ *     tier: ssm.ParameterTier.ADVANCED, // Custom tier
  *   },
  *   customParameters: [
  *     { name: 'api-url', value: 'https://api.example.com' },
+ *     { name: 'api-key', value: 'secret', secure: true },
  *   ],
+ *   encryptionKey: myKmsKey,
+ *   createCfnExports: true,
  * });
  *
- * // Access created parameters
- * const vpcIdParam = params.getParameter('vpc-id');
+ * // Get parameter by full path
+ * const vpcParam = params.getParameterByPath('/monitoring/production/vpc/vpc-id');
+ *
+ * // Get parameter by key
+ * const vpcParam2 = params.getParameterByKey('vpc', 'vpc-id');
  * ```
  */
 export class SsmParametersConstruct extends Construct {
-  public readonly parameters: Map<string, ssm.StringParameter>;
+  /**
+   * Map of full parameter paths to ParameterInfo objects
+   */
+  public readonly parametersByPath: Map<string, ParameterInfo>;
+
+  /**
+   * Map of category/key to ParameterInfo for easy lookup
+   * Key format: "{category}/{key}" e.g., "vpc/vpc-id"
+   */
+  public readonly parametersByKey: Map<string, ParameterInfo>;
+
+  /**
+   * The path prefix used for all parameters
+   */
+  public readonly pathPrefix: string;
+
   private readonly envName: string;
-  private readonly pathPrefix: string;
-  private readonly stack = cdk.Stack.of(this);
+  private readonly stack: cdk.Stack;
+  private readonly props: SsmParametersConstructProps;
 
   constructor(
     scope: Construct,
@@ -66,13 +102,16 @@ export class SsmParametersConstruct extends Construct {
   ) {
     super(scope, id);
 
-    this.parameters = new Map();
+    this.parametersByPath = new Map();
+    this.parametersByKey = new Map();
     this.envName = props.envName;
+    this.stack = cdk.Stack.of(this);
+    this.props = props;
 
     // Validate inputs
     this.validateInputs(props);
 
-    // Build path prefix
+    // Build path prefix - this is used for ALL parameters
     this.pathPrefix = this.buildPathPrefix(props);
 
     // Create VPC parameters
@@ -100,6 +139,11 @@ export class SsmParametersConstruct extends Construct {
       this.createCustomParameters(props);
     }
 
+    // Production warnings
+    if (!props.suppressWarnings) {
+      this.addProductionWarnings(props);
+    }
+
     // Apply tags
     this.applyTags(props);
 
@@ -107,8 +151,12 @@ export class SsmParametersConstruct extends Construct {
     this.createOutputs();
   }
 
+  // ========================================
+  // Validation
+  // ========================================
+
   /**
-   * Validate inputs
+   * Validate all inputs
    */
   private validateInputs(props: SsmParametersConstructProps): void {
     validateEnvName(props.envName);
@@ -133,7 +181,7 @@ export class SsmParametersConstruct extends Construct {
       );
     }
 
-    // Validate custom parameters have required fields
+    // Validate custom parameters
     if (props.customParameters) {
       props.customParameters.forEach((param, index) => {
         if (!param.name || param.name.trim().length === 0) {
@@ -141,29 +189,84 @@ export class SsmParametersConstruct extends Construct {
             `Custom parameter at index ${index} is missing 'name' field`
           );
         }
+
+        // Validate parameter name format
+        validateCustomParameterName(param.name);
+
         if (param.value === undefined || param.value === null) {
           throw new Error(
             `Custom parameter '${param.name}' is missing 'value' field`
+          );
+        }
+
+        // Validate value length
+        const valueStr = Array.isArray(param.value)
+          ? param.value.join(",")
+          : param.value;
+        validateSsmParameterValue(
+          valueStr,
+          param.tier ?? DEFAULT_SSM_PARAMETER_TIER
+        );
+      });
+    }
+
+    // Validate log group names
+    if (props.logGroups) {
+      props.logGroups.forEach((config, index) => {
+        if (!config.name || config.name.trim().length === 0) {
+          throw new Error(
+            `Log group configuration at index ${index} is missing 'name' field`
           );
         }
       });
     }
   }
 
+  // ========================================
+  // Path Building
+  // ========================================
+
   /**
-   * Build path prefix for parameters
+   * Build the base path prefix for all parameters
+   *
+   * Priority:
+   * 1. Custom pathPrefix if provided
+   * 2. /{projectName}/{envName} if projectName provided
+   * 3. /{envName} otherwise
    */
   private buildPathPrefix(props: SsmParametersConstructProps): string {
     if (props.pathPrefix) {
-      return props.pathPrefix.startsWith("/")
-        ? props.pathPrefix
-        : `/${props.pathPrefix}`;
+      // Ensure it starts with / and doesn't end with /
+      let prefix = props.pathPrefix;
+      if (!prefix.startsWith("/")) {
+        prefix = `/${prefix}`;
+      }
+      if (prefix.endsWith("/")) {
+        prefix = prefix.slice(0, -1);
+      }
+      return prefix;
     }
 
     return props.projectName
       ? `/${props.projectName}/${props.envName}`
       : `/${props.envName}`;
   }
+
+  /**
+   * Build full parameter path using pathPrefix
+   */
+  private buildParameterPath(category: string, suffix: string): string {
+    const path = `${this.pathPrefix}/${category}/${suffix}`;
+
+    // Validate the final path
+    validateSsmParameterName(path);
+
+    return path;
+  }
+
+  // ========================================
+  // Parameter Creation Methods
+  // ========================================
 
   /**
    * Create VPC parameters
@@ -173,62 +276,104 @@ export class SsmParametersConstruct extends Construct {
     if (!vpcConfig) return;
 
     const vpc = vpcConfig.vpc;
-    const basePath = `${SSM_PARAMETER_PATH_PREFIXES.VPC}/${this.envName}`;
+    const category = SSM_PARAMETER_CATEGORIES.VPC;
+    const tier = vpcConfig.tier ?? DEFAULT_SSM_PARAMETER_TIER;
 
     // VPC ID
-    this.createParameter(
-      "VpcIdParameter",
-      `${basePath}/${SSM_PARAMETER_SUFFIXES.VPC_ID}`,
-      vpc.vpcId,
-      `VPC ID for ${this.envName} environment`
-    );
+    this.createParameter({
+      id: "VpcIdParameter",
+      path: this.buildParameterPath(category, SSM_PARAMETER_SUFFIXES.VPC_ID),
+      value: vpc.vpcId,
+      description:
+        vpcConfig.description ?? SSM_DEFAULT_DESCRIPTIONS.VPC_ID(this.envName),
+      tier,
+      category,
+      key: SSM_PARAMETER_SUFFIXES.VPC_ID,
+    });
 
     // VPC CIDR
-    this.createParameter(
-      "VpcCidrParameter",
-      `${basePath}/${SSM_PARAMETER_SUFFIXES.VPC_CIDR}`,
-      vpc.vpcCidrBlock,
-      `VPC CIDR Block for ${this.envName} environment`
-    );
+    this.createParameter({
+      id: "VpcCidrParameter",
+      path: this.buildParameterPath(category, SSM_PARAMETER_SUFFIXES.VPC_CIDR),
+      value: vpc.vpcCidrBlock,
+      description: SSM_DEFAULT_DESCRIPTIONS.VPC_CIDR(this.envName),
+      tier,
+      category,
+      key: SSM_PARAMETER_SUFFIXES.VPC_CIDR,
+    });
 
-    // Private Subnet IDs
+    // Subnet IDs
     if (vpcConfig.includeSubnets !== false) {
-      const privateSubnetIds = vpc.privateSubnets
-        .map((subnet) => subnet.subnetId)
-        .join(",");
-
-      if (privateSubnetIds) {
-        this.createParameter(
-          "PrivateSubnetIdsParameter",
-          `${basePath}/${SSM_PARAMETER_SUFFIXES.PRIVATE_SUBNET_IDS}`,
-          privateSubnetIds,
-          `Private Subnet IDs for ${this.envName} environment (comma-separated)`
-        );
-      }
-
-      const publicSubnetIds = vpc.publicSubnets
-        .map((subnet) => subnet.subnetId)
-        .join(",");
-
-      if (publicSubnetIds) {
-        this.createParameter(
-          "PublicSubnetIdsParameter",
-          `${basePath}/${SSM_PARAMETER_SUFFIXES.PUBLIC_SUBNET_IDS}`,
-          publicSubnetIds,
-          `Public Subnet IDs for ${this.envName} environment (comma-separated)`
-        );
-      }
+      this.createSubnetParameters(vpc, vpcConfig, category, tier);
     }
 
     // Availability Zones
     if (vpcConfig.includeAvailabilityZones) {
-      const azs = vpc.availabilityZones.join(",");
-      this.createParameter(
-        "AvailabilityZonesParameter",
-        `${basePath}/${SSM_PARAMETER_SUFFIXES.AVAILABILITY_ZONES}`,
-        azs,
-        `Availability Zones for ${this.envName} environment (comma-separated)`
-      );
+      const azs = vpc.availabilityZones;
+      this.createParameter({
+        id: "AvailabilityZonesParameter",
+        path: this.buildParameterPath(
+          category,
+          SSM_PARAMETER_SUFFIXES.AVAILABILITY_ZONES
+        ),
+        value: vpcConfig.useStringList ? azs : azs.join(","),
+        description: SSM_DEFAULT_DESCRIPTIONS.AVAILABILITY_ZONES(this.envName),
+        tier,
+        category,
+        key: SSM_PARAMETER_SUFFIXES.AVAILABILITY_ZONES,
+        type: vpcConfig.useStringList ? "StringList" : "String",
+      });
+    }
+  }
+
+  /**
+   * Create subnet parameters (private and public)
+   */
+  private createSubnetParameters(
+    vpc: cdk.aws_ec2.IVpc,
+    vpcConfig: NonNullable<SsmParametersConstructProps["vpc"]>,
+    category: string,
+    tier: ssm.ParameterTier
+  ): void {
+    const privateSubnetIds = vpc.privateSubnets.map(
+      (subnet) => subnet.subnetId
+    );
+    const publicSubnetIds = vpc.publicSubnets.map((subnet) => subnet.subnetId);
+
+    if (privateSubnetIds.length > 0) {
+      this.createParameter({
+        id: "PrivateSubnetIdsParameter",
+        path: this.buildParameterPath(
+          category,
+          SSM_PARAMETER_SUFFIXES.PRIVATE_SUBNET_IDS
+        ),
+        value: vpcConfig.useStringList
+          ? privateSubnetIds
+          : privateSubnetIds.join(","),
+        description: SSM_DEFAULT_DESCRIPTIONS.PRIVATE_SUBNET_IDS(this.envName),
+        tier,
+        category,
+        key: SSM_PARAMETER_SUFFIXES.PRIVATE_SUBNET_IDS,
+        type: vpcConfig.useStringList ? "StringList" : "String",
+      });
+    }
+
+    if (publicSubnetIds.length > 0) {
+      this.createParameter({
+        id: "PublicSubnetIdsParameter",
+        path: this.buildParameterPath(
+          category,
+          SSM_PARAMETER_SUFFIXES.PUBLIC_SUBNET_IDS
+        ),
+        value: vpcConfig.useStringList
+          ? publicSubnetIds
+          : publicSubnetIds.join(","),
+        description: SSM_DEFAULT_DESCRIPTIONS.PUBLIC_SUBNET_IDS(this.envName),
+        tier,
+        category,
+        key: SSM_PARAMETER_SUFFIXES.PUBLIC_SUBNET_IDS,
+        type: vpcConfig.useStringList ? "StringList" : "String",
+      });
     }
   }
 
@@ -240,28 +385,49 @@ export class SsmParametersConstruct extends Construct {
     if (!ecrConfig) return;
 
     const repository = ecrConfig.repository;
-    const basePath = `${SSM_PARAMETER_PATH_PREFIXES.ECR}/${this.envName}`;
+    const category = SSM_PARAMETER_CATEGORIES.ECR;
+    const tier = ecrConfig.tier ?? DEFAULT_SSM_PARAMETER_TIER;
 
-    this.createParameter(
-      "RepositoryUriParameter",
-      `${basePath}/${SSM_PARAMETER_SUFFIXES.REPOSITORY_URI}`,
-      repository.repositoryUri,
-      `ECR Repository URI for ${this.envName} environment`
-    );
+    this.createParameter({
+      id: "RepositoryUriParameter",
+      path: this.buildParameterPath(
+        category,
+        SSM_PARAMETER_SUFFIXES.REPOSITORY_URI
+      ),
+      value: repository.repositoryUri,
+      description:
+        ecrConfig.description ??
+        SSM_DEFAULT_DESCRIPTIONS.REPOSITORY_URI(this.envName),
+      tier,
+      category,
+      key: SSM_PARAMETER_SUFFIXES.REPOSITORY_URI,
+    });
 
-    this.createParameter(
-      "RepositoryArnParameter",
-      `${basePath}/${SSM_PARAMETER_SUFFIXES.REPOSITORY_ARN}`,
-      repository.repositoryArn,
-      `ECR Repository ARN for ${this.envName} environment`
-    );
+    this.createParameter({
+      id: "RepositoryArnParameter",
+      path: this.buildParameterPath(
+        category,
+        SSM_PARAMETER_SUFFIXES.REPOSITORY_ARN
+      ),
+      value: repository.repositoryArn,
+      description: SSM_DEFAULT_DESCRIPTIONS.REPOSITORY_ARN(this.envName),
+      tier,
+      category,
+      key: SSM_PARAMETER_SUFFIXES.REPOSITORY_ARN,
+    });
 
-    this.createParameter(
-      "RepositoryNameParameter",
-      `${basePath}/${SSM_PARAMETER_SUFFIXES.REPOSITORY_NAME}`,
-      repository.repositoryName,
-      `ECR Repository Name for ${this.envName} environment`
-    );
+    this.createParameter({
+      id: "RepositoryNameParameter",
+      path: this.buildParameterPath(
+        category,
+        SSM_PARAMETER_SUFFIXES.REPOSITORY_NAME
+      ),
+      value: repository.repositoryName,
+      description: SSM_DEFAULT_DESCRIPTIONS.REPOSITORY_NAME(this.envName),
+      tier,
+      category,
+      key: SSM_PARAMETER_SUFFIXES.REPOSITORY_NAME,
+    });
   }
 
   /**
@@ -272,29 +438,50 @@ export class SsmParametersConstruct extends Construct {
     if (!ecsConfig) return;
 
     const { cluster, service } = ecsConfig;
-    const basePath = `${SSM_PARAMETER_PATH_PREFIXES.ECS}/${this.envName}`;
+    const category = SSM_PARAMETER_CATEGORIES.ECS;
+    const tier = ecsConfig.tier ?? DEFAULT_SSM_PARAMETER_TIER;
 
-    this.createParameter(
-      "EcsClusterNameParameter",
-      `${basePath}/${SSM_PARAMETER_SUFFIXES.CLUSTER_NAME}`,
-      cluster.clusterName,
-      `ECS Cluster Name for ${this.envName} environment`
-    );
+    this.createParameter({
+      id: "EcsClusterNameParameter",
+      path: this.buildParameterPath(
+        category,
+        SSM_PARAMETER_SUFFIXES.CLUSTER_NAME
+      ),
+      value: cluster.clusterName,
+      description:
+        ecsConfig.description ??
+        SSM_DEFAULT_DESCRIPTIONS.CLUSTER_NAME(this.envName),
+      tier,
+      category,
+      key: SSM_PARAMETER_SUFFIXES.CLUSTER_NAME,
+    });
 
-    this.createParameter(
-      "EcsClusterArnParameter",
-      `${basePath}/${SSM_PARAMETER_SUFFIXES.CLUSTER_ARN}`,
-      cluster.clusterArn,
-      `ECS Cluster ARN for ${this.envName} environment`
-    );
+    this.createParameter({
+      id: "EcsClusterArnParameter",
+      path: this.buildParameterPath(
+        category,
+        SSM_PARAMETER_SUFFIXES.CLUSTER_ARN
+      ),
+      value: cluster.clusterArn,
+      description: SSM_DEFAULT_DESCRIPTIONS.CLUSTER_ARN(this.envName),
+      tier,
+      category,
+      key: SSM_PARAMETER_SUFFIXES.CLUSTER_ARN,
+    });
 
     if (service) {
-      this.createParameter(
-        "EcsServiceNameParameter",
-        `${basePath}/${SSM_PARAMETER_SUFFIXES.SERVICE_NAME}`,
-        service.serviceName,
-        `ECS Service Name for ${this.envName} environment`
-      );
+      this.createParameter({
+        id: "EcsServiceNameParameter",
+        path: this.buildParameterPath(
+          category,
+          SSM_PARAMETER_SUFFIXES.SERVICE_NAME
+        ),
+        value: service.serviceName,
+        description: SSM_DEFAULT_DESCRIPTIONS.SERVICE_NAME(this.envName),
+        tier,
+        category,
+        key: SSM_PARAMETER_SUFFIXES.SERVICE_NAME,
+      });
     }
   }
 
@@ -305,24 +492,42 @@ export class SsmParametersConstruct extends Construct {
     const logGroups = props.logGroups;
     if (!logGroups || logGroups.length === 0) return;
 
-    const basePath = `${SSM_PARAMETER_PATH_PREFIXES.LOGS}/${this.envName}`;
+    const category = SSM_PARAMETER_CATEGORIES.LOGS;
 
     logGroups.forEach((config, index) => {
-      const safeName = config.name.replace(/[^a-zA-Z0-9-]/g, "-");
+      const safeName = config.name.replace(/[^a-zA-Z0-9-]/g, "-").toLowerCase();
+      const tier = config.tier ?? DEFAULT_SSM_PARAMETER_TIER;
 
-      this.createParameter(
-        `LogGroup${index}NameParameter`,
-        `${basePath}/${safeName}/${SSM_PARAMETER_SUFFIXES.LOG_GROUP_NAME}`,
-        config.logGroup.logGroupName,
-        `Log Group Name for ${config.name} in ${this.envName} environment`
-      );
+      this.createParameter({
+        id: `LogGroup${index}NameParameter`,
+        path: this.buildParameterPath(
+          `${category}/${safeName}`,
+          SSM_PARAMETER_SUFFIXES.LOG_GROUP_NAME
+        ),
+        value: config.logGroup.logGroupName,
+        description:
+          config.description ??
+          SSM_DEFAULT_DESCRIPTIONS.LOG_GROUP_NAME(config.name, this.envName),
+        tier,
+        category: `${category}/${safeName}`,
+        key: SSM_PARAMETER_SUFFIXES.LOG_GROUP_NAME,
+      });
 
-      this.createParameter(
-        `LogGroup${index}ArnParameter`,
-        `${basePath}/${safeName}/${SSM_PARAMETER_SUFFIXES.LOG_GROUP_ARN}`,
-        config.logGroup.logGroupArn,
-        `Log Group ARN for ${config.name} in ${this.envName} environment`
-      );
+      this.createParameter({
+        id: `LogGroup${index}ArnParameter`,
+        path: this.buildParameterPath(
+          `${category}/${safeName}`,
+          SSM_PARAMETER_SUFFIXES.LOG_GROUP_ARN
+        ),
+        value: config.logGroup.logGroupArn,
+        description: SSM_DEFAULT_DESCRIPTIONS.LOG_GROUP_ARN(
+          config.name,
+          this.envName
+        ),
+        tier,
+        category: `${category}/${safeName}`,
+        key: SSM_PARAMETER_SUFFIXES.LOG_GROUP_ARN,
+      });
     });
   }
 
@@ -333,56 +538,218 @@ export class SsmParametersConstruct extends Construct {
     const customParameters = props.customParameters;
     if (!customParameters || customParameters.length === 0) return;
 
-    const basePath = `${SSM_PARAMETER_PATH_PREFIXES.CUSTOM}/${this.envName}`;
+    const category = SSM_PARAMETER_CATEGORIES.CUSTOM;
 
     customParameters.forEach((config, index) => {
-      const parameterName = `${basePath}/${config.name}`;
+      const parameterPath = this.buildParameterPath(category, config.name);
+      const tier = config.tier ?? DEFAULT_SSM_PARAMETER_TIER;
 
-      if (config.secure && props.encryptionKey) {
-        // Create SecureString parameter
+      // Determine value - join array for StringList
+      const value = Array.isArray(config.value)
+        ? config.value.join(",")
+        : config.value;
+
+      // Determine parameter type
+      const isSecure = config.secure === true;
+      const isStringList = config.type === "StringList" || Array.isArray(config.value);
+
+      if (isSecure) {
+        // Create SecureString parameter with KMS key if provided
         const param = new ssm.StringParameter(this, `CustomParam${index}`, {
-          parameterName,
-          stringValue: config.value,
+          parameterName: parameterPath,
+          stringValue: value,
           description: config.description ?? `Custom parameter: ${config.name}`,
-          tier: config.tier ?? DEFAULT_SSM_PARAMETER_TIER,
+          tier,
           type: ssm.ParameterType.SECURE_STRING,
         });
-        this.parameters.set(config.name, param);
+
+        // Note: CDK doesn't directly support customer KMS keys for SSM SecureString
+        // via StringParameter construct. The AWS-managed key is used by default.
+        // For customer-managed keys, use AWS CLI or SDK to create the parameter.
+        if (props.encryptionKey) {
+          Annotations.of(this).addWarningV2(
+            `@custom-kms-${index}`,
+            `SecureString parameter '${config.name}' uses AWS-managed encryption. ` +
+              "CDK StringParameter doesn't support customer-managed KMS keys directly. " +
+              "Consider using AWS CLI: aws ssm put-parameter --key-id <kms-key-id>"
+          );
+        }
+
+        this.storeParameter({
+          path: parameterPath,
+          category,
+          key: config.name,
+          parameter: param,
+        });
       } else {
-        this.createParameter(
-          `CustomParam${index}`,
-          parameterName,
-          config.value,
-          config.description ?? `Custom parameter: ${config.name}`,
-          config.tier
-        );
+        // Create String or StringList parameter
+        this.createParameter({
+          id: `CustomParam${index}`,
+          path: parameterPath,
+          value,
+          description: config.description ?? `Custom parameter: ${config.name}`,
+          tier,
+          category,
+          key: config.name,
+          type: isStringList ? "StringList" : "String",
+        });
       }
     });
   }
 
+  // ========================================
+  // Core Parameter Creation
+  // ========================================
+
   /**
    * Create a single SSM parameter
    */
-  private createParameter(
-    id: string,
-    parameterName: string,
-    value: string,
-    description: string,
-    tier?: ssm.ParameterTier
-  ): ssm.StringParameter {
-    const param = new ssm.StringParameter(this, id, {
-      parameterName,
-      stringValue: value,
-      description,
-      tier: tier ?? DEFAULT_SSM_PARAMETER_TIER,
+  private createParameter(options: {
+    id: string;
+    path: string;
+    value: string | string[];
+    description: string;
+    tier: ssm.ParameterTier;
+    category: string;
+    key: string;
+    type?: "String" | "StringList";
+  }): ssm.StringParameter {
+    const valueStr = Array.isArray(options.value)
+      ? options.value.join(",")
+      : options.value;
+
+    // Note: CDK StringParameter uses ParameterType which doesn't support
+    // StringList directly. StringList must be created via CfnParameter.
+    // For simplicity, we store as comma-separated String.
+    const param = new ssm.StringParameter(this, options.id, {
+      parameterName: options.path,
+      stringValue: valueStr,
+      description: options.description,
+      tier: options.tier,
     });
 
-    // Store reference by a simplified key (last part of the path)
-    const key = parameterName.split("/").pop() ?? parameterName;
-    this.parameters.set(key, param);
+    // Store in maps for lookup
+    this.storeParameter({
+      path: options.path,
+      category: options.category,
+      key: options.key,
+      parameter: param,
+    });
+
+    // Create CloudFormation export if enabled
+    if (this.props.createCfnExports) {
+      this.createCfnExport(options.category, options.key, valueStr);
+    }
 
     return param;
   }
+
+  /**
+   * Store parameter in lookup maps
+   */
+  private storeParameter(info: ParameterInfo): void {
+    // Store by full path (no collision)
+    this.parametersByPath.set(info.path, info);
+
+    // Store by category/key (e.g., "vpc/vpc-id")
+    const compositeKey = `${info.category}/${info.key}`;
+    this.parametersByKey.set(compositeKey, info);
+  }
+
+  /**
+   * Create CloudFormation export for a parameter value
+   */
+  private createCfnExport(
+    category: string,
+    key: string,
+    value: string
+  ): void {
+    const exportName = this.props.projectName
+      ? `${this.envName}-${this.props.projectName}-${category}-${key}`
+      : `${this.envName}-${category}-${key}`;
+
+    new cdk.CfnOutput(this, `Export${category}${key}`.replace(/[^a-zA-Z0-9]/g, ""), {
+      value,
+      description: `${category}/${key} for ${this.envName}`,
+      exportName,
+    });
+  }
+
+  // ========================================
+  // Production Warnings
+  // ========================================
+
+  /**
+   * Add production safety warnings
+   */
+  private addProductionWarnings(props: SsmParametersConstructProps): void {
+    // Warning: SecureString without customer KMS key
+    const hasSecureParams = props.customParameters?.some((p) => p.secure);
+    if (hasSecureParams && !props.encryptionKey) {
+      Annotations.of(this).addWarningV2(
+        "@ssm-no-custom-kms",
+        "SecureString parameters are using AWS-managed encryption key. " +
+          "For production workloads, consider using a customer-managed KMS key " +
+          "for better control over encryption and key rotation."
+      );
+    }
+
+    // Warning: Large number of parameters
+    const paramCount = this.estimateParameterCount(props);
+    if (paramCount > SSM_PARAMETER_VALIDATION.MAX_PARAMETERS_PER_REGION * 0.5) {
+      Annotations.of(this).addWarningV2(
+        "@ssm-parameter-limit",
+        `Creating ${paramCount} parameters. AWS limits SSM parameters to ` +
+          `${SSM_PARAMETER_VALIDATION.MAX_PARAMETERS_PER_REGION} per region. ` +
+          "Consider consolidating parameters or using a different storage mechanism."
+      );
+    }
+
+    // Warning: Sensitive data not marked secure
+    if (props.customParameters) {
+      const potentiallySensitive = props.customParameters.filter(
+        (p) =>
+          !p.secure &&
+          /password|secret|key|token|credential/i.test(p.name)
+      );
+      if (potentiallySensitive.length > 0) {
+        Annotations.of(this).addWarningV2(
+          "@ssm-potentially-sensitive",
+          `Parameters with potentially sensitive names are not marked as secure: ` +
+            `${potentiallySensitive.map((p) => p.name).join(", ")}. ` +
+            "Consider setting secure: true for these parameters."
+        );
+      }
+    }
+  }
+
+  /**
+   * Estimate the total number of parameters that will be created
+   */
+  private estimateParameterCount(props: SsmParametersConstructProps): number {
+    let count = 0;
+
+    if (props.vpc) {
+      count += 2; // vpc-id, vpc-cidr
+      if (props.vpc.includeSubnets !== false) count += 2; // private, public
+      if (props.vpc.includeAvailabilityZones) count += 1;
+    }
+
+    if (props.ecr) count += 3; // uri, arn, name
+    if (props.ecs) {
+      count += 2; // cluster name, arn
+      if (props.ecs.service) count += 1;
+    }
+
+    if (props.logGroups) count += props.logGroups.length * 2; // name, arn per group
+    if (props.customParameters) count += props.customParameters.length;
+
+    return count;
+  }
+
+  // ========================================
+  // Tags and Outputs
+  // ========================================
 
   /**
    * Apply tags to all parameters
@@ -409,7 +776,7 @@ export class SsmParametersConstruct extends Construct {
    */
   private createOutputs(): void {
     new cdk.CfnOutput(this, "ParameterCount", {
-      value: this.parameters.size.toString(),
+      value: this.parametersByPath.size.toString(),
       description: `Number of SSM parameters created for ${this.envName}`,
     });
 
@@ -420,28 +787,75 @@ export class SsmParametersConstruct extends Construct {
     });
   }
 
+  // ========================================
+  // Public Lookup Methods
+  // ========================================
+
   /**
-   * Get a parameter by its key (last part of the path)
+   * Get a parameter by its full path
+   *
+   * @param path - Full parameter path (e.g., '/monitoring/production/vpc/vpc-id')
+   * @returns ParameterInfo or undefined if not found
+   *
+   * @example
+   * ```typescript
+   * const info = params.getParameterByPath('/monitoring/production/vpc/vpc-id');
+   * if (info) {
+   *   console.log(info.parameter.parameterName);
+   * }
+   * ```
    */
-  public getParameter(key: string): ssm.StringParameter | undefined {
-    return this.parameters.get(key);
+  public getParameterByPath(path: string): ParameterInfo | undefined {
+    return this.parametersByPath.get(path);
   }
 
   /**
-   * Get all parameter names
+   * Get a parameter by category and key
+   *
+   * @param category - Parameter category (e.g., 'vpc', 'ecr', 'ecs')
+   * @param key - Parameter key (e.g., 'vpc-id', 'repository-uri')
+   * @returns ParameterInfo or undefined if not found
+   *
+   * @example
+   * ```typescript
+   * const info = params.getParameterByKey('vpc', 'vpc-id');
+   * if (info) {
+   *   console.log(info.path);
+   * }
+   * ```
    */
-  public getParameterNames(): string[] {
-    return Array.from(this.parameters.values()).map(
-      (p) => p.parameterName
-    );
+  public getParameterByKey(
+    category: string,
+    key: string
+  ): ParameterInfo | undefined {
+    return this.parametersByKey.get(`${category}/${key}`);
   }
 
   /**
-   * Grant read access to the parameters
+   * Get all parameters in a category
+   *
+   * @param category - Parameter category (e.g., 'vpc', 'ecr', 'ecs')
+   * @returns Array of ParameterInfo objects
+   */
+  public getParametersByCategory(category: string): ParameterInfo[] {
+    return Array.from(this.parametersByKey.entries())
+      .filter(([key]) => key.startsWith(`${category}/`))
+      .map(([, info]) => info);
+  }
+
+  /**
+   * Get all parameter paths
+   */
+  public getAllPaths(): string[] {
+    return Array.from(this.parametersByPath.keys());
+  }
+
+  /**
+   * Grant read access to all parameters
    */
   public grantRead(grantee: cdk.aws_iam.IGrantable): void {
-    this.parameters.forEach((param) => {
-      param.grantRead(grantee);
+    this.parametersByPath.forEach((info) => {
+      info.parameter.grantRead(grantee);
     });
   }
 
