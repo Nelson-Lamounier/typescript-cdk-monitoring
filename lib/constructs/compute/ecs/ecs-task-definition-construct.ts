@@ -161,10 +161,12 @@ export class EcsTaskDefinitionConstruct extends Construct {
     });
 
     // Add port mapping only if containerPort is specified
-    // For HOST mode, port mapping is optional as container uses host network directly
+    // For HOST and AWS_VPC modes, hostPort must equal containerPort
     if (config.containerPort !== undefined) {
+      const networkMode = this.taskDefinition.networkMode;
       const hostPort =
-        this.taskDefinition.networkMode === ecs.NetworkMode.HOST
+        networkMode === ecs.NetworkMode.HOST ||
+        networkMode === ecs.NetworkMode.AWS_VPC
           ? config.containerPort
           : config.hostPort ?? 0;
 
