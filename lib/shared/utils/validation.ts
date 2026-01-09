@@ -1,9 +1,12 @@
 /** @format */
 
+import * as cdk from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
-import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as ecr from "aws-cdk-lib/aws-ecr";
+import * as efs from "aws-cdk-lib/aws-efs";
+import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as ecs from "aws-cdk-lib/aws-ecs";
+import * as kms from "aws-cdk-lib/aws-kms";
 
 import {
   MIN_SUBNET_CIDR_MASK,
@@ -18,11 +21,19 @@ import {
   MIN_CLUSTER_NAME_LENGTH,
 } from "../constants/compute-constants";
 import {
+  ALLOWED_EFS_ARCHIVE_TRANSITIONS,
+  EFS_MAX_PROVISIONED_THROUGHPUT_MIBPS,
+  EFS_MIN_PROVISIONED_THROUGHPUT_MIBPS,
   MAX_ECR_LIFECYCLE_MAX_IMAGE_COUNT,
   MIN_ECR_LIFECYCLE_MAX_IMAGE_COUNT,
 } from "../constants/storage-constants";
 import { EcsLaunchType, ContainerConfig } from "../types/compute-types";
-import { EcrLifecycleRuleConfig } from "../types/storage-types";
+import {
+  EcrLifecycleRuleConfig,
+  EfsLifecycleConfig,
+  EfsMountTargetConfig,
+  EfsReplicationConfig,
+} from "../types/storage-types";
 
 /**
  * Validate subnet CIDR mask is within acceptable range
@@ -644,6 +655,113 @@ export function validateEnvName(envName: string): void {
         " 3. Ensure the value is not undefined or null"
     );
   }
+}
+
+/**
+ * Validate EFS throughput mode and provisioned throughput combination.
+ */
+export function validateEfsThroughputConfiguration(
+  throughputMode: efs.ThroughputMode | undefined,
+  provisionedThroughputPerSecond: cdk.Size | undefined
+): void {
+  if (throughputMode === efs.ThroughputMode.PROVISIONED) {
+    if (!provisionedThroughputPerSecond) {
+      throw new Error(
+        "Provisioned throughput must be provided when throughputMode is PROVISIONED.\n\n" +
+          `Recommended range: ${EFS_MIN_PROVISIONED_THROUGHPUT_MIBPS}-${EFS_MAX_PROVISIONED_THROUGHPUT_MIBPS} MiB/s`
+      );
+    }
+
+    const provisionedMibps = provisionedThroughputPerSecond.toMebibytes();
+    if (
+      provisionedMibps < EFS_MIN_PROVISIONED_THROUGHPUT_MIBPS ||
+      provisionedMibps > EFS_MAX_PROVISIONED_THROUGHPUT_MIBPS
+    ) {
+      throw new Error(
+        `Provisioned throughput must be between ${EFS_MIN_PROVISIONED_THROUGHPUT_MIBPS} and ${EFS_MAX_PROVISIONED_THROUGHPUT_MIBPS} MiB/s. ` +
+          `Received: ${provisionedMibps} MiB/s`
+      );
+    }
+  } else if (provisionedThroughputPerSecond) {
+    throw new Error(
+      "Provisioned throughput is only valid when throughputMode is PROVISIONED. Remove provisionedThroughputPerSecond or set throughputMode to PROVISIONED."
+    );
+  }
+}
+
+/**
+ * Validate lifecycle configuration including archive transitions.
+ */
+export function validateEfsLifecycleConfiguration(
+  lifecycle: EfsLifecycleConfig | undefined
+): void {
+  if (!lifecycle) {
+    return;
+  }
+
+  if (
+    lifecycle.transitionToArchive &&
+    !ALLOWED_EFS_ARCHIVE_TRANSITIONS.includes(lifecycle.transitionToArchive)
+  ) {
+    throw new Error(
+      `Invalid archive transition value: ${lifecycle.transitionToArchive}. ` +
+        `Allowed values: ${ALLOWED_EFS_ARCHIVE_TRANSITIONS.join(", ")}`
+    );
+  }
+}
+
+/**
+ * Validate mount target configuration to avoid contradictory options.
+ */
+export function validateEfsMountTargetConfig(
+  mountTargets: EfsMountTargetConfig | undefined
+): void {
+  if (!mountTargets) {
+    return;
+  }
+
+  if (mountTargets.availabilityZoneName && !mountTargets.oneZone) {
+    throw new Error(
+      "availabilityZoneName requires oneZone to be set to true for EFS One Zone configuration."
+    );
+  }
+}
+
+/**
+ * Validate encryption inputs to avoid misconfiguration.
+ */
+export function validateEfsEncryptionConfig(
+  enableEncryption: boolean | undefined,
+  kmsKey: kms.IKey | undefined
+): void {
+  if (kmsKey && enableEncryption === false) {
+    throw new Error(
+      "kmsKey was provided but enableEncryption is set to false. Either enable encryption or remove the KMS key."
+    );
+  }
+}
+
+/**
+ * Validate replication destinations when provided.
+ */
+export function validateEfsReplicationConfig(
+  replication: EfsReplicationConfig | undefined,
+  validateRegionFn: (region: string) => void = validateRegion
+): void {
+  if (!replication) {
+    return;
+  }
+
+  if (!replication.destinations || replication.destinations.length === 0) {
+    throw new Error("EFS replication requires at least one destination.");
+  }
+
+  replication.destinations.forEach((destination, index) => {
+    if (!destination.region) {
+      throw new Error(`Replication destination #${index + 1} is missing region.`);
+    }
+    validateRegionFn(destination.region);
+  });
 }
 
 /**
