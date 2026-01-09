@@ -42,6 +42,7 @@ import {
   EfsMountTargetConfig,
   EfsReplicationConfig,
 } from "../types/storage-types";
+import { GrafanaServiceConstructProps } from "../types/service-types";
 
 /**
  * Validate subnet CIDR mask is within acceptable range
@@ -914,6 +915,36 @@ export function validateLogGroupNameOptional(name?: string): void {
     return;
   }
   validateLogGroupName(name);
+}
+
+/**
+ * Validate that an admin password secret ARN is provided.
+ */
+export function validateAdminPasswordSecretArn(secretArn: string | undefined): void {
+  if (!secretArn || secretArn.trim().length === 0) {
+    throw new Error(
+      "Grafana admin password must be supplied via Secrets Manager (adminPasswordSecretArn)."
+    );
+  }
+}
+
+/**
+ * Validate Grafana volume usage for launch type.
+ */
+export function validateGrafanaVolumes(
+  props: GrafanaServiceConstructProps
+): void {
+  if (props.launchType === "FARGATE") {
+    if (
+      props.dataVolume?.hostPath ||
+      props.provisioningVolume?.hostPath ||
+      props.dashboardsVolume?.hostPath
+    ) {
+      throw new Error(
+        "Host path volumes are not supported for Fargate. Use EFS volumes instead."
+      );
+    }
+  }
 }
 
 /**

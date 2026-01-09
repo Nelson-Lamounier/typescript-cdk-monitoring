@@ -1,4 +1,4 @@
 /** @format */
 
-// Grafana constructs
-export * from "./grafana-construct";
+// Grafana constructs (service-level)
+export { GrafanaServiceConstruct } from "../../../../services/monitoring/grafana/grafana-service-construct";
