@@ -1,7 +1,6 @@
 /** @format */
 
-import { NagPackSuppression, NagSuppressions } from "cdk-nag";
-import * as cdk from "aws-cdk-lib";
+import { NagPackSuppression } from "cdk-nag";
 
 /**
  * Centralized CDK Nag Suppression Manager
@@ -385,7 +384,7 @@ export class SuppressionManager {
       {
         id: "AwsSolutions-ELB2",
         reason:
-          "ALB access logging may be disabled in some environments to reduce costs. When enabled, access logging is configured to S3 bucket for audit and troubleshooting purposes. Logs are retained according to compliance requirements.",
+          "ALB access logging is disabled to reduce costs in development environments. For production, enable access logging to S3 bucket for audit and troubleshooting purposes. Logs should be retained according to compliance requirements.",
       },
       {
         id: "AwsSolutions-S1",
@@ -428,7 +427,7 @@ export class SuppressionManager {
    * This is the recommended way to apply suppressions
    */
   static applyToStack(
-    stack: cdk.Stack,
+    stack: any,
     stackType:
       | "ComputeStack"
       | "MonitoringStack"
@@ -440,6 +439,7 @@ export class SuppressionManager {
       | "CertificateStack",
     envName?: string
   ): void {
+    const { NagSuppressions } = require("cdk-nag");
 
     const suppressions: NagPackSuppression[] = [];
 
