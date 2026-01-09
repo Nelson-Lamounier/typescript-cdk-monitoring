@@ -1,4 +1,6 @@
-/** @format */
+<!-- @format -->
+
+/\*_ @format _/
 
 # ECS Constructs
 
@@ -28,13 +30,14 @@ This directory contains reusable AWS CDK constructs for creating and managing Am
 
 The ECS infrastructure is split into three primary constructs rather than one monolithic construct:
 
-| Construct | Responsibility |
-|-----------|----------------|
-| `EcsClusterConstruct` | Cluster creation, EC2 capacity, networking, security groups |
-| `EcsTaskDefinitionConstruct` | Task definition, containers, volumes, IAM execution role |
-| `EcsServiceConstruct` | Service deployment, scaling, load balancer attachment |
+| Construct                    | Responsibility                                              |
+| ---------------------------- | ----------------------------------------------------------- |
+| `EcsClusterConstruct`        | Cluster creation, EC2 capacity, networking, security groups |
+| `EcsTaskDefinitionConstruct` | Task definition, containers, volumes, IAM execution role    |
+| `EcsServiceConstruct`        | Service deployment, scaling, load balancer attachment       |
 
 **Rationale:**
+
 - Different teams may own different parts of the infrastructure
 - Task definitions can be shared across multiple services
 - Clusters can host multiple services with different configurations
@@ -44,11 +47,11 @@ The ECS infrastructure is split into three primary constructs rather than one mo
 
 Both EC2 and Fargate launch types are supported with appropriate defaults:
 
-| Feature | EC2 | Fargate |
-|---------|-----|---------|
-| Network Mode | BRIDGE (default) | AWS_VPC (required) |
-| CPU/Memory | Optional | Required |
-| Volumes | Host paths, EFS | EFS only |
+| Feature      | EC2                   | Fargate                           |
+| ------------ | --------------------- | --------------------------------- |
+| Network Mode | BRIDGE (default)      | AWS_VPC (required)                |
+| CPU/Memory   | Optional              | Required                          |
+| Volumes      | Host paths, EFS       | EFS only                          |
 | Port Mapping | Dynamic (hostPort: 0) | Static (hostPort = containerPort) |
 
 **Note:** When using Fargate, you must provide `networkConfiguration` with subnets and security groups.
@@ -86,26 +89,26 @@ const cluster = new EcsClusterConstruct(this, "MonitoringCluster", {
   vpc: myVpc,
   envName: "production",
   projectName: "monitoring",
-  
+
   // Cluster configuration
   clusterName: "monitoring-cluster",
   enableContainerInsights: true,
   enableFargateCapacityProviders: false,
-  
+
   // EC2 capacity
   instanceType: new ec2.InstanceType("t3.medium"),
   minCapacity: 2,
   maxCapacity: 10,
   desiredCapacity: 2,
-  
+
   // Networking
   usePublicSubnets: false,
   additionalSecurityGroups: [mySecurityGroup],
-  
+
   // Logging
   logRetention: logs.RetentionDays.ONE_MONTH,
   logGroupKmsKey: myKmsKey,
-  
+
   // Execute command for debugging
   enableExecuteCommand: true,
 });
@@ -115,6 +118,7 @@ cluster.allowInternalPort(9090, "Allow Prometheus scraping");
 ```
 
 **Key Properties Exposed:**
+
 - `cluster` - The ECS Cluster
 - `logGroup` - CloudWatch Log Group for cluster logs
 - `asg` - Auto Scaling Group for EC2 capacity
@@ -148,7 +152,10 @@ const ec2Task = new EcsTaskDefinitionConstruct(this, "AppTask", {
       logGroup: myLogGroup,
       logStreamPrefix: "app",
       healthCheck: {
-        command: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"],
+        command: [
+          "CMD-SHELL",
+          "curl -f http://localhost:8080/health || exit 1",
+        ],
         intervalSeconds: 30,
         retries: 3,
       },
@@ -173,7 +180,7 @@ ec2Task.addMountPoints("app", {
 const fargateTask = new EcsTaskDefinitionConstruct(this, "FargateTask", {
   envName: "production",
   launchType: "FARGATE",
-  cpu: 512,        // Required for Fargate
+  cpu: 512, // Required for Fargate
   memoryMiB: 1024, // Required for Fargate
   containers: [
     {
@@ -187,26 +194,27 @@ const fargateTask = new EcsTaskDefinitionConstruct(this, "FargateTask", {
 ```
 
 **Key Properties Exposed:**
+
 - `taskDefinition` - The ECS Task Definition
 - `containers` - Map of container definitions by name
 
 **Container Configuration Options:**
 
-| Property | Description |
-|----------|-------------|
-| `name` | Container name (required) |
-| `image` | Container image (required) |
-| `containerPort` | Port exposed by container |
-| `hostPort` | Host port mapping (EC2 only, 0 for dynamic) |
-| `cpu` | CPU units (1024 = 1 vCPU) |
-| `memoryLimitMiB` | Hard memory limit |
-| `memoryReservationMiB` | Soft memory limit |
-| `environment` | Environment variables |
-| `secrets` | Secrets from Secrets Manager/SSM |
-| `command` | Command override |
-| `healthCheck` | Container health check |
-| `logGroup` | CloudWatch Log Group |
-| `linuxParameters` | Linux-specific settings |
+| Property               | Description                                 |
+| ---------------------- | ------------------------------------------- |
+| `name`                 | Container name (required)                   |
+| `image`                | Container image (required)                  |
+| `containerPort`        | Port exposed by container                   |
+| `hostPort`             | Host port mapping (EC2 only, 0 for dynamic) |
+| `cpu`                  | CPU units (1024 = 1 vCPU)                   |
+| `memoryLimitMiB`       | Hard memory limit                           |
+| `memoryReservationMiB` | Soft memory limit                           |
+| `environment`          | Environment variables                       |
+| `secrets`              | Secrets from Secrets Manager/SSM            |
+| `command`              | Command override                            |
+| `healthCheck`          | Container health check                      |
+| `logGroup`             | CloudWatch Log Group                        |
+| `linuxParameters`      | Linux-specific settings                     |
 
 ### EcsServiceConstruct
 
@@ -221,17 +229,17 @@ const ec2Service = new EcsServiceConstruct(this, "AppService", {
   taskDefinition: myTaskDefinition,
   envName: "production",
   projectName: "my-app",
-  
+
   // Service configuration
   serviceName: "app-service",
   desiredCount: 3,
   minHealthyPercent: 100,
   maxHealthyPercent: 200,
   healthCheckGracePeriod: cdk.Duration.seconds(60),
-  
+
   // Deployment
   enableCircuitBreaker: true,
-  
+
   // Load balancer
   loadBalancerTargets: [
     {
@@ -240,7 +248,7 @@ const ec2Service = new EcsServiceConstruct(this, "AppService", {
       containerPort: 8080,
     },
   ],
-  
+
   // Auto-scaling
   scalingConfig: {
     minCapacity: 2,
@@ -248,7 +256,7 @@ const ec2Service = new EcsServiceConstruct(this, "AppService", {
     cpuTargetUtilizationPercent: 70,
     memoryTargetUtilizationPercent: 80,
   },
-  
+
   // Alarms
   alarmConfig: {
     enabled: true,
@@ -263,11 +271,11 @@ const fargateService = new EcsServiceConstruct(this, "FargateService", {
   taskDefinition: myFargateTaskDef,
   envName: "production",
   launchType: "FARGATE",
-  
+
   // Required for Fargate
   networkConfiguration: {
     awsvpcConfiguration: {
-      subnets: myVpc.privateSubnets.map(s => s.subnetId),
+      subnets: myVpc.privateSubnets.map((s) => s.subnetId),
       securityGroups: [mySecurityGroup.securityGroupId],
       assignPublicIp: false,
     },
@@ -276,6 +284,7 @@ const fargateService = new EcsServiceConstruct(this, "FargateService", {
 ```
 
 **Key Properties Exposed:**
+
 - `service` - The ECS Service (Ec2Service or FargateService)
 - `cpuAlarm` - CloudWatch CPU alarm (if configured)
 - `memoryAlarm` - CloudWatch memory alarm (if configured)
@@ -292,20 +301,20 @@ const asg = new AutoScalingGroupConstruct(this, "CustomAsg", {
   cluster: myCluster,
   envName: "production",
   launchTemplate: myLaunchTemplate,
-  
+
   minCapacity: 1,
   maxCapacity: 5,
   desiredCapacity: 2,
-  
+
   // Subnet selection
   subnetSelection: {
     subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
   },
-  
+
   // Capacity provider settings
   enableManagedScaling: true,
   enableManagedTerminationProtection: false,
-  
+
   // Update policy
   updateMaxBatchSize: 1,
   updateMinInstancesInService: 1,
@@ -331,12 +340,14 @@ const cluster = new EcsClusterConstruct(this, "Cluster", {
 const taskDef = new EcsTaskDefinitionConstruct(this, "TaskDef", {
   envName: "dev",
   launchType: "EC2",
-  containers: [{
-    name: "app",
-    image: ecs.ContainerImage.fromRegistry("nginx:latest"),
-    containerPort: 80,
-    memoryReservationMiB: 256,
-  }],
+  containers: [
+    {
+      name: "app",
+      image: ecs.ContainerImage.fromRegistry("nginx:latest"),
+      containerPort: 80,
+      memoryReservationMiB: 256,
+    },
+  ],
 });
 
 // 3. Create service
@@ -365,15 +376,17 @@ const taskDef = new EcsTaskDefinitionConstruct(this, "TaskDef", {
   launchType: "FARGATE",
   cpu: 256,
   memoryMiB: 512,
-  containers: [{
-    name: "app",
-    image: ecs.ContainerImage.fromEcrRepository(repo, "v1.0.0"),
-    containerPort: 8080,
-    logGroup,
-    environment: {
-      PORT: "8080",
+  containers: [
+    {
+      name: "app",
+      image: ecs.ContainerImage.fromEcrRepository(repo, "v1.0.0"),
+      containerPort: 8080,
+      logGroup,
+      environment: {
+        PORT: "8080",
+      },
     },
-  }],
+  ],
 });
 
 // Service with network configuration
@@ -385,15 +398,17 @@ const service = new EcsServiceConstruct(this, "Service", {
   desiredCount: 2,
   networkConfiguration: {
     awsvpcConfiguration: {
-      subnets: vpc.privateSubnets.map(s => s.subnetId),
+      subnets: vpc.privateSubnets.map((s) => s.subnetId),
       securityGroups: [serviceSg.securityGroupId],
     },
   },
-  loadBalancerTargets: [{
-    targetGroup: albTargetGroup,
-    containerName: "app",
-    containerPort: 8080,
-  }],
+  loadBalancerTargets: [
+    {
+      targetGroup: albTargetGroup,
+      containerName: "app",
+      containerPort: 8080,
+    },
+  ],
   scalingConfig: {
     minCapacity: 2,
     maxCapacity: 10,
@@ -430,10 +445,12 @@ const taskDef = new EcsTaskDefinitionConstruct(this, "TaskDef", {
       cpu: 64,
       memoryLimitMiB: 128,
       logGroup: metricsLogGroup,
-      dependencies: [{
-        containerName: "app",
-        condition: ecs.ContainerDependencyCondition.START,
-      }],
+      dependencies: [
+        {
+          containerName: "app",
+          condition: ecs.ContainerDependencyCondition.START,
+        },
+      ],
     },
   ],
 });
@@ -461,22 +478,26 @@ const taskDef = new EcsTaskDefinitionConstruct(this, "TaskDef", {
   launchType: "FARGATE",
   cpu: 512,
   memoryMiB: 1024,
-  volumes: [{
-    name: "app-storage",
-    efsVolumeConfiguration: {
-      fileSystemId: fileSystem.fileSystemId,
-      transitEncryption: "ENABLED",
-      authorizationConfig: {
-        accessPointId: accessPoint.accessPointId,
+  volumes: [
+    {
+      name: "app-storage",
+      efsVolumeConfiguration: {
+        fileSystemId: fileSystem.fileSystemId,
+        transitEncryption: "ENABLED",
+        authorizationConfig: {
+          accessPointId: accessPoint.accessPointId,
+        },
       },
     },
-  }],
-  containers: [{
-    name: "app",
-    image: ecs.ContainerImage.fromEcrRepository(repo),
-    containerPort: 8080,
-    logGroup,
-  }],
+  ],
+  containers: [
+    {
+      name: "app",
+      image: ecs.ContainerImage.fromEcrRepository(repo),
+      containerPort: 8080,
+      logGroup,
+    },
+  ],
 });
 
 // Add mount point after creation
@@ -497,14 +518,14 @@ const isProduction = props.envName === "production";
 const cluster = new EcsClusterConstruct(this, "Cluster", {
   vpc,
   envName: props.envName,
-  
+
   // Production settings
   enableContainerInsights: isProduction,
   minCapacity: isProduction ? 2 : 1,
   maxCapacity: isProduction ? 20 : 3,
   logGroupKmsKey: isProduction ? kmsKey : undefined,
-  logRetention: isProduction 
-    ? logs.RetentionDays.THREE_MONTHS 
+  logRetention: isProduction
+    ? logs.RetentionDays.THREE_MONTHS
     : logs.RetentionDays.ONE_WEEK,
 });
 ```
