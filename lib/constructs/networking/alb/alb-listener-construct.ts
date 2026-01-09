@@ -69,13 +69,18 @@ export class AlbListenerConstruct extends Construct {
       certificateArn,
       additionalCertificates = [],
       redirectHttpToHttps = false,
-      sslPolicy = elbv2.SslPolicy.TLS13_RES, // TLS 1.3 by default
+      sslPolicy = elbv2.SslPolicy.RECOMMENDED_TLS, // TLS 1.3 by default
       httpDefaultAction,
       httpsDefaultAction,
       preserveXForwardedFor: _preserveXForwardedFor = true, // Note: ALB preserves X-Forwarded-For by default
       preserveXForwardedProto: _preserveXForwardedProto = true, // Note: ALB preserves X-Forwarded-Proto by default
       loadBalancerName,
     } = props;
+
+    // These options are preserved for API compatibility; ALB already forwards these headers
+    // so the flags are intentionally unused.
+    void _preserveXForwardedFor;
+    void _preserveXForwardedProto;
 
     // ========================================
     // Input Validation
@@ -110,10 +115,7 @@ export class AlbListenerConstruct extends Construct {
     // ========================================
 
     // Warn about HTTPS not enabled in production
-    if (
-      !enableHttps &&
-      (envName === "production" || envName === "prod")
-    ) {
+    if (!enableHttps && (envName === "production" || envName === "prod")) {
       cdk.Annotations.of(this).addWarning(
         "SECURITY WARNING: HTTPS is disabled in production environment.\n" +
           "HTTPS should be enabled in production for secure communication.\n" +
@@ -125,12 +127,15 @@ export class AlbListenerConstruct extends Construct {
     if (
       enableHttps &&
       (envName === "production" || envName === "prod") &&
+      sslPolicy !== elbv2.SslPolicy.RECOMMENDED_TLS &&
       sslPolicy !== elbv2.SslPolicy.TLS13_RES &&
       sslPolicy !== elbv2.SslPolicy.TLS13_EXT1 &&
       sslPolicy !== elbv2.SslPolicy.TLS13_EXT2
     ) {
       cdk.Annotations.of(this).addWarning(
-        `SECURITY WARNING: Using SSL policy ${String(sslPolicy)} in production.\n` +
+        `SECURITY WARNING: Using SSL policy ${String(
+          sslPolicy
+        )} in production.\n` +
           "TLS 1.3 is recommended for production environments.\n" +
           "Consider using SslPolicy.TLS13_RES, SslPolicy.TLS13_EXT1, or SslPolicy.TLS13_EXT2 for better security."
       );
@@ -211,10 +216,19 @@ export class AlbListenerConstruct extends Construct {
         sslPolicy,
       });
 
+      const httpsListenerResource = this.httpsListener.node
+        .defaultChild as elbv2.CfnListener;
+      httpsListenerResource.certificates = certificates.map((cert) => ({
+        certificateArn: cert.certificateArn,
+      }));
+
       // Tag HTTPS listener
       cdk.Tags.of(this.httpsListener).add("Environment", envName);
       cdk.Tags.of(this.httpsListener).add("ManagedBy", "CDK");
-      cdk.Tags.of(this.httpsListener).add("ResourceType", "ApplicationListener");
+      cdk.Tags.of(this.httpsListener).add(
+        "ResourceType",
+        "ApplicationListener"
+      );
       cdk.Tags.of(this.httpsListener).add("Protocol", "HTTPS");
 
       if (projectName) {
@@ -249,8 +263,10 @@ export class AlbListenerConstruct extends Construct {
       ? `${loadBalancerName}-`
       : `${stackName}-`;
 
+    const stackScope = cdk.Stack.of(this);
+
     if (this.httpListener) {
-      new cdk.CfnOutput(this, "HttpListenerArn", {
+      new cdk.CfnOutput(stackScope, "HttpListenerArn", {
         value: this.httpListener.listenerArn,
         description: "HTTP Listener ARN",
         exportName: `${uniqueSuffix}http-listener-arn`,
@@ -258,7 +274,7 @@ export class AlbListenerConstruct extends Construct {
     }
 
     if (this.httpsListener) {
-      new cdk.CfnOutput(this, "HttpsListenerArn", {
+      new cdk.CfnOutput(stackScope, "HttpsListenerArn", {
         value: this.httpsListener.listenerArn,
         description: "HTTPS Listener ARN",
         exportName: `${uniqueSuffix}https-listener-arn`,
@@ -372,10 +388,7 @@ export class AlbListenerConstruct extends Construct {
     conditions?: elbv2.ListenerCondition[]
   ): void {
     // Calculate total weight for validation
-    const totalWeight = targetGroups.reduce(
-      (sum, tg) => sum + tg.weight,
-      0
-    );
+    const totalWeight = targetGroups.reduce((sum, tg) => sum + tg.weight, 0);
 
     if (totalWeight === 0) {
       throw new Error(
@@ -394,10 +407,15 @@ export class AlbListenerConstruct extends Construct {
       }))
     );
 
+    const ruleConditions =
+      conditions && conditions.length > 0
+        ? conditions
+        : [elbv2.ListenerCondition.pathPatterns(["/*"])];
+
     this.listener.addAction(id, {
       action: forwardAction,
       priority,
-      conditions: conditions || [],
+      conditions: ruleConditions,
     });
   }
 
