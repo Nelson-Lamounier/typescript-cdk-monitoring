@@ -1,46 +1,38 @@
 /** @format */
 
+import * as cdk from "aws-cdk-lib";
 import * as ecs from "aws-cdk-lib/aws-ecs";
-import * as iam from "aws-cdk-lib/aws-iam";
-import * as logs from "aws-cdk-lib/aws-logs";
 import { Tags } from "aws-cdk-lib";
 import { NagSuppressions } from "cdk-nag";
 import { Construct } from "constructs";
 
-import { EcsTaskExecutionRole } from "../../iam";
-
-export interface ContainerConfig {
-  name: string;
-  image: ecs.ContainerImage;
-  containerPort?: number; // Optional - not needed for HOST mode without explicit port mapping
-  hostPort?: number; // Optional - if set, uses static host port mapping (required for metrics scraping)
-  cpu?: number;
-  memoryLimitMiB?: number;
-  memoryReservationMiB?: number;
-  environment?: { [key: string]: string };
-  secrets?: { [key: string]: ecs.Secret };
-  command?: string[];
-  logStreamPrefix?: string;
-  logGroup?: logs.ILogGroup; // Optional - specific log group to use (if not provided, ECS will auto-create)
-  user?: string; // Optional - run container as specific user (e.g., "472" for Grafana)
-}
-
-export interface EcsTaskDefinitionConstructProps {
-  envName: string;
-  networkMode?: ecs.NetworkMode;
-  containers: ContainerConfig[];
-  grantEcrReadAccess?: boolean;
-  taskRole?: iam.IRole;
-  executionRole?: iam.IRole;
-  volumes?: ecs.Volume[];
-}
+import {
+  DEFAULT_ECS_TASK_HEALTHCHECK_INTERVAL_SECONDS,
+  DEFAULT_ECS_TASK_HEALTHCHECK_RETRIES,
+  DEFAULT_ECS_TASK_HEALTHCHECK_START_PERIOD_SECONDS,
+  DEFAULT_ECS_TASK_HEALTHCHECK_TIMEOUT_SECONDS,
+  DEFAULT_ECS_TASK_LOG_STREAM_PREFIX,
+  DEFAULT_ECS_TASK_MEMORY_RESERVATION_MIB,
+  DEFAULT_ECS_TASK_NETWORK_MODE_EC2,
+} from "../../../shared/constants/compute-constants";
+import {
+  ContainerConfig,
+  EcsLaunchType,
+  EcsTaskDefinitionConstructProps,
+} from "../../../shared/types";
+import {
+  validateContainers,
+  validateEnvName,
+  validateFargateResources,
+} from "../../../shared/utils/validation";
+import { EcsTaskExecutionRole } from "../../iam/ecs-task-execution-role";
 
 /**
  * Reusable construct for creating ECS Task Definitions with containers
  * Supports multiple containers and flexible configuration
  */
 export class EcsTaskDefinitionConstruct extends Construct {
-  public readonly taskDefinition: ecs.Ec2TaskDefinition;
+  public readonly taskDefinition: ecs.TaskDefinition;
   public readonly containers: Map<string, ecs.ContainerDefinition>;
 
   constructor(
@@ -51,6 +43,12 @@ export class EcsTaskDefinitionConstruct extends Construct {
     super(scope, id);
 
     this.containers = new Map();
+
+    validateEnvName(props.envName);
+    validateContainers(props.containers);
+
+    const launchType: EcsLaunchType = props.launchType ?? "EC2";
+    validateFargateResources(launchType, props.cpu, props.memoryMiB);
 
     // Create or use provided execution role
     let executionRole = props.executionRole;
@@ -76,11 +74,26 @@ export class EcsTaskDefinitionConstruct extends Construct {
     }
 
     // Create Task Definition
-    this.taskDefinition = new ecs.Ec2TaskDefinition(this, "TaskDef", {
-      networkMode: props.networkMode || ecs.NetworkMode.BRIDGE,
-      taskRole: props.taskRole,
-      executionRole: executionRole,
-    });
+    if (launchType === "FARGATE") {
+      const fargateCpu = props.cpu as number;
+      const fargateMemoryMiB = props.memoryMiB as number;
+      this.taskDefinition = new ecs.FargateTaskDefinition(this, "TaskDef", {
+        cpu: fargateCpu,
+        memoryLimitMiB: fargateMemoryMiB,
+        taskRole: props.taskRole,
+        executionRole: executionRole,
+        ephemeralStorageGiB: props.ephemeralStorageGiB,
+        runtimePlatform: props.runtimePlatform,
+      });
+    } else {
+      this.taskDefinition = new ecs.Ec2TaskDefinition(this, "TaskDef", {
+        networkMode:
+          props.networkMode ||
+          (DEFAULT_ECS_TASK_NETWORK_MODE_EC2 as ecs.NetworkMode.BRIDGE),
+        taskRole: props.taskRole,
+        executionRole: executionRole,
+      });
+    }
 
     // Add volumes if provided
     if (props.volumes) {
@@ -91,7 +104,7 @@ export class EcsTaskDefinitionConstruct extends Construct {
 
     // Add containers
     props.containers.forEach((containerConfig) => {
-      this.addContainer(containerConfig, props.envName);
+      this.addContainer(containerConfig, props.envName, launchType);
     });
 
     // Tag task definition
@@ -121,75 +134,160 @@ export class EcsTaskDefinitionConstruct extends Construct {
   /**
    * Add a container to the task definition
    */
-  private addContainer(config: ContainerConfig, envName: string): void {
-    // Configure logging: Use awslogs driver for ECS console integration
-    // The awslogs driver automatically captures stdout/stderr from container processes
-    // and sends them to CloudWatch Logs, enabling the ECS console "Logs" tab
-    let logging: ecs.LogDriver | undefined;
-    if (config.logStreamPrefix && config.logGroup) {
-      // Use awslogs driver with explicit log group - enables ECS console "Logs" tab
-      // Logs are sent directly to CloudWatch Logs via the awslogs driver
-      // This captures stdout/stderr from the container process
-      logging = ecs.LogDrivers.awsLogs({
-        logGroup: config.logGroup,
-        streamPrefix: config.logStreamPrefix,
-      });
-    } else if (config.logStreamPrefix) {
-      // Fallback: Use awslogs with auto-created log group if logGroup not provided
-      // Still captures stdout/stderr and enables ECS console integration
-      logging = ecs.LogDrivers.awsLogs({
-        streamPrefix: config.logStreamPrefix,
-      });
-    } else if (config.logGroup) {
-      // If logGroup is provided but no prefix, use container name as prefix
-      logging = ecs.LogDrivers.awsLogs({
-        logGroup: config.logGroup,
-        streamPrefix: config.name,
-      });
-    } else {
-      // Default: Auto-create log group with container name as prefix
-      // Ensures all containers have logging configured to capture stdout/stderr
-      logging = ecs.LogDrivers.awsLogs({
-        streamPrefix: config.name,
-      });
-    }
+  private addContainer(
+    config: ContainerConfig,
+    _envName: string,
+    _launchType: EcsLaunchType
+  ): void {
+    const logging = this.buildLogging(config);
+    const linuxParameters = this.buildLinuxParameters(config);
 
     const container = this.taskDefinition.addContainer(config.name, {
       image: config.image,
-      logging: logging,
-      memoryReservationMiB: config.memoryReservationMiB || 512,
+      logging,
+      memoryReservationMiB:
+        config.memoryReservationMiB ?? DEFAULT_ECS_TASK_MEMORY_RESERVATION_MIB,
       memoryLimitMiB: config.memoryLimitMiB,
       cpu: config.cpu,
       environment: config.environment,
+      environmentFiles: config.environmentFiles,
       secrets: config.secrets,
       command: config.command,
-      user: config.user, // Run container as specific user if specified
+      entryPoint: config.entryPoint,
+      user: config.user,
+      healthCheck: this.buildHealthCheck(config),
+      linuxParameters,
+      ulimits: config.linuxParameters?.ulimits,
     });
 
     // Add port mapping only if containerPort is specified
     // For HOST mode, port mapping is optional as container uses host network directly
     if (config.containerPort !== undefined) {
-      let hostPort: number;
-
-      if (this.taskDefinition.networkMode === ecs.NetworkMode.HOST) {
-        // HOST mode: container uses host network directly
-        hostPort = config.containerPort;
-      } else if (config.hostPort !== undefined) {
-        // BRIDGE mode with static host port (for metrics scraping)
-        hostPort = config.hostPort;
-      } else {
-        // BRIDGE mode with dynamic port (default)
-        hostPort = 0;
-      }
+      const hostPort =
+        this.taskDefinition.networkMode === ecs.NetworkMode.HOST
+          ? config.containerPort
+          : config.hostPort ?? 0;
 
       container.addPortMappings({
         containerPort: config.containerPort,
         hostPort: hostPort,
-        protocol: ecs.Protocol.TCP,
+        protocol: config.portProtocol ?? ecs.Protocol.TCP,
+      });
+    }
+
+    if (config.dependencies) {
+      config.dependencies.forEach((dep) => {
+        const depContainer = this.containers.get(dep.containerName);
+        if (!depContainer) {
+          throw new Error(
+            `Dependency container ${dep.containerName} not found`
+          );
+        }
+        container.addContainerDependencies({
+          container: depContainer,
+          condition: dep.condition ?? ecs.ContainerDependencyCondition.START,
+        });
       });
     }
 
     this.containers.set(config.name, container);
+  }
+
+  private buildLogging(config: ContainerConfig): ecs.LogDriver | undefined {
+    const driver = config.logConfiguration?.driver ?? "awslogs";
+    switch (driver) {
+      case "awslogs":
+        return ecs.LogDrivers.awsLogs({
+          logGroup: config.logGroup,
+          streamPrefix:
+            config.logStreamPrefix ?? DEFAULT_ECS_TASK_LOG_STREAM_PREFIX,
+          ...config.logConfiguration?.options,
+        });
+      case "fluentd":
+        return ecs.LogDrivers.fluentd(config.logConfiguration?.options);
+      case "splunk":
+        if (!config.logConfiguration?.splunk) {
+          throw new Error(
+            "Splunk log driver requires 'splunk' configuration with url and token."
+          );
+        }
+        return ecs.LogDrivers.splunk({
+          url: config.logConfiguration.splunk.url,
+          secretToken: config.logConfiguration.splunk.token,
+          index: config.logConfiguration.splunk.index,
+          source: config.logConfiguration.splunk.source,
+          sourceType: config.logConfiguration.splunk.sourceType,
+        });
+      case "json-file":
+        return ecs.LogDrivers.jsonFile(config.logConfiguration?.options);
+      case "syslog":
+        return ecs.LogDrivers.syslog(config.logConfiguration?.options);
+      default:
+        return ecs.LogDrivers.awsLogs({
+          logGroup: config.logGroup,
+          streamPrefix:
+            config.logStreamPrefix ?? DEFAULT_ECS_TASK_LOG_STREAM_PREFIX,
+        });
+    }
+  }
+
+  private buildHealthCheck(
+    config: ContainerConfig
+  ): ecs.HealthCheck | undefined {
+    if (!config.healthCheck) {
+      return undefined;
+    }
+    return {
+      command: config.healthCheck.command,
+      interval: cdk.Duration.seconds(
+        config.healthCheck.intervalSeconds ??
+          DEFAULT_ECS_TASK_HEALTHCHECK_INTERVAL_SECONDS
+      ),
+      timeout: cdk.Duration.seconds(
+        config.healthCheck.timeoutSeconds ??
+          DEFAULT_ECS_TASK_HEALTHCHECK_TIMEOUT_SECONDS
+      ),
+      retries:
+        config.healthCheck.retries ?? DEFAULT_ECS_TASK_HEALTHCHECK_RETRIES,
+      startPeriod: cdk.Duration.seconds(
+        config.healthCheck.startPeriodSeconds ??
+          DEFAULT_ECS_TASK_HEALTHCHECK_START_PERIOD_SECONDS
+      ),
+    };
+  }
+
+  private buildLinuxParameters(
+    config: ContainerConfig
+  ): ecs.LinuxParameters | undefined {
+    if (!config.linuxParameters) {
+      return undefined;
+    }
+
+    const lp = new ecs.LinuxParameters(this, `${config.name}LinuxParams`, {
+      initProcessEnabled: config.linuxParameters.initProcessEnabled,
+      sharedMemorySize: config.linuxParameters.sharedMemorySize,
+      maxSwap: config.linuxParameters.maxSwap
+        ? cdk.Size.mebibytes(config.linuxParameters.maxSwap)
+        : undefined,
+      swappiness: config.linuxParameters.swappiness,
+    });
+
+    if (config.linuxParameters.capabilities?.add) {
+      lp.addCapabilities(...config.linuxParameters.capabilities.add);
+    }
+    if (config.linuxParameters.capabilities?.drop) {
+      lp.dropCapabilities(...config.linuxParameters.capabilities.drop);
+    }
+
+    if (config.linuxParameters.devices) {
+      config.linuxParameters.devices.forEach((d) => lp.addDevices(d));
+    }
+
+    if (config.linuxParameters.tmpfs) {
+      config.linuxParameters.tmpfs.forEach((t) => lp.addTmpfs(t));
+    }
+
+    return lp;
   }
 
   /**

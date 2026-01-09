@@ -2,86 +2,116 @@
 
 import * as cdk from "aws-cdk-lib";
 import * as ecs from "aws-cdk-lib/aws-ecs";
-import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as cw from "aws-cdk-lib/aws-cloudwatch";
 import { Tags } from "aws-cdk-lib";
 import { Construct } from "constructs";
 
-export interface LoadBalancerTargetConfig {
-  targetGroup: elbv2.IApplicationTargetGroup;
-  containerName: string;
-  containerPort: number;
-}
-
-export interface ServiceAlarmConfig {
-  enabled: boolean;
-  cpuThreshold?: number;
-  memoryThreshold?: number;
-  alarmBehavior?: ecs.AlarmBehavior;
-}
-
-export interface EcsServiceConstructProps {
-  cluster: ecs.ICluster;
-  taskDefinition: ecs.TaskDefinition;
-  envName: string;
-  serviceName?: string;
-  desiredCount?: number;
-  minHealthyPercent?: number;
-  maxHealthyPercent?: number;
-  healthCheckGracePeriod?: cdk.Duration;
-  enableCircuitBreaker?: boolean;
-  enableExecuteCommand?: boolean;
-  loadBalancerTarget?: LoadBalancerTargetConfig;
-  alarmConfig?: ServiceAlarmConfig;
-  placementStrategies?: ecs.PlacementStrategy[];
-}
+import {
+  DEFAULT_ECS_SERVICE_AUTOSCALE_MAX_CAPACITY,
+  DEFAULT_ECS_SERVICE_AUTOSCALE_MIN_CAPACITY,
+  DEFAULT_ECS_SERVICE_DESIRED_COUNT,
+  DEFAULT_ECS_SERVICE_HEALTH_GRACE_SECONDS,
+  DEFAULT_ECS_SERVICE_MAX_HEALTHY_PERCENT,
+  DEFAULT_ECS_SERVICE_MIN_HEALTHY_PERCENT,
+} from "../../../shared/constants/compute-constants";
+import {
+  EcsServiceConstructProps,
+  LoadBalancerTargetConfig,
+  ServiceAlarmConfig,
+} from "../../../shared/types";
+import {
+  validateCapacityOrder,
+  validateClusterProvided,
+  validateDesiredCount,
+  validateDeploymentPercentages,
+  validateEnvName,
+} from "../../../shared/utils/validation";
 
 /**
  * Reusable construct for creating ECS Services
  * Handles service configuration, load balancer attachment, and alarms
  */
 export class EcsServiceConstruct extends Construct {
-  public readonly service: ecs.Ec2Service;
+  public readonly service: ecs.BaseService;
   public cpuAlarm?: cw.Alarm;
   public memoryAlarm?: cw.Alarm;
 
   constructor(scope: Construct, id: string, props: EcsServiceConstructProps) {
     super(scope, id);
 
-    // Create ECS Service
-    this.service = new ecs.Ec2Service(this, "Service", {
-      cluster: props.cluster,
-      taskDefinition: props.taskDefinition as ecs.Ec2TaskDefinition,
-      desiredCount: props.desiredCount || 1,
-      serviceName: props.serviceName || `ecs-service-${props.envName}`,
+    validateEnvName(props.envName);
+    validateClusterProvided(props.cluster);
+    validateDesiredCount(props.desiredCount);
 
-      // Placement strategy for better distribution
-      placementStrategies: props.placementStrategies || [
-        ecs.PlacementStrategy.spreadAcrossInstances(),
-        ecs.PlacementStrategy.packedByCpu(),
-      ],
+    const minHealthy =
+      props.minHealthyPercent ?? DEFAULT_ECS_SERVICE_MIN_HEALTHY_PERCENT;
+    const maxHealthy =
+      props.maxHealthyPercent ?? DEFAULT_ECS_SERVICE_MAX_HEALTHY_PERCENT;
+    validateDeploymentPercentages(minHealthy, maxHealthy);
 
-      // Circuit breaker configuration
-      circuitBreaker: {
-        enable: props.enableCircuitBreaker !== false,
-        rollback: props.enableCircuitBreaker !== false,
-      },
+    const desiredCount =
+      props.desiredCount ?? DEFAULT_ECS_SERVICE_DESIRED_COUNT;
 
-      // Deployment configuration
-      minHealthyPercent: props.minHealthyPercent ?? 0,
-      maxHealthyPercent: props.maxHealthyPercent ?? 200,
+    const isFargate =
+      props.launchType === "FARGATE" ||
+      props.taskDefinition instanceof ecs.FargateTaskDefinition;
 
-      // Health check grace period
-      healthCheckGracePeriod:
-        props.healthCheckGracePeriod || cdk.Duration.seconds(120),
-
-      // Enable ECS Exec
-      enableExecuteCommand: props.enableExecuteCommand,
-    });
+    if (isFargate) {
+      this.service = new ecs.FargateService(this, "Service", {
+        cluster: props.cluster,
+        taskDefinition: props.taskDefinition,
+        desiredCount,
+        serviceName: props.serviceName || `ecs-service-${props.envName}`,
+        circuitBreaker: {
+          enable: props.enableCircuitBreaker !== false,
+          rollback: props.enableCircuitBreaker !== false,
+        },
+        minHealthyPercent: minHealthy,
+        maxHealthyPercent: maxHealthy,
+        healthCheckGracePeriod:
+          props.healthCheckGracePeriod ||
+          cdk.Duration.seconds(DEFAULT_ECS_SERVICE_HEALTH_GRACE_SECONDS),
+        enableExecuteCommand: props.enableExecuteCommand,
+        deploymentController: props.deploymentController,
+        deploymentAlarms: props.deploymentAlarms,
+        cloudMapOptions: props.cloudMapOptions,
+        assignPublicIp:
+          props.networkConfiguration?.awsvpcConfiguration?.assignPublicIp,
+        securityGroups:
+          props.networkConfiguration?.awsvpcConfiguration?.securityGroups,
+        vpcSubnets: props.networkConfiguration?.awsvpcConfiguration?.subnets
+          ? { subnets: props.networkConfiguration.awsvpcConfiguration.subnets }
+          : undefined,
+      });
+    } else {
+      this.service = new ecs.Ec2Service(this, "Service", {
+        cluster: props.cluster,
+        taskDefinition: props.taskDefinition,
+        desiredCount,
+        serviceName: props.serviceName || `ecs-service-${props.envName}`,
+        circuitBreaker: {
+          enable: props.enableCircuitBreaker !== false,
+          rollback: props.enableCircuitBreaker !== false,
+        },
+        minHealthyPercent: minHealthy,
+        maxHealthyPercent: maxHealthy,
+        healthCheckGracePeriod:
+          props.healthCheckGracePeriod ||
+          cdk.Duration.seconds(DEFAULT_ECS_SERVICE_HEALTH_GRACE_SECONDS),
+        enableExecuteCommand: props.enableExecuteCommand,
+        deploymentController: props.deploymentController,
+        deploymentAlarms: props.deploymentAlarms,
+        cloudMapOptions: props.cloudMapOptions,
+        capacityProviderStrategies: props.capacityProviderStrategies,
+        placementStrategies: props.placementStrategies,
+      });
+    }
 
     // Attach to load balancer if configured
-    if (props.loadBalancerTarget) {
-      this.attachToLoadBalancer(props.loadBalancerTarget);
+    if (props.loadBalancerTargets) {
+      props.loadBalancerTargets.forEach((target) =>
+        this.attachToLoadBalancer(target)
+      );
     }
 
     // Create alarms if configured
@@ -93,6 +123,26 @@ export class EcsServiceConstruct extends Construct {
     Tags.of(this.service).add("Environment", props.envName);
     Tags.of(this.service).add("ManagedBy", "CDK");
     Tags.of(this.service).add("Service", "ECS");
+    if (props.projectName) {
+      Tags.of(this.service).add("Project", props.projectName);
+    }
+
+    if (
+      (props.envName === "production" || props.envName === "prod") &&
+      desiredCount < 2
+    ) {
+      cdk.Annotations.of(this).addWarning(
+        "Desired task count is below 2 in production. Consider running at least two tasks for availability."
+      );
+    }
+
+    if (minHealthy < 50) {
+      cdk.Annotations.of(this).addWarning(
+        "minHealthyPercent is low. Values under 50 can cause downtime during deployments."
+      );
+    }
+
+    this.configureAutoScaling(props);
   }
 
   /**
@@ -150,33 +200,34 @@ export class EcsServiceConstruct extends Construct {
   /**
    * Enable auto scaling for the service
    */
-  public enableAutoScaling(
-    minCapacity: number,
-    maxCapacity: number
-  ): ecs.ScalableTaskCount {
-    return this.service.autoScaleTaskCount({
-      minCapacity,
-      maxCapacity,
-    });
-  }
+  private configureAutoScaling(props: EcsServiceConstructProps): void {
+    if (!props.scalingConfig) return;
 
-  /**
-   * Add target tracking scaling policy based on CPU
-   */
-  public addCpuScaling(targetUtilizationPercent: number): void {
-    const scaling = this.enableAutoScaling(1, 10);
-    scaling.scaleOnCpuUtilization("CpuScaling", {
-      targetUtilizationPercent,
-    });
-  }
+    const min =
+      props.scalingConfig.minCapacity ??
+      DEFAULT_ECS_SERVICE_AUTOSCALE_MIN_CAPACITY;
+    const max =
+      props.scalingConfig.maxCapacity ??
+      DEFAULT_ECS_SERVICE_AUTOSCALE_MAX_CAPACITY;
+    validateCapacityOrder(min, min, max);
 
-  /**
-   * Add target tracking scaling policy based on memory
-   */
-  public addMemoryScaling(targetUtilizationPercent: number): void {
-    const scaling = this.enableAutoScaling(1, 10);
-    scaling.scaleOnMemoryUtilization("MemoryScaling", {
-      targetUtilizationPercent,
+    const scaling = this.service.autoScaleTaskCount({
+      minCapacity: min,
+      maxCapacity: max,
     });
+
+    if (props.scalingConfig.cpuTargetUtilizationPercent !== undefined) {
+      scaling.scaleOnCpuUtilization("CpuScaling", {
+        targetUtilizationPercent:
+          props.scalingConfig.cpuTargetUtilizationPercent,
+      });
+    }
+
+    if (props.scalingConfig.memoryTargetUtilizationPercent !== undefined) {
+      scaling.scaleOnMemoryUtilization("MemoryScaling", {
+        targetUtilizationPercent:
+          props.scalingConfig.memoryTargetUtilizationPercent,
+      });
+    }
   }
 }

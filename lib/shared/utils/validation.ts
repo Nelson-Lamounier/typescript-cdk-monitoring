@@ -16,6 +16,11 @@ import {
   MAX_CLUSTER_NAME_LENGTH,
   MIN_CLUSTER_NAME_LENGTH,
 } from "../constants/compute-constants";
+import { EcsLaunchType, ContainerConfig } from "../types/compute-types";
+import {
+  DEFAULT_ECS_SERVICE_MAX_HEALTHY_PERCENT,
+  DEFAULT_ECS_SERVICE_MIN_HEALTHY_PERCENT,
+} from "../constants/compute-constants";
 
 /**
  * Validate subnet CIDR mask is within acceptable range
@@ -747,6 +752,60 @@ export function validateVpcForTargetGroup(
 export function validateClusterProvided(cluster: ecs.ICluster): void {
   if (!cluster || !cluster.clusterName) {
     throw new Error("ECS cluster is required and must have a valid clusterName.");
+  }
+}
+
+/**
+ * Validate containers array and names
+ */
+export function validateContainers(containers: ContainerConfig[]): void {
+  if (!containers || containers.length === 0) {
+    throw new Error("At least one container configuration is required.");
+  }
+
+  containers.forEach((c) => {
+    if (!c.name || c.name.trim().length === 0) {
+      throw new Error("Container name is required.");
+    }
+    const nameRegex = /^[a-zA-Z0-9-_]+$/;
+    if (!nameRegex.test(c.name)) {
+      throw new Error(
+        `Container name "${c.name}" is invalid. Only alphanumeric characters, hyphens, and underscores are allowed.`
+      );
+    }
+  });
+}
+
+/**
+ * Validate Fargate requirements
+ */
+export function validateFargateResources(
+  launchType: EcsLaunchType,
+  cpu?: number,
+  memoryMiB?: number
+): void {
+  if (launchType === "FARGATE") {
+    if (cpu === undefined || memoryMiB === undefined) {
+      throw new Error("Fargate tasks require both cpu and memoryMiB to be specified.");
+    }
+  }
+}
+
+export function validateDesiredCount(desired?: number): void {
+  if (desired !== undefined && desired <= 0) {
+    throw new Error("Desired count must be greater than 0.");
+  }
+}
+
+export function validateDeploymentPercentages(
+  minHealthy: number,
+  maxHealthy: number
+): void {
+  if (minHealthy <= 0 || minHealthy > 100) {
+    throw new Error("minHealthyPercent must be between 1 and 100.");
+  }
+  if (maxHealthy < minHealthy || maxHealthy > 200) {
+    throw new Error("maxHealthyPercent must be between minHealthyPercent and 200.");
   }
 }
 

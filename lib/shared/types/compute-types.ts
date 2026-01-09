@@ -85,7 +85,6 @@ export interface MonitoringConfig {
   installCloudWatchAgent?: boolean;
 }
 
-
 export interface LaunchTemplateConstructProps {
   vpc: ec2.IVpc;
   envName: string;
@@ -105,4 +104,135 @@ export interface LaunchTemplateConstructProps {
   enableDetailedMonitoring?: boolean;
   associatePublicIpAddress?: boolean;
   customTags?: Record<string, string>;
+}
+
+export type EcsLaunchType = "EC2" | "FARGATE";
+
+export type EcsLogDriverType =
+  | "awslogs"
+  | "fluentd"
+  | "splunk"
+  | "json-file"
+  | "syslog";
+
+export interface ContainerLogConfig {
+  driver?: EcsLogDriverType;
+  options?: { [key: string]: string };
+  splunk?: {
+    url: string;
+    token: ecs.Secret;
+    index?: string;
+    source?: string;
+    sourceType?: string;
+  };
+}
+
+export interface ContainerHealthCheckConfig {
+  command: string[];
+  intervalSeconds?: number;
+  timeoutSeconds?: number;
+  retries?: number;
+  startPeriodSeconds?: number;
+}
+
+export interface ContainerDependencyConfig {
+  containerName: string;
+  condition?: ecs.ContainerDependencyCondition;
+}
+
+export interface ContainerLinuxParametersConfig {
+  capabilities?: {
+    add?: ecs.Capability[];
+    drop?: ecs.Capability[];
+  };
+  devices?: ecs.Device[];
+  tmpfs?: ecs.Tmpfs[];
+  sharedMemorySize?: number;
+  maxSwap?: number;
+  swappiness?: number;
+  initProcessEnabled?: boolean;
+  ulimits?: ecs.Ulimit[];
+}
+
+export interface ContainerConfig {
+  name: string;
+  image: ecs.ContainerImage;
+  containerPort?: number;
+  hostPort?: number;
+  cpu?: number;
+  memoryLimitMiB?: number;
+  memoryReservationMiB?: number;
+  environment?: { [key: string]: string };
+  environmentFiles?: ecs.EnvironmentFile[];
+  secrets?: { [key: string]: ecs.Secret };
+  command?: string[];
+  entryPoint?: string[];
+  logStreamPrefix?: string;
+  logGroup?: logs.ILogGroup;
+  logConfiguration?: ContainerLogConfig;
+  user?: string;
+  healthCheck?: ContainerHealthCheckConfig;
+  dependencies?: ContainerDependencyConfig[];
+  linuxParameters?: ContainerLinuxParametersConfig;
+  portProtocol?: ecs.Protocol;
+}
+
+export interface EcsTaskDefinitionConstructProps {
+  envName: string;
+  projectName?: string;
+  launchType?: EcsLaunchType;
+  networkMode?: ecs.NetworkMode;
+  containers: ContainerConfig[];
+  grantEcrReadAccess?: boolean;
+  taskRole?: iam.IRole;
+  executionRole?: iam.IRole;
+  volumes?: ecs.Volume[];
+  enableExecuteCommand?: boolean;
+  cpu?: number; // Required for Fargate
+  memoryMiB?: number; // Required for Fargate
+  ephemeralStorageGiB?: number; // Fargate only
+  placementConstraints?: ecs.PlacementConstraint[];
+  runtimePlatform?: ecs.RuntimePlatform;
+}
+
+export interface LoadBalancerTargetConfig {
+  targetGroup: elbv2.ITargetGroup;
+  containerName: string;
+  containerPort: number;
+}
+
+export interface ServiceAlarmConfig {
+  enabled: boolean;
+  cpuThreshold?: number;
+  memoryThreshold?: number;
+  alarmBehavior?: ecs.AlarmBehavior;
+}
+
+export interface EcsServiceConstructProps {
+  cluster: ecs.ICluster;
+  taskDefinition: ecs.TaskDefinition;
+  envName: string;
+  projectName?: string;
+  serviceName?: string;
+  desiredCount?: number;
+  minHealthyPercent?: number;
+  maxHealthyPercent?: number;
+  healthCheckGracePeriod?: cdk.Duration;
+  enableCircuitBreaker?: boolean;
+  enableExecuteCommand?: boolean;
+  loadBalancerTargets?: LoadBalancerTargetConfig[];
+  alarmConfig?: ServiceAlarmConfig;
+  placementStrategies?: ecs.PlacementStrategy[];
+  capacityProviderStrategies?: ecs.CapacityProviderStrategy[];
+  networkConfiguration?: ecs.NetworkConfiguration;
+  cloudMapOptions?: ecs.CloudMapOptions;
+  deploymentController?: ecs.DeploymentController;
+  deploymentAlarms?: ecs.DeploymentAlarmConfig;
+  scalingConfig?: {
+    minCapacity?: number;
+    maxCapacity?: number;
+    cpuTargetUtilizationPercent?: number;
+    memoryTargetUtilizationPercent?: number;
+  };
+  launchType?: EcsLaunchType;
 }
