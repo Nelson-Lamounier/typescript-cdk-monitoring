@@ -3,13 +3,14 @@
 import * as cdk from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecs from "aws-cdk-lib/aws-ecs";
-import * as iam from "aws-cdk-lib/aws-iam";
+import type * as iam from "aws-cdk-lib/aws-iam";
 import { Construct } from "constructs";
 
 // Import types
 import type { LaunchTemplateConstructProps } from "../../../shared/types";
 // Import helpers
 import { UserDataConstruct } from "../../../shared/helpers/user-data-construct";
+import { Ec2InstanceRole } from "../../iam/ec2-instance-role";
 
 /**
  * Launch Template Construct
@@ -70,7 +71,7 @@ import { UserDataConstruct } from "../../../shared/helpers/user-data-construct";
 export class LaunchTemplateConstruct extends Construct {
   public readonly launchTemplate: ec2.LaunchTemplate;
   public readonly securityGroup: ec2.SecurityGroup;
-  public readonly role: iam.Role;
+  public readonly role: Ec2InstanceRole["role"];
 
   constructor(
     scope: Construct,
@@ -167,57 +168,18 @@ export class LaunchTemplateConstruct extends Construct {
   /**
    * Create IAM role
    */
-  private createInstanceRole(props: LaunchTemplateConstructProps): iam.Role {
-    // Use custom role if provided
+  private createInstanceRole(
+    props: LaunchTemplateConstructProps
+  ): Ec2InstanceRole["role"] {
     if (props.role) {
-      return props.role as iam.Role;
+      return props.role as Ec2InstanceRole["role"];
     }
-
-    const managedPolicies = [
-      iam.ManagedPolicy.fromAwsManagedPolicyName(
-        "AmazonSSMManagedInstanceCore"
-      ),
-      iam.ManagedPolicy.fromAwsManagedPolicyName("CloudWatchAgentServerPolicy"),
-    ];
-
-    // Add ECS policy if ECS configuration is provided
-    if (props.ecsConfig) {
-      managedPolicies.push(
-        iam.ManagedPolicy.fromAwsManagedPolicyName(
-          "service-role/AmazonEC2ContainerServiceforEC2Role"
-        )
-      );
-    }
-
-    const role = new iam.Role(this, "InstanceRole", {
-      assumedBy: new iam.ServicePrincipal("ec2.amazonaws.com"),
-      description: "IAM role for EC2 instances launched from template",
-      managedPolicies,
+    const roleConstruct = new Ec2InstanceRole(this, "InstanceRole", {
+      envName: props.envName,
+      projectName: props.projectName,
+      attachEcsInstancePolicy: !!props.ecsConfig,
     });
-
-    // Add CloudWatch Logs permissions if ECS
-    if (props.ecsConfig) {
-      role.addToPrincipalPolicy(
-        new iam.PolicyStatement({
-          effect: iam.Effect.ALLOW,
-          actions: [
-            "logs:CreateLogStream",
-            "logs:PutLogEvents",
-            "logs:DescribeLogStreams",
-          ],
-          resources: [
-            `arn:aws:logs:${cdk.Stack.of(this).region}:${
-              cdk.Stack.of(this).account
-            }:log-group:/ecs/*:*`,
-            `arn:aws:logs:${cdk.Stack.of(this).region}:${
-              cdk.Stack.of(this).account
-            }:log-group:/aws/ecs/*:*`,
-          ],
-        })
-      );
-    }
-
-    return role;
+    return roleConstruct.role;
   }
 
   /**
