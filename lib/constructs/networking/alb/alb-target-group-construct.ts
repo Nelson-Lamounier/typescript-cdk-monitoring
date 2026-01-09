@@ -160,6 +160,13 @@ export class AlbTargetGroupConstruct extends Construct {
       this.targetGroup.setAttribute("lambda.multi_value_headers.enabled", "true");
     }
 
+    if (slowStartDurationSeconds > 0) {
+      this.targetGroup.setAttribute(
+        "slow_start.duration_seconds",
+        String(slowStartDurationSeconds)
+      );
+    }
+
     if (targetGroupAttributes) {
       Object.entries(targetGroupAttributes).forEach(([key, value]) => {
         this.targetGroup.setAttribute(key, value);
@@ -202,25 +209,31 @@ export class AlbTargetGroupConstruct extends Construct {
         : false;
 
     if (shouldCreateUnhealthyAlarm && alarmConfig?.unhealthyHostThreshold !== undefined) {
-      const unhealthyMetric = this.targetGroup.metricUnhealthyHostCount({
-        period: alarmConfig.metricPeriod ?? cdk.Duration.minutes(1),
-      });
+      try {
+        const unhealthyMetric = this.targetGroup.metrics.unhealthyHostCount({
+          period: alarmConfig.metricPeriod ?? cdk.Duration.minutes(1),
+        });
 
-      new cloudwatch.Alarm(this, "UnhealthyHostsAlarm", {
-        metric: unhealthyMetric,
-        threshold: alarmConfig.unhealthyHostThreshold,
-        evaluationPeriods: alarmConfig.evaluationPeriods ?? 2,
-        datapointsToAlarm: alarmConfig.datapointsToAlarm,
-        comparisonOperator:
-          alarmConfig.comparisonOperator ??
-          cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-        treatMissingData:
-          alarmConfig.treatMissingData ?? cloudwatch.TreatMissingData.NOT_BREACHING,
-        alarmName: alarmConfig.alarmName,
-        alarmDescription:
-          alarmConfig.alarmDescription ??
-          `Unhealthy hosts exceeded threshold for target group ${name}`,
-      });
+        new cloudwatch.Alarm(this, "UnhealthyHostsAlarm", {
+          metric: unhealthyMetric,
+          threshold: alarmConfig.unhealthyHostThreshold,
+          evaluationPeriods: alarmConfig.evaluationPeriods ?? 2,
+          datapointsToAlarm: alarmConfig.datapointsToAlarm,
+          comparisonOperator:
+            alarmConfig.comparisonOperator ??
+            cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+          treatMissingData:
+            alarmConfig.treatMissingData ?? cloudwatch.TreatMissingData.NOT_BREACHING,
+          alarmName: alarmConfig.alarmName,
+          alarmDescription:
+            alarmConfig.alarmDescription ??
+            `Unhealthy hosts exceeded threshold for target group ${name}`,
+        });
+      } catch (error) {
+        cdk.Annotations.of(this).addWarning(
+          "Could not create unhealthy host alarm because the target group is not yet attached to a load balancer."
+        );
+      }
     }
   }
 
