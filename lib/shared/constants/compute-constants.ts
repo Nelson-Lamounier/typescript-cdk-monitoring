@@ -1,6 +1,7 @@
 /** @format */
 
 import * as logs from "aws-cdk-lib/aws-logs";
+import { PRODUCTION_ENV_NAMES } from "./storage-constants";
 
 export const DEFAULT_ECS_CLUSTER_NAME_SUFFIX = "cluster";
 export const DEFAULT_ECS_INSTANCE_TYPE = "t3.small";
@@ -48,6 +49,28 @@ export const DEFAULT_ECS_TASK_HEALTHCHECK_INTERVAL_SECONDS = 30;
 export const DEFAULT_ECS_TASK_HEALTHCHECK_TIMEOUT_SECONDS = 5;
 export const DEFAULT_ECS_TASK_HEALTHCHECK_RETRIES = 3;
 export const DEFAULT_ECS_TASK_HEALTHCHECK_START_PERIOD_SECONDS = 0;
+
+export const DEFAULT_SSM_SCHEDULE_EXPRESSION_DEV = "rate(30 days)";
+export const DEFAULT_SSM_SCHEDULE_EXPRESSION_PROD = "rate(7 days)";
+export const DEFAULT_SSM_COMPLIANCE_SEVERITY = "HIGH";
+export const DEFAULT_SSM_COMPLIANCE_SEVERITY_PROD = "CRITICAL";
+export const DEFAULT_SSM_MAX_CONCURRENCY = "10";
+export const DEFAULT_SSM_MAX_ERRORS = "5";
+export const DEFAULT_SSM_DOCKER_MAX_RETRIES = 24;
+export const DEFAULT_SSM_DOCKER_RETRY_DELAY_SECONDS = 5;
+export const DEFAULT_SSM_ECS_START_MAX_RETRIES = 6;
+export const DEFAULT_SSM_ECS_START_RETRY_DELAY_SECONDS = 5;
+export const DEFAULT_SSM_AGENT_CHECK_MAX_RETRIES = 36;
+export const DEFAULT_SSM_AGENT_CHECK_DELAY_SECONDS = 10;
+export const DEFAULT_SSM_LOG_RETENTION_DEV = logs.RetentionDays.TWO_WEEKS;
+export const DEFAULT_SSM_LOG_RETENTION_PROD = logs.RetentionDays.ONE_MONTH;
+export const DEFAULT_SSM_APPLY_ONLY_AT_CRON_INTERVAL = false;
+
+export function resolveSsmSchedule(envName: string): string {
+  return PRODUCTION_ENV_NAMES.includes(envName)
+    ? DEFAULT_SSM_SCHEDULE_EXPRESSION_PROD
+    : DEFAULT_SSM_SCHEDULE_EXPRESSION_DEV;
+}
 
 /**
  * ECS service defaults

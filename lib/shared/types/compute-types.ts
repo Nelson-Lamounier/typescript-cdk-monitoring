@@ -8,6 +8,7 @@ import * as iam from "aws-cdk-lib/aws-iam";
 import * as kms from "aws-cdk-lib/aws-kms";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as s3 from "aws-cdk-lib/aws-s3";
+import * as ssm from "aws-cdk-lib/aws-ssm";
 
 export interface EcsExecuteCommandConfig {
   enable?: boolean;
@@ -242,4 +243,44 @@ export interface EcsServiceConstructProps {
     memoryTargetUtilizationPercent?: number;
   };
   launchType?: EcsLaunchType;
+}
+
+export interface SsmAssociationConfig {
+  scheduleExpression?: string;
+  applyOnlyAtCronInterval?: boolean;
+  complianceSeverity?: string;
+  maxConcurrency?: string;
+  maxErrors?: string;
+  targets?: ssm.CfnAssociation.TargetProperty[];
+}
+
+export interface EcsAgentSsmConfig extends SsmAssociationConfig {
+  dockerMaxRetries?: number;
+  dockerRetryDelaySeconds?: number;
+  ecsStartMaxRetries?: number;
+  ecsStartRetryDelaySeconds?: number;
+  agentCheckMaxRetries?: number;
+  agentCheckDelaySeconds?: number;
+}
+
+export interface CloudWatchAgentSsmLogConfig {
+  containerLogGroupName?: string;
+  ecsAgentLogGroupName?: string;
+  ecsInitLogGroupName?: string;
+  logRetention?: logs.RetentionDays;
+  logGroupKmsKey?: kms.IKey;
+}
+
+export interface CloudWatchAgentSsmConfig extends SsmAssociationConfig {
+  logConfig?: CloudWatchAgentSsmLogConfig;
+}
+
+export interface SsmStateManagerConstructProps {
+  envName: string;
+  projectName?: string;
+  clusterName: string;
+  instanceRole: iam.IRole;
+  targets?: ssm.CfnAssociation.TargetProperty[];
+  ecsAgent?: EcsAgentSsmConfig;
+  cloudWatchAgent?: CloudWatchAgentSsmConfig;
 }

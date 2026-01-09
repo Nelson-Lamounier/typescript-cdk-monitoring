@@ -134,4 +134,3 @@ export interface EfsAccessPointConstructProps {
     | Record<string, unknown>;
   additionalTags?: Record<string, string>;
 }
-

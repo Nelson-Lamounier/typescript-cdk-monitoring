@@ -6,7 +6,9 @@ import * as ecr from "aws-cdk-lib/aws-ecr";
 import * as efs from "aws-cdk-lib/aws-efs";
 import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as ecs from "aws-cdk-lib/aws-ecs";
+import * as iam from "aws-cdk-lib/aws-iam";
 import * as kms from "aws-cdk-lib/aws-kms";
+import * as ssm from "aws-cdk-lib/aws-ssm";
 
 import {
   MIN_SUBNET_CIDR_MASK,
@@ -861,6 +863,57 @@ export function validateEfsAccessPointProps(
   validatePosixId(creationAcl.ownerUid, "creationAcl.ownerUid");
   validatePosixId(creationAcl.ownerGid, "creationAcl.ownerGid");
   validatePosixPermissions(creationAcl.permissions);
+}
+
+/**
+ * Validate SSM association targets.
+ */
+export function validateSsmTargets(
+  targets: ssm.CfnAssociation.TargetProperty[] | undefined
+): void {
+  if (!targets || targets.length === 0) {
+    throw new Error("At least one SSM association target is required.");
+  }
+
+  targets.forEach((target, index) => {
+    if (!target.key || target.key.trim().length === 0) {
+      throw new Error(`Target #${index + 1} is missing a key.`);
+    }
+    if (!target.values || target.values.length === 0) {
+      throw new Error(`Target #${index + 1} must include at least one value.`);
+    }
+  });
+}
+
+/**
+ * Validate IAM role presence.
+ */
+export function validateIamRoleProvided(
+  role: iam.IRole | undefined,
+  context: string
+): void {
+  if (!role) {
+    throw new Error(`${context} is required and must be defined.`);
+  }
+}
+
+/**
+ * Validate SSM association schedule expression.
+ */
+export function validateScheduleExpression(expression: string): void {
+  if (!expression || typeof expression !== "string") {
+    throw new Error("scheduleExpression must be a non-empty string.");
+  }
+}
+
+/**
+ * Validate log group names when provided.
+ */
+export function validateLogGroupNameOptional(name?: string): void {
+  if (name === undefined) {
+    return;
+  }
+  validateLogGroupName(name);
 }
 
 /**
