@@ -90,10 +90,15 @@ export class EcsServiceConstruct extends Construct {
           ),
         vpcSubnets: props.networkConfiguration?.awsvpcConfiguration?.subnets
           ? {
-              subnets: props.networkConfiguration.awsvpcConfiguration.subnets.map(
-                (subnetId, index) =>
-                  ec2.Subnet.fromSubnetId(this, `Subnet${index}${subnetId}`, subnetId)
-              ),
+              subnets:
+                props.networkConfiguration.awsvpcConfiguration.subnets.map(
+                  (subnetId, index) =>
+                    ec2.Subnet.fromSubnetId(
+                      this,
+                      `Subnet${index}${subnetId}`,
+                      subnetId
+                    )
+                ),
             }
           : undefined,
       });
