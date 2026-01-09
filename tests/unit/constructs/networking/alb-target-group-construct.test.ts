@@ -117,7 +117,8 @@ describe("AlbTargetGroupConstruct", () => {
       port: 80,
       stickinessEnabled: true,
       slowStartDurationSeconds: 120,
-      stickinessCookieDurationSeconds: DEFAULT_ALB_TG_STICKINESS_DURATION_SECONDS,
+      stickinessCookieDurationSeconds:
+        DEFAULT_ALB_TG_STICKINESS_DURATION_SECONDS,
     });
 
     const template = Template.fromStack(stack);
@@ -204,6 +205,8 @@ describe("AlbTargetGroupConstruct", () => {
         name: "invalid name with spaces",
         port: 80,
       });
-    }).toThrow("Target group name may only contain alphanumeric characters and hyphens");
+    }).toThrow(
+      "Target group name may only contain alphanumeric characters and hyphens"
+    );
   });
 });
