@@ -1470,7 +1470,9 @@ export function validateCustomParameterName(name: string): void {
   if (estimatedTotalLength > SSM_PARAMETER_VALIDATION.MAX_NAME_LENGTH) {
     throw new Error(
       `Custom parameter name is too long.\n` +
-        `Maximum recommended length: ${SSM_PARAMETER_VALIDATION.MAX_NAME_LENGTH - 50} characters.\n` +
+        `Maximum recommended length: ${
+          SSM_PARAMETER_VALIDATION.MAX_NAME_LENGTH - 50
+        } characters.\n` +
         `Received: ${trimmed.length} characters.`
     );
   }
