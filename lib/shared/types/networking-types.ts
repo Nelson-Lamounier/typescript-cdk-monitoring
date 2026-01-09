@@ -378,7 +378,7 @@ export interface AlbListenerConstructProps {
 
   /**
    * SSL policy for HTTPS listeners
-   * @default ELBSecurityPolicy-TLS13-1-2-2021-06 (TLS 1.3)
+   * @default TLS13_RES (TLS 1.3)
    *
    * WARNING: Using TLS 1.2 or older in production is not recommended.
    * Consider using TLS 1.3 for better security.

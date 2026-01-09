@@ -16,7 +16,6 @@ import {
   DEFAULT_ALB_FIXED_RESPONSE_STATUS_CODE,
   DEFAULT_ALB_FIXED_RESPONSE_CONTENT_TYPE,
   DEFAULT_ALB_FIXED_RESPONSE_MESSAGE,
-  COMMON_PORTS,
 } from "../../../shared/constants/networking-constants";
 
 /**
@@ -70,11 +69,11 @@ export class AlbListenerConstruct extends Construct {
       certificateArn,
       additionalCertificates = [],
       redirectHttpToHttps = false,
-      sslPolicy = elbv2.SslPolicy.TLS13_1_2_2021_06, // TLS 1.3 by default
+      sslPolicy = elbv2.SslPolicy.TLS13_RES, // TLS 1.3 by default
       httpDefaultAction,
       httpsDefaultAction,
-      preserveXForwardedFor = true,
-      preserveXForwardedProto = true,
+      preserveXForwardedFor: _preserveXForwardedFor = true, // Note: ALB preserves X-Forwarded-For by default
+      preserveXForwardedProto: _preserveXForwardedProto = true, // Note: ALB preserves X-Forwarded-Proto by default
       loadBalancerName,
     } = props;
 
@@ -126,13 +125,14 @@ export class AlbListenerConstruct extends Construct {
     if (
       enableHttps &&
       (envName === "production" || envName === "prod") &&
-      sslPolicy !== elbv2.SslPolicy.TLS13_1_2_2021_06 &&
-      sslPolicy !== elbv2.SslPolicy.TLS13_1_3_2021_06
+      sslPolicy !== elbv2.SslPolicy.TLS13_RES &&
+      sslPolicy !== elbv2.SslPolicy.TLS13_EXT1 &&
+      sslPolicy !== elbv2.SslPolicy.TLS13_EXT2
     ) {
       cdk.Annotations.of(this).addWarning(
-        `SECURITY WARNING: Using SSL policy ${sslPolicy.name} in production.\n` +
+        `SECURITY WARNING: Using SSL policy ${String(sslPolicy)} in production.\n` +
           "TLS 1.3 is recommended for production environments.\n" +
-          "Consider using SslPolicy.TLS13_1_2_2021_06 or SslPolicy.TLS13_1_3_2021_06 for better security."
+          "Consider using SslPolicy.TLS13_RES, SslPolicy.TLS13_EXT1, or SslPolicy.TLS13_EXT2 for better security."
       );
     }
 
@@ -405,20 +405,25 @@ export class AlbListenerConstruct extends Construct {
    * Add authentication action (Cognito or OIDC)
    *
    * This method allows you to add authentication before forwarding to a target group.
-   * Use authenticateCognito or authenticateOidc to create the authentication action.
+   * Create the authentication action using ListenerAction.authenticateOidc() and include
+   * the forward action in the 'next' property.
    *
    * @param id - Unique identifier for the rule
-   * @param authenticateAction - Authentication action (created with ListenerAction.authenticateCognito or authenticateOidc)
-   * @param targetGroup - Target group to forward to after authentication
+   * @param authenticateAction - Authentication action created with ListenerAction.authenticateOidc()
+   *                             Must include 'next' property with forward action to target group
+   * @param _targetGroup - Target group parameter (kept for API compatibility, but should be included in authenticateAction)
    * @param priority - Rule priority (lower numbers = higher priority)
    * @param conditions - Optional conditions for the rule
    *
    * @example
    * ```typescript
-   * const authAction = elbv2.ListenerAction.authenticateCognito({
-   *   userPool: cognitoUserPool,
-   *   userPoolClient: cognitoUserPoolClient,
-   *   userPoolDomain: cognitoUserPoolDomain,
+   * const authAction = elbv2.ListenerAction.authenticateOidc({
+   *   authorizationEndpoint: 'https://example.com/auth',
+   *   tokenEndpoint: 'https://example.com/token',
+   *   userInfoEndpoint: 'https://example.com/userinfo',
+   *   clientId: 'client-id',
+   *   clientSecret: cdk.SecretValue.secretsManager('secret'),
+   *   next: elbv2.ListenerAction.forward([targetGroup]), // Include target group here
    * });
    *
    * listener.addAuthentication('AuthRule', authAction, targetGroup, 100);
@@ -427,17 +432,14 @@ export class AlbListenerConstruct extends Construct {
   public addAuthentication(
     id: string,
     authenticateAction: elbv2.ListenerAction,
-    targetGroup: elbv2.IApplicationTargetGroup,
+    _targetGroup: elbv2.IApplicationTargetGroup, // Kept for API compatibility
     priority: number,
     conditions?: elbv2.ListenerCondition[]
   ): void {
-    // Create a composite action: authenticate then forward
-    const compositeAction = authenticateAction({
-      next: elbv2.ListenerAction.forward([targetGroup]),
-    });
-
+    // Note: The authenticateAction should already include the 'next' forward action
+    // This method just adds it to the listener with the specified priority and conditions
     this.listener.addAction(id, {
-      action: compositeAction,
+      action: authenticateAction,
       priority,
       conditions: conditions || [],
     });
