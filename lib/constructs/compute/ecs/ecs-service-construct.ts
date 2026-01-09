@@ -2,6 +2,7 @@
 
 import * as cdk from "aws-cdk-lib";
 import * as ecs from "aws-cdk-lib/aws-ecs";
+import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as cw from "aws-cdk-lib/aws-cloudwatch";
 import { Tags } from "aws-cdk-lib";
 import { Construct } from "constructs";
@@ -57,6 +58,13 @@ export class EcsServiceConstruct extends Construct {
       props.taskDefinition instanceof ecs.FargateTaskDefinition;
 
     if (isFargate) {
+      const assignPublicIpSetting =
+        props.networkConfiguration?.awsvpcConfiguration?.assignPublicIp;
+      const assignPublicIp =
+        typeof assignPublicIpSetting === "string"
+          ? assignPublicIpSetting === "ENABLED"
+          : assignPublicIpSetting;
+
       this.service = new ecs.FargateService(this, "Service", {
         cluster: props.cluster,
         taskDefinition: props.taskDefinition,
@@ -75,12 +83,18 @@ export class EcsServiceConstruct extends Construct {
         deploymentController: props.deploymentController,
         deploymentAlarms: props.deploymentAlarms,
         cloudMapOptions: props.cloudMapOptions,
-        assignPublicIp:
-          props.networkConfiguration?.awsvpcConfiguration?.assignPublicIp,
+        assignPublicIp,
         securityGroups:
-          props.networkConfiguration?.awsvpcConfiguration?.securityGroups,
+          props.networkConfiguration?.awsvpcConfiguration?.securityGroups?.map(
+            (sg) => ec2.SecurityGroup.fromSecurityGroupId(this, `Sg${sg}`, sg)
+          ),
         vpcSubnets: props.networkConfiguration?.awsvpcConfiguration?.subnets
-          ? { subnets: props.networkConfiguration.awsvpcConfiguration.subnets }
+          ? {
+              subnets: props.networkConfiguration.awsvpcConfiguration.subnets.map(
+                (subnetId, index) =>
+                  ec2.Subnet.fromSubnetId(this, `Subnet${index}${subnetId}`, subnetId)
+              ),
+            }
           : undefined,
       });
     } else {

@@ -3,6 +3,7 @@
 import * as cdk from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecs from "aws-cdk-lib/aws-ecs";
+import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as kms from "aws-cdk-lib/aws-kms";
 import * as logs from "aws-cdk-lib/aws-logs";
@@ -196,7 +197,7 @@ export interface EcsTaskDefinitionConstructProps {
 }
 
 export interface LoadBalancerTargetConfig {
-  targetGroup: elbv2.ITargetGroup;
+  targetGroup: elbv2.IApplicationTargetGroup;
   containerName: string;
   containerPort: number;
 }
@@ -206,6 +207,12 @@ export interface ServiceAlarmConfig {
   cpuThreshold?: number;
   memoryThreshold?: number;
   alarmBehavior?: ecs.AlarmBehavior;
+}
+
+export interface AwsvpcConfigurationLite {
+  assignPublicIp?: boolean | "ENABLED" | "DISABLED";
+  securityGroups?: string[];
+  subnets?: string[];
 }
 
 export interface EcsServiceConstructProps {
@@ -224,7 +231,7 @@ export interface EcsServiceConstructProps {
   alarmConfig?: ServiceAlarmConfig;
   placementStrategies?: ecs.PlacementStrategy[];
   capacityProviderStrategies?: ecs.CapacityProviderStrategy[];
-  networkConfiguration?: ecs.NetworkConfiguration;
+  networkConfiguration?: { awsvpcConfiguration?: AwsvpcConfigurationLite };
   cloudMapOptions?: ecs.CloudMapOptions;
   deploymentController?: ecs.DeploymentController;
   deploymentAlarms?: ecs.DeploymentAlarmConfig;
