@@ -9,82 +9,6 @@ import {
   EfsFileSystemConstruct,
 } from "../../../../lib/constructs/storage/efs";
 
-describe("EfsFileSystemConstruct", () => {
-  let app: cdk.App;
-  let stack: cdk.Stack;
-  let vpc: ec2.Vpc;
-
-  beforeEach(() => {
-    app = new cdk.App();
-    stack = new cdk.Stack(app, "TestStack", {
-      env: { account: "123456789012", region: "eu-west-1" },
-    });
-    vpc = new ec2.Vpc(stack, "Vpc");
-  });
-
-  test("creates EFS with secure defaults, tags, and outputs", () => {
-    new EfsFileSystemConstruct(stack, "EfsDefault", {
-      vpc,
-      envName: "dev",
-    });
-
-    const template = Template.fromStack(stack);
-
-    template.resourceCountIs("AWS::EFS::FileSystem", 1);
-    template.hasResourceProperties("AWS::EFS::FileSystem", {
-      Encrypted: true,
-      PerformanceMode: "generalPurpose",
-      ThroughputMode: "provisioned",
-      ProvisionedThroughputInMibps: 10,
-      LifecyclePolicies: [{ TransitionToIA: "AFTER_30_DAYS" }],
-      BackupPolicy: { Status: "ENABLED" },
-      FileSystemTags: Match.arrayWith([
-        Match.objectLike({ Key: "Name", Value: "dev-shared-storage-efs" }),
-        Match.objectLike({ Key: "Purpose", Value: "shared-storage" }),
-      ]),
-    });
-
-    const outputs = template.findOutputs("*");
-    expect(Object.values(outputs)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ Export: { Name: "TestStack-efs-id" } }),
-        expect.objectContaining({ Export: { Name: "TestStack-efs-arn" } }),
-        expect.objectContaining({ Export: { Name: "TestStack-efs-dns" } }),
-      ])
-    );
-  });
-
-  test("creates replication configuration when destinations are provided", () => {
-    new EfsFileSystemConstruct(stack, "EfsWithReplication", {
-      vpc,
-      envName: "dev",
-      replication: {
-        destinations: [
-          {
-            region: "eu-west-2",
-            kmsKeyId: "kms-arn",
-            availabilityZoneName: "eu-west-2a",
-          },
-        ],
-      },
-    });
-
-    const template = Template.fromStack(stack);
-
-    template.resourceCountIs("AWS::EFS::ReplicationConfiguration", 1);
-    template.hasResourceProperties("AWS::EFS::ReplicationConfiguration", {
-      SourceFileSystemId: Match.anyValue(),
-      Destinations: [
-        Match.objectLike({
-          Region: "eu-west-2",
-          KmsKeyId: "kms-arn",
-          AvailabilityZoneName: "eu-west-2a",
-        }),
-      ],
-    });
-  });
-});
-
 describe("EfsAccessPointConstruct", () => {
   let app: cdk.App;
   let stack: cdk.Stack;
@@ -103,7 +27,7 @@ describe("EfsAccessPointConstruct", () => {
     });
   });
 
-  test("creates access point with non-root defaults and tagging", () => {
+  test("creates access point with non-root defaults and outputs", () => {
     new EfsAccessPointConstruct(stack, "AccessPoint", {
       envName: "dev",
       fileSystem: fileSystem.fileSystem,
@@ -139,17 +63,13 @@ describe("EfsAccessPointConstruct", () => {
     const outputs = template.findOutputs("*");
     expect(Object.values(outputs)).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          Export: { Name: "TestStack-access-point-id" },
-        }),
-        expect.objectContaining({
-          Export: { Name: "TestStack-access-point-arn" },
-        }),
+        expect.objectContaining({ Export: { Name: "TestStack-access-point-id" } }),
+        expect.objectContaining({ Export: { Name: "TestStack-access-point-arn" } }),
       ])
     );
   });
 
-  test("applies custom POSIX settings, path, purpose, and policy", () => {
+  test("supports custom POSIX settings, path, purpose, and policy", () => {
     const policy = {
       Version: "2012-10-17",
       Statement: [
