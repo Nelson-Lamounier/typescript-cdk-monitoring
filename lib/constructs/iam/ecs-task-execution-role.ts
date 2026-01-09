@@ -5,7 +5,7 @@ import * as cdk from "aws-cdk-lib";
 import * as iam from "aws-cdk-lib/aws-iam";
 import { NagSuppressions } from "cdk-nag";
 
-import { SuppressionManager } from "../cdk-nag/suppression-manager";
+import { SuppressionManager } from "../../cdk-nag/suppression-manager";
 
 export interface EcsTaskExecutionRoleProps {
   envName: string;
@@ -43,7 +43,12 @@ export class EcsTaskExecutionRole extends Construct {
       this.role.addToPrincipalPolicy(
         new iam.PolicyStatement({
           effect: iam.Effect.ALLOW,
-          actions: ["ecr-public:GetAuthorizationToken", "ecr-public:BatchCheckLayerAvailability", "ecr-public:GetDownloadUrlForLayer", "ecr-public:BatchGetImage"],
+          actions: [
+            "ecr-public:GetAuthorizationToken",
+            "ecr-public:BatchCheckLayerAvailability",
+            "ecr-public:GetDownloadUrlForLayer",
+            "ecr-public:BatchGetImage",
+          ],
           resources: ["*"],
         })
       );
@@ -60,8 +65,16 @@ export class EcsTaskExecutionRole extends Construct {
       this.role.addToPrincipalPolicy(
         new iam.PolicyStatement({
           effect: iam.Effect.ALLOW,
-          actions: ["ecr:BatchCheckLayerAvailability", "ecr:GetDownloadUrlForLayer", "ecr:BatchGetImage"],
-          resources: [`arn:aws:ecr:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:repository/*`],
+          actions: [
+            "ecr:BatchCheckLayerAvailability",
+            "ecr:GetDownloadUrlForLayer",
+            "ecr:BatchGetImage",
+          ],
+          resources: [
+            `arn:aws:ecr:${cdk.Stack.of(this).region}:${
+              cdk.Stack.of(this).account
+            }:repository/*`,
+          ],
         })
       );
     }
@@ -82,7 +95,11 @@ export class EcsTaskExecutionRole extends Construct {
         new iam.PolicyStatement({
           effect: iam.Effect.ALLOW,
           actions: ["logs:CreateLogStream", "logs:PutLogEvents"],
-          resources: [`arn:aws:logs:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:log-group:/ecs/*:*`],
+          resources: [
+            `arn:aws:logs:${cdk.Stack.of(this).region}:${
+              cdk.Stack.of(this).account
+            }:log-group:/ecs/*:*`,
+          ],
         })
       );
     }
