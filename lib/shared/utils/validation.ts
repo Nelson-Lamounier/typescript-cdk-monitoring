@@ -22,14 +22,20 @@ import {
 } from "../constants/compute-constants";
 import {
   ALLOWED_EFS_ARCHIVE_TRANSITIONS,
+  DEFAULT_EFS_ACCESS_POINT_GID,
+  DEFAULT_EFS_ACCESS_POINT_PERMISSIONS,
+  DEFAULT_EFS_ACCESS_POINT_UID,
   EFS_MAX_PROVISIONED_THROUGHPUT_MIBPS,
   EFS_MIN_PROVISIONED_THROUGHPUT_MIBPS,
+  MAX_POSIX_ID,
   MAX_ECR_LIFECYCLE_MAX_IMAGE_COUNT,
   MIN_ECR_LIFECYCLE_MAX_IMAGE_COUNT,
+  MIN_POSIX_ID,
 } from "../constants/storage-constants";
 import { EcsLaunchType, ContainerConfig } from "../types/compute-types";
 import {
   EcrLifecycleRuleConfig,
+  EfsAccessPointConstructProps,
   EfsLifecycleConfig,
   EfsMountTargetConfig,
   EfsReplicationConfig,
@@ -512,9 +518,7 @@ export function validateLoadBalancerName(loadBalancerName: string): void {
  * validatePublicSubnetsForInternetFacing(vpc); // Valid if public subnets exist
  * ```
  */
-export function validatePublicSubnetsForInternetFacing(
-  vpc: ec2.IVpc
-): void {
+export function validatePublicSubnetsForInternetFacing(vpc: ec2.IVpc): void {
   const publicSubnets = vpc.publicSubnets;
   if (!publicSubnets || publicSubnets.length === 0) {
     throw new Error(
@@ -758,10 +762,105 @@ export function validateEfsReplicationConfig(
 
   replication.destinations.forEach((destination, index) => {
     if (!destination.region) {
-      throw new Error(`Replication destination #${index + 1} is missing region.`);
+      throw new Error(
+        `Replication destination #${index + 1} is missing region.`
+      );
     }
     validateRegionFn(destination.region);
   });
+}
+
+/**
+ * Validate EFS access point path format.
+ */
+export function validateEfsPath(path: string): void {
+  if (!path || typeof path !== "string") {
+    throw new Error("Access point path must be a non-empty string.");
+  }
+
+  if (!path.startsWith("/")) {
+    throw new Error(
+      `Access point path must start with "/". Received: "${path}".`
+    );
+  }
+
+  const validPathRegex = /^\/[A-Za-z0-9._/-]*$/;
+  if (!validPathRegex.test(path)) {
+    throw new Error(
+      `Access point path contains invalid characters. Allowed: letters, numbers, ".", "_", "-", "/". Received: "${path}".`
+    );
+  }
+}
+
+/**
+ * Validate a single POSIX ID string falls within expected range.
+ */
+export function validatePosixId(id: string, label: string): void {
+  if (!id || typeof id !== "string") {
+    throw new Error(`${label} is required and must be a string.`);
+  }
+
+  const numeric = Number(id);
+  if (!Number.isInteger(numeric)) {
+    throw new Error(`${label} must be an integer string. Received: "${id}".`);
+  }
+
+  if (numeric < MIN_POSIX_ID || numeric > MAX_POSIX_ID) {
+    throw new Error(
+      `${label} must be between ${MIN_POSIX_ID} and ${MAX_POSIX_ID}. Received: ${numeric}.`
+    );
+  }
+}
+
+/**
+ * Validate POSIX permissions string (octal 3-4 digits).
+ */
+export function validatePosixPermissions(permissions: string): void {
+  if (!permissions || typeof permissions !== "string") {
+    throw new Error("permissions is required and must be a string.");
+  }
+
+  const permissionRegex = /^[0-7]{3,4}$/;
+  if (!permissionRegex.test(permissions)) {
+    throw new Error(
+      `permissions must be a 3-4 digit octal string (e.g., 750 or 0750). Received: "${permissions}".`
+    );
+  }
+}
+
+/**
+ * Validate access point inputs collectively.
+ */
+export function validateEfsAccessPointProps(
+  props: EfsAccessPointConstructProps
+): void {
+  if (!props.fileSystem) {
+    throw new Error("fileSystem is required for EFS access point creation.");
+  }
+
+  validateEnvName(props.envName);
+
+  const posixUser = props.posixUser ?? {
+    uid: DEFAULT_EFS_ACCESS_POINT_UID,
+    gid: DEFAULT_EFS_ACCESS_POINT_GID,
+    secondaryGids: [],
+  };
+  const creationAcl = props.creationAcl ?? {
+    ownerUid: DEFAULT_EFS_ACCESS_POINT_UID,
+    ownerGid: DEFAULT_EFS_ACCESS_POINT_GID,
+    permissions: DEFAULT_EFS_ACCESS_POINT_PERMISSIONS,
+  };
+
+  validateEfsPath(props.path ?? "/");
+  validatePosixId(posixUser.uid, "posixUser.uid");
+  validatePosixId(posixUser.gid, "posixUser.gid");
+  (posixUser.secondaryGids ?? []).forEach((gid, index) =>
+    validatePosixId(gid, `posixUser.secondaryGids[${index}]`)
+  );
+
+  validatePosixId(creationAcl.ownerUid, "creationAcl.ownerUid");
+  validatePosixId(creationAcl.ownerGid, "creationAcl.ownerGid");
+  validatePosixPermissions(creationAcl.permissions);
 }
 
 /**
@@ -809,25 +908,40 @@ export function validateEcrLifecycleRules(
         rule.maxImageCount > MAX_ECR_LIFECYCLE_MAX_IMAGE_COUNT)
     ) {
       throw new Error(
-        `Lifecycle rule #${index + 1} maxImageCount must be between ${MIN_ECR_LIFECYCLE_MAX_IMAGE_COUNT} and ${MAX_ECR_LIFECYCLE_MAX_IMAGE_COUNT}. Received: ${rule.maxImageCount}`
+        `Lifecycle rule #${
+          index + 1
+        } maxImageCount must be between ${MIN_ECR_LIFECYCLE_MAX_IMAGE_COUNT} and ${MAX_ECR_LIFECYCLE_MAX_IMAGE_COUNT}. Received: ${
+          rule.maxImageCount
+        }`
       );
     }
 
     if (rule.rulePriority !== undefined && rule.rulePriority < 1) {
       throw new Error(
-        `Lifecycle rule #${index + 1} rulePriority must be greater than 0. Received: ${rule.rulePriority}`
+        `Lifecycle rule #${
+          index + 1
+        } rulePriority must be greater than 0. Received: ${rule.rulePriority}`
       );
     }
 
     if (rule.maxImageAgeDays !== undefined && rule.maxImageAgeDays <= 0) {
       throw new Error(
-        `Lifecycle rule #${index + 1} maxImageAgeDays must be greater than 0. Received: ${rule.maxImageAgeDays}`
+        `Lifecycle rule #${
+          index + 1
+        } maxImageAgeDays must be greater than 0. Received: ${
+          rule.maxImageAgeDays
+        }`
       );
     }
 
-    if (rule.tagStatus && !Object.values(ecr.TagStatus).includes(rule.tagStatus)) {
+    if (
+      rule.tagStatus &&
+      !Object.values(ecr.TagStatus).includes(rule.tagStatus)
+    ) {
       throw new Error(
-        `Lifecycle rule #${index + 1} tagStatus is invalid. Allowed values: ${Object.values(
+        `Lifecycle rule #${
+          index + 1
+        } tagStatus is invalid. Allowed values: ${Object.values(
           ecr.TagStatus
         ).join(", ")}`
       );
@@ -889,7 +1003,9 @@ export function validateHealthCheckTiming(
   timeoutSeconds: number
 ): void {
   if (intervalSeconds <= 0 || timeoutSeconds <= 0) {
-    throw new Error("Health check interval and timeout must be greater than 0.");
+    throw new Error(
+      "Health check interval and timeout must be greater than 0."
+    );
   }
 
   if (!Number.isInteger(intervalSeconds) || !Number.isInteger(timeoutSeconds)) {
@@ -916,7 +1032,10 @@ export function validateHealthCheckThreshold(
     throw new Error(`${name} must be an integer.`);
   }
 
-  if (value < MIN_HEALTH_CHECK_THRESHOLD || value > MAX_HEALTH_CHECK_THRESHOLD) {
+  if (
+    value < MIN_HEALTH_CHECK_THRESHOLD ||
+    value > MAX_HEALTH_CHECK_THRESHOLD
+  ) {
     throw new Error(
       `${name} must be between ${MIN_HEALTH_CHECK_THRESHOLD} and ${MAX_HEALTH_CHECK_THRESHOLD}. Received: ${value}`
     );
@@ -942,7 +1061,9 @@ export function validateVpcForTargetGroup(
  */
 export function validateClusterProvided(cluster: ecs.ICluster): void {
   if (!cluster || !cluster.clusterName) {
-    throw new Error("ECS cluster is required and must have a valid clusterName.");
+    throw new Error(
+      "ECS cluster is required and must have a valid clusterName."
+    );
   }
 }
 
@@ -977,7 +1098,9 @@ export function validateFargateResources(
 ): void {
   if (launchType === "FARGATE") {
     if (cpu === undefined || memoryMiB === undefined) {
-      throw new Error("Fargate tasks require both cpu and memoryMiB to be specified.");
+      throw new Error(
+        "Fargate tasks require both cpu and memoryMiB to be specified."
+      );
     }
   }
 }
@@ -996,7 +1119,9 @@ export function validateDeploymentPercentages(
     throw new Error("minHealthyPercent must be between 1 and 100.");
   }
   if (maxHealthy < minHealthy || maxHealthy > 200) {
-    throw new Error("maxHealthyPercent must be between minHealthyPercent and 200.");
+    throw new Error(
+      "maxHealthyPercent must be between minHealthyPercent and 200."
+    );
   }
 }
 
@@ -1009,7 +1134,10 @@ export function validateClusterName(clusterName: string): void {
   }
 
   const trimmed = clusterName.trim();
-  if (trimmed.length < MIN_CLUSTER_NAME_LENGTH || trimmed.length > MAX_CLUSTER_NAME_LENGTH) {
+  if (
+    trimmed.length < MIN_CLUSTER_NAME_LENGTH ||
+    trimmed.length > MAX_CLUSTER_NAME_LENGTH
+  ) {
     throw new Error(
       `Cluster name must be between ${MIN_CLUSTER_NAME_LENGTH} and ${MAX_CLUSTER_NAME_LENGTH} characters. Received: ${trimmed.length}`
     );

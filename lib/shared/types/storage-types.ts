@@ -81,6 +81,18 @@ export interface EfsReplicationConfig {
   destinations: EfsReplicationDestination[];
 }
 
+export interface EfsPosixUserConfig {
+  uid: string;
+  gid: string;
+  secondaryGids?: string[];
+}
+
+export interface EfsCreationAclConfig {
+  ownerUid: string;
+  ownerGid: string;
+  permissions: string;
+}
+
 export interface EfsFileSystemConstructProps {
   vpc: ec2.IVpc;
   envName: string;
@@ -100,6 +112,22 @@ export interface EfsFileSystemConstructProps {
   mountTargets?: EfsMountTargetConfig;
   backup?: EfsBackupConfig;
   replication?: EfsReplicationConfig;
+  fileSystemPolicy?:
+    | iam.PolicyDocument
+    | iam.PolicyStatement[]
+    | Record<string, unknown>;
+  additionalTags?: Record<string, string>;
+}
+
+export interface EfsAccessPointConstructProps {
+  fileSystem: efs.IFileSystem;
+  envName: string;
+  projectName?: string;
+  purpose?: string;
+  accessPointName?: string;
+  path?: string;
+  posixUser?: EfsPosixUserConfig;
+  creationAcl?: EfsCreationAclConfig;
   fileSystemPolicy?:
     | iam.PolicyDocument
     | iam.PolicyStatement[]

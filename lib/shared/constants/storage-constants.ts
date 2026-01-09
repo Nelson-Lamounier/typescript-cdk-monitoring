@@ -37,3 +37,10 @@ export const DEFAULT_EFS_PURPOSE = "shared-storage";
 export const DEFAULT_EFS_REMOVAL_POLICY_NON_PROD = cdk.RemovalPolicy.DESTROY;
 export const DEFAULT_EFS_REMOVAL_POLICY_PROD = cdk.RemovalPolicy.RETAIN;
 
+export const DEFAULT_EFS_ACCESS_POINT_PATH = "/";
+export const DEFAULT_EFS_ACCESS_POINT_UID = "1000";
+export const DEFAULT_EFS_ACCESS_POINT_GID = "1000";
+export const DEFAULT_EFS_ACCESS_POINT_PERMISSIONS = "750";
+export const MIN_POSIX_ID = 0;
+export const MAX_POSIX_ID = 2147483647;
+
