@@ -2,7 +2,8 @@
 
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
-import * as logs from "aws-cdk-lib/aws-logs";
+import * as ecr from "aws-cdk-lib/aws-ecr";
+import * as ecs from "aws-cdk-lib/aws-ecs";
 
 import {
   MIN_SUBNET_CIDR_MASK,
@@ -16,11 +17,12 @@ import {
   MAX_CLUSTER_NAME_LENGTH,
   MIN_CLUSTER_NAME_LENGTH,
 } from "../constants/compute-constants";
-import { EcsLaunchType, ContainerConfig } from "../types/compute-types";
 import {
-  DEFAULT_ECS_SERVICE_MAX_HEALTHY_PERCENT,
-  DEFAULT_ECS_SERVICE_MIN_HEALTHY_PERCENT,
-} from "../constants/compute-constants";
+  MAX_ECR_LIFECYCLE_MAX_IMAGE_COUNT,
+  MIN_ECR_LIFECYCLE_MAX_IMAGE_COUNT,
+} from "../constants/storage-constants";
+import { EcsLaunchType, ContainerConfig } from "../types/compute-types";
+import { EcrLifecycleRuleConfig } from "../types/storage-types";
 
 /**
  * Validate subnet CIDR mask is within acceptable range
@@ -642,6 +644,77 @@ export function validateEnvName(envName: string): void {
         " 3. Ensure the value is not undefined or null"
     );
   }
+}
+
+/**
+ * Validate ECR repository name
+ * Must be lowercase, may include numbers, hyphens, underscores, slashes, and dots.
+ */
+export function validateEcrRepositoryName(name: string): void {
+  if (!name || typeof name !== "string") {
+    throw new Error("ECR repository name is required and must be a string.");
+  }
+
+  const trimmed = name.trim();
+  if (trimmed.length === 0) {
+    throw new Error("ECR repository name cannot be empty.");
+  }
+
+  if (trimmed.length > 256) {
+    throw new Error(
+      `ECR repository name must be 256 characters or fewer. Received: ${trimmed.length}`
+    );
+  }
+
+  const regex = /^[a-z0-9]+(?:[./_-][a-z0-9]+)*$/;
+  if (!regex.test(trimmed)) {
+    throw new Error(
+      "ECR repository name may only contain lowercase letters, numbers, and separators (., /, _, -), and cannot start or end with a separator."
+    );
+  }
+}
+
+/**
+ * Validate ECR lifecycle rules
+ */
+export function validateEcrLifecycleRules(
+  rules: EcrLifecycleRuleConfig[] | undefined
+): void {
+  if (!rules || rules.length === 0) {
+    return;
+  }
+
+  rules.forEach((rule, index) => {
+    if (
+      rule.maxImageCount !== undefined &&
+      (rule.maxImageCount < MIN_ECR_LIFECYCLE_MAX_IMAGE_COUNT ||
+        rule.maxImageCount > MAX_ECR_LIFECYCLE_MAX_IMAGE_COUNT)
+    ) {
+      throw new Error(
+        `Lifecycle rule #${index + 1} maxImageCount must be between ${MIN_ECR_LIFECYCLE_MAX_IMAGE_COUNT} and ${MAX_ECR_LIFECYCLE_MAX_IMAGE_COUNT}. Received: ${rule.maxImageCount}`
+      );
+    }
+
+    if (rule.rulePriority !== undefined && rule.rulePriority < 1) {
+      throw new Error(
+        `Lifecycle rule #${index + 1} rulePriority must be greater than 0. Received: ${rule.rulePriority}`
+      );
+    }
+
+    if (rule.maxImageAgeDays !== undefined && rule.maxImageAgeDays <= 0) {
+      throw new Error(
+        `Lifecycle rule #${index + 1} maxImageAgeDays must be greater than 0. Received: ${rule.maxImageAgeDays}`
+      );
+    }
+
+    if (rule.tagStatus && !Object.values(ecr.TagStatus).includes(rule.tagStatus)) {
+      throw new Error(
+        `Lifecycle rule #${index + 1} tagStatus is invalid. Allowed values: ${Object.values(
+          ecr.TagStatus
+        ).join(", ")}`
+      );
+    }
+  });
 }
 
 /**
