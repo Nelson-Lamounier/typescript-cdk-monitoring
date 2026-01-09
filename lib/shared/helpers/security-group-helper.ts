@@ -73,7 +73,7 @@ export function isOverlyBroadPort(port: ec2.Port): boolean {
   // Try to extract port range from port object
   // This is a heuristic check - CDK doesn't expose port range directly
   const portString = port.toString();
-  
+
   // Check for explicit wide ranges
   if (portString.includes("0-65535") || portString.includes("all")) {
     return true;
@@ -148,7 +148,11 @@ export function generateRuleDescription(
   let peerDescription: string;
   if (isUnrestrictedPeer(peer)) {
     peerDescription = "anywhere (0.0.0.0/0)";
-  } else if (peerString.includes("10.") || peerString.includes("172.") || peerString.includes("192.")) {
+  } else if (
+    peerString.includes("10.") ||
+    peerString.includes("172.") ||
+    peerString.includes("192.")
+  ) {
     // Extract CIDR from peer string if possible
     const cidrMatch = peerString.match(/(\d+\.\d+\.\d+\.\d+\/\d+)/);
     peerDescription = cidrMatch ? `CIDR ${cidrMatch[1]}` : "specified CIDR";
@@ -204,14 +208,14 @@ export function generateSecurityWarnings(
     if (direction === "ingress") {
       warnings.push(
         "SECURITY WARNING: Ingress rule allows access from anywhere (0.0.0.0/0). " +
-        "This exposes your resources to the entire internet. " +
-        "Consider restricting to specific CIDR blocks or security groups."
+          "This exposes your resources to the entire internet. " +
+          "Consider restricting to specific CIDR blocks or security groups."
       );
     } else {
       warnings.push(
         "SECURITY WARNING: Egress rule allows outbound access to anywhere (0.0.0.0/0). " +
-        "This allows unrestricted outbound traffic. " +
-        "Consider restricting to specific destinations for better security."
+          "This allows unrestricted outbound traffic. " +
+          "Consider restricting to specific destinations for better security."
       );
     }
 
@@ -219,8 +223,8 @@ export function generateSecurityWarnings(
     if (environment === "production" || environment === "prod") {
       warnings.push(
         "CRITICAL: Unrestricted access in production environment. " +
-        "This violates security best practices and may not comply with security policies. " +
-        "Please review and restrict access appropriately."
+          "This violates security best practices and may not comply with security policies. " +
+          "Please review and restrict access appropriately."
       );
     }
   }
@@ -229,8 +233,8 @@ export function generateSecurityWarnings(
   if (isUnrestrictedPort(port)) {
     warnings.push(
       "SECURITY WARNING: Port rule allows all traffic (all ports). " +
-      "This is overly permissive and should be restricted to specific ports. " +
-      "Consider using specific port numbers or narrow port ranges."
+        "This is overly permissive and should be restricted to specific ports. " +
+        "Consider using specific port numbers or narrow port ranges."
     );
   }
 
@@ -238,8 +242,8 @@ export function generateSecurityWarnings(
   if (isOverlyBroadPort(port)) {
     warnings.push(
       "SECURITY WARNING: Port range is overly broad (covers more than 1000 ports). " +
-      "Consider narrowing the port range to only necessary ports. " +
-      "This improves security and makes rule auditing easier."
+        "Consider narrowing the port range to only necessary ports. " +
+        "This improves security and makes rule auditing easier."
     );
   }
 
@@ -277,7 +281,11 @@ export class SecurityGroupRulePresets {
     allowHttp: boolean = true,
     allowHttps: boolean = true
   ): Array<{ peer: ec2.IPeer; port: ec2.Port; description: string }> {
-    const rules: Array<{ peer: ec2.IPeer; port: ec2.Port; description: string }> = [];
+    const rules: Array<{
+      peer: ec2.IPeer;
+      port: ec2.Port;
+      description: string;
+    }> = [];
 
     if (allowHttp) {
       rules.push({
@@ -319,7 +327,12 @@ export class SecurityGroupRulePresets {
    */
   static forRdsDatabase(
     peer: ec2.IPeer,
-    databaseType: "mysql" | "postgresql" | "mongodb" | "redis" | "custom" = "postgresql",
+    databaseType:
+      | "mysql"
+      | "postgresql"
+      | "mongodb"
+      | "redis"
+      | "custom" = "postgresql",
     customPort?: number
   ): Array<{ peer: ec2.IPeer; port: ec2.Port; description: string }> {
     const portMap: Record<string, number> = {
@@ -329,9 +342,10 @@ export class SecurityGroupRulePresets {
       redis: COMMON_PORTS.REDIS,
     };
 
-    const port = databaseType === "custom" && customPort
-      ? customPort
-      : portMap[databaseType] || COMMON_PORTS.POSTGRESQL;
+    const port =
+      databaseType === "custom" && customPort
+        ? customPort
+        : portMap[databaseType] || COMMON_PORTS.POSTGRESQL;
 
     const dbName = databaseType.charAt(0).toUpperCase() + databaseType.slice(1);
 
@@ -387,7 +401,11 @@ export class SecurityGroupRulePresets {
     allowHttp: boolean = true,
     allowHttps: boolean = true
   ): Array<{ peer: ec2.IPeer; port: ec2.Port; description: string }> {
-    const rules: Array<{ peer: ec2.IPeer; port: ec2.Port; description: string }> = [];
+    const rules: Array<{
+      peer: ec2.IPeer;
+      port: ec2.Port;
+      description: string;
+    }> = [];
 
     if (allowHttp) {
       rules.push({
@@ -429,7 +447,8 @@ export class SecurityGroupRulePresets {
     return {
       peer: ec2.Peer.anyIpv4(),
       port: ec2.Port.tcp(COMMON_PORTS.HTTPS),
-      description: "Allow outbound HTTPS for AWS service endpoints (ECR, ECS, CloudWatch, SSM)",
+      description:
+        "Allow outbound HTTPS for AWS service endpoints (ECR, ECS, CloudWatch, SSM)",
     };
   }
 
@@ -453,7 +472,8 @@ export class SecurityGroupRulePresets {
     return {
       peer: ec2.Peer.anyIpv4(),
       port: ec2.Port.tcp(COMMON_PORTS.HTTP),
-      description: "Allow outbound HTTP for package manager updates (yum, apt, etc.)",
+      description:
+        "Allow outbound HTTP for package manager updates (yum, apt, etc.)",
     };
   }
 }
