@@ -920,7 +920,9 @@ export function validateLogGroupNameOptional(name?: string): void {
 /**
  * Validate that an admin password secret ARN is provided.
  */
-export function validateAdminPasswordSecretArn(secretArn: string | undefined): void {
+export function validateAdminPasswordSecretArn(
+  secretArn: string | undefined
+): void {
   if (!secretArn || secretArn.trim().length === 0) {
     throw new Error(
       "Grafana admin password must be supplied via Secrets Manager (adminPasswordSecretArn)."
