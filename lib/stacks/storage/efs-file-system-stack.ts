@@ -10,7 +10,7 @@ import * as customResources from "aws-cdk-lib/custom-resources";
 import { NagSuppressions } from "cdk-nag";
 
 import { SuppressionManager } from "../../cdk-nag/suppression-manager";
-import { LambdaFunctionConstruct } from "../compute/lambda-stack";
+import { LambdaFunctionConstruct } from "../../constructs/compute/lambda";
 
 // ============================================================================
 // CROSS-ACCOUNT TARGET TYPE

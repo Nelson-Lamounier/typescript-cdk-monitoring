@@ -82,6 +82,8 @@ interface NetworkingStackProps extends cdk.StackProps {
 
 ```typescript
 import { NetworkingStack } from './lib/stacks/networking-stack';
+import { VpcConstruct, VpcFlowLogsConstruct } from './lib/constructs/networking/vpc';
+import { SubnetConfigurationHelper } from './lib/shared/helpers';
 import * as cdk from 'aws-cdk-lib';
 
 const app = new cdk.App();
@@ -151,7 +153,7 @@ The `NetworkingStack` uses several internal constructs that can also be used ind
 Factory class for creating standard subnet configurations:
 
 ```typescript
-import { SubnetConfigurationHelper } from './lib/stacks/networking-stack';
+import { SubnetConfigurationHelper } from './lib/shared/helpers';
 
 // Create individual subnet configurations
 const publicSubnet = SubnetConfigurationHelper.publicSubnet(24);
@@ -168,7 +170,7 @@ const threeTier = SubnetConfigurationHelper.threeTierConfiguration();    // Publ
 Enhanced VPC construct with additional features:
 
 ```typescript
-import { VpcConstruct } from './lib/stacks/networking-stack';
+import { VpcConstruct } from './lib/constructs/networking/vpc';
 
 const vpcConstruct = new VpcConstruct(this, 'Vpc', {
   envName: 'development',
@@ -185,9 +187,10 @@ const vpcConstruct = new VpcConstruct(this, 'Vpc', {
 const vpc = vpcConstruct.vpc;
 
 // Add VPC endpoints
-vpcConstruct.addInterfaceEndpoint('EcrApiEndpoint', {
-  service: ec2.InterfaceVpcEndpointAwsService.ECR,
-});
+vpcConstruct.addInterfaceEndpoint(
+  'EcrApiEndpoint',
+  ec2.InterfaceVpcEndpointAwsService.ECR
+);
 
 vpcConstruct.addGatewayEndpoint('S3Endpoint', {
   service: ec2.GatewayVpcEndpointAwsService.S3,
@@ -199,7 +202,7 @@ vpcConstruct.addGatewayEndpoint('S3Endpoint', {
 VPC Flow Logs construct for network traffic monitoring:
 
 ```typescript
-import { VpcFlowLogsConstruct } from './lib/stacks/networking-stack';
+import { VpcFlowLogsConstruct } from './lib/constructs/networking/vpc';
 
 const flowLogs = new VpcFlowLogsConstruct(this, 'FlowLogs', {
   vpc: vpc,
