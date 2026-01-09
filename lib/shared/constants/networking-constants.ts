@@ -452,3 +452,23 @@ export const DEFAULT_ALB_FIXED_RESPONSE_CONTENT_TYPE = "text/plain";
  * Default fixed response message body
  */
 export const DEFAULT_ALB_FIXED_RESPONSE_MESSAGE = "Not Found";
+
+/**
+ * Application Load Balancer Target Group default configuration constants
+ */
+export const DEFAULT_ALB_TARGET_GROUP_PORT = 80;
+export const DEFAULT_ALB_TG_HEALTH_CHECK_PATH = "/";
+export const DEFAULT_ALB_TG_HEALTH_CHECK_PORT = "traffic-port";
+export const DEFAULT_ALB_TG_HEALTH_CHECK_INTERVAL_SECONDS = 30;
+export const DEFAULT_ALB_TG_HEALTH_CHECK_TIMEOUT_SECONDS = 10;
+export const DEFAULT_ALB_TG_HEALTHY_THRESHOLD_COUNT = 2;
+export const DEFAULT_ALB_TG_UNHEALTHY_THRESHOLD_COUNT = 5;
+export const DEFAULT_ALB_TG_DEREGISTRATION_DELAY_SECONDS = 30;
+export const DEFAULT_ALB_TG_STICKINESS_DURATION_SECONDS = 3600;
+export const DEFAULT_ALB_TG_SLOW_START_SECONDS = 0;
+export const DEFAULT_ALB_TG_HTTP_SUCCESS_CODES = "200-399";
+export const DEFAULT_ALB_TG_GRPC_SUCCESS_CODES = "0-99";
+export const MIN_TARGET_GROUP_PORT = 1;
+export const MAX_TARGET_GROUP_PORT = 65535;
+export const MIN_HEALTH_CHECK_THRESHOLD = 2;
+export const MAX_HEALTH_CHECK_THRESHOLD = 10;

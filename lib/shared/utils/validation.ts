@@ -1,10 +1,15 @@
 /** @format */
 
 import * as ec2 from "aws-cdk-lib/aws-ec2";
+import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 
 import {
   MIN_SUBNET_CIDR_MASK,
   MAX_SUBNET_CIDR_MASK,
+  MAX_HEALTH_CHECK_THRESHOLD,
+  MAX_TARGET_GROUP_PORT,
+  MIN_HEALTH_CHECK_THRESHOLD,
+  MIN_TARGET_GROUP_PORT,
 } from "../constants/networking-constants";
 
 /**
@@ -610,6 +615,123 @@ export function validateAtLeastOneListener(
         "    enableHttp: true, // At least one must be true\n" +
         "    enableHttps: false,\n" +
         "  });"
+    );
+  }
+}
+
+/**
+ * Validate environment name presence and formatting
+ */
+export function validateEnvName(envName: string): void {
+  if (!envName || typeof envName !== "string" || envName.trim().length === 0) {
+    throw new Error(
+      "Environment name (envName) is required and must be a non-empty string.\n\n" +
+        "Troubleshooting Steps:\n" +
+        " 1. Provide envName in construct props\n" +
+        " 2. Use standard values such as 'development', 'staging', 'production', or 'pipeline'\n" +
+        " 3. Ensure the value is not undefined or null"
+    );
+  }
+}
+
+/**
+ * Validate a listener or target group port number
+ */
+export function validatePortInRange(port: number, context = "Port"): void {
+  if (!Number.isInteger(port)) {
+    throw new Error(`${context} must be an integer. Received: ${port}`);
+  }
+
+  if (port < MIN_TARGET_GROUP_PORT || port > MAX_TARGET_GROUP_PORT) {
+    throw new Error(
+      `${context} must be between ${MIN_TARGET_GROUP_PORT} and ${MAX_TARGET_GROUP_PORT}. Received: ${port}`
+    );
+  }
+}
+
+/**
+ * Validate target group name format
+ */
+export function validateTargetGroupName(name: string): void {
+  if (!name || typeof name !== "string") {
+    throw new Error("Target group name is required and must be a string.");
+  }
+
+  const trimmed = name.trim();
+  if (trimmed.length === 0) {
+    throw new Error("Target group name cannot be empty or whitespace only.");
+  }
+
+  if (trimmed.length > 32) {
+    throw new Error(
+      `Target group name must not exceed 32 characters. Received: ${trimmed.length}`
+    );
+  }
+
+  const nameRegex = /^[A-Za-z0-9-]+$/;
+  if (!nameRegex.test(trimmed)) {
+    throw new Error(
+      "Target group name may only contain alphanumeric characters and hyphens."
+    );
+  }
+
+  if (trimmed.startsWith("-") || trimmed.endsWith("-")) {
+    throw new Error("Target group name cannot start or end with a hyphen.");
+  }
+}
+
+/**
+ * Validate health check timing to ensure timeout is less than interval
+ */
+export function validateHealthCheckTiming(
+  intervalSeconds: number,
+  timeoutSeconds: number
+): void {
+  if (intervalSeconds <= 0 || timeoutSeconds <= 0) {
+    throw new Error("Health check interval and timeout must be greater than 0.");
+  }
+
+  if (!Number.isInteger(intervalSeconds) || !Number.isInteger(timeoutSeconds)) {
+    throw new Error(
+      "Health check interval and timeout must be integer values expressed in seconds."
+    );
+  }
+
+  if (timeoutSeconds >= intervalSeconds) {
+    throw new Error(
+      `Health check timeout (${timeoutSeconds}s) must be less than the interval (${intervalSeconds}s).`
+    );
+  }
+}
+
+/**
+ * Validate health check threshold counts
+ */
+export function validateHealthCheckThreshold(
+  name: string,
+  value: number
+): void {
+  if (!Number.isInteger(value)) {
+    throw new Error(`${name} must be an integer.`);
+  }
+
+  if (value < MIN_HEALTH_CHECK_THRESHOLD || value > MAX_HEALTH_CHECK_THRESHOLD) {
+    throw new Error(
+      `${name} must be between ${MIN_HEALTH_CHECK_THRESHOLD} and ${MAX_HEALTH_CHECK_THRESHOLD}. Received: ${value}`
+    );
+  }
+}
+
+/**
+ * Validate that VPC is provided when required by target type
+ */
+export function validateVpcForTargetGroup(
+  vpc: ec2.IVpc | undefined,
+  targetType: elbv2.TargetType
+): void {
+  if (targetType !== elbv2.TargetType.LAMBDA && !vpc) {
+    throw new Error(
+      "VPC is required for instance or IP target groups. Provide a VPC when targetType is not LAMBDA."
     );
   }
 }

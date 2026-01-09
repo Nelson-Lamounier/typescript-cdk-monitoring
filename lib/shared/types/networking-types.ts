@@ -4,6 +4,7 @@ import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as kms from "aws-cdk-lib/aws-kms";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
+import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
 import * as cdk from "aws-cdk-lib";
 
 /**
@@ -414,4 +415,206 @@ export interface AlbListenerConstructProps {
    * Used to avoid export name conflicts
    */
   loadBalancerName?: string;
+}
+
+/**
+ * Matcher configuration for ALB target group health checks
+ */
+export interface AlbTargetGroupHealthCheckMatcher {
+  /**
+   * HTTP success codes to match (e.g., "200-399")
+   */
+  httpCodes?: string;
+
+  /**
+   * gRPC success codes to match (e.g., "0-99")
+   */
+  grpcCodes?: string;
+}
+
+/**
+ * CloudWatch alarm configuration for target groups
+ */
+export interface TargetGroupAlarmConfig {
+  /**
+   * Whether to create an alarm on unhealthy hosts
+   * @default true when unhealthyHostThreshold is provided
+   */
+  createUnhealthyHostAlarm?: boolean;
+
+  /**
+   * Threshold for unhealthy host count to trigger the alarm
+   */
+  unhealthyHostThreshold: number;
+
+  /**
+   * Evaluation periods for the alarm
+   * @default 2
+   */
+  evaluationPeriods?: number;
+
+  /**
+   * Datapoints to alarm
+   */
+  datapointsToAlarm?: number;
+
+  /**
+   * Comparison operator for the alarm
+   * @default GREATER_THAN_OR_EQUAL_TO_THRESHOLD
+   */
+  comparisonOperator?: cloudwatch.ComparisonOperator;
+
+  /**
+   * Treat missing data configuration
+   * @default NOT_BREACHING
+   */
+  treatMissingData?: cloudwatch.TreatMissingData;
+
+  /**
+   * Metric period
+   * @default 1 minute
+   */
+  metricPeriod?: cdk.Duration;
+
+  /**
+   * Optional alarm name override
+   */
+  alarmName?: string;
+
+  /**
+   * Optional alarm description override
+   */
+  alarmDescription?: string;
+}
+
+/**
+ * Application Load Balancer Target Group construct properties
+ */
+export interface AlbTargetGroupConstructProps {
+  /**
+   * VPC for the target group. Required unless targetType is LAMBDA
+   */
+  vpc?: ec2.IVpc;
+
+  /**
+   * Environment name for tagging and warnings
+   */
+  envName: string;
+
+  /**
+   * Project name for tagging
+   */
+  projectName?: string;
+
+  /**
+   * Optional component tag (e.g., "api", "frontend")
+   */
+  component?: string;
+
+  /**
+   * Target group name (1-32 characters, alphanumeric and hyphens)
+   */
+  name: string;
+
+  /**
+   * Listener port (required for non-Lambda targets)
+   */
+  port?: number;
+
+  /**
+   * Application protocol
+   * @default HTTP (HTTPS when port is 443)
+   */
+  protocol?: elbv2.ApplicationProtocol;
+
+  /**
+   * Application protocol version (e.g., GRPC)
+   */
+  protocolVersion?: elbv2.ApplicationProtocolVersion;
+
+  /**
+   * Target type (INSTANCE, IP, LAMBDA)
+   * @default INSTANCE
+   */
+  targetType?: elbv2.TargetType;
+
+  /**
+   * Health check path (HTTP/HTTPS only)
+   */
+  healthCheckPath?: string;
+
+  /**
+   * Health check protocol
+   */
+  healthCheckProtocol?: elbv2.Protocol;
+
+  /**
+   * Health check port (number or "traffic-port")
+   */
+  healthCheckPort?: string;
+
+  /**
+   * Health check interval (seconds)
+   */
+  healthCheckIntervalSeconds?: number;
+
+  /**
+   * Health check timeout (seconds)
+   */
+  healthCheckTimeoutSeconds?: number;
+
+  /**
+   * Consecutive healthy check threshold
+   */
+  healthyThresholdCount?: number;
+
+  /**
+   * Consecutive unhealthy check threshold
+   */
+  unhealthyThresholdCount?: number;
+
+  /**
+   * Success matcher for health checks
+   */
+  healthCheckMatcher?: AlbTargetGroupHealthCheckMatcher;
+
+  /**
+   * Deregistration delay (seconds)
+   */
+  deregistrationDelaySeconds?: number;
+
+  /**
+   * Enable sticky sessions
+   */
+  stickinessEnabled?: boolean;
+
+  /**
+   * Sticky session cookie duration (seconds)
+   */
+  stickinessCookieDurationSeconds?: number;
+
+  /**
+   * Slow start duration (seconds)
+   */
+  slowStartDurationSeconds?: number;
+
+  /**
+   * Load balancing algorithm
+   */
+  loadBalancingAlgorithm?: elbv2.TargetGroupLoadBalancingAlgorithmType;
+
+  /**
+   * Additional target group attributes
+   */
+  targetGroupAttributes?: Record<string, string>;
+
+  /**
+   * Enable multi-value headers for Lambda targets
+   */
+  lambdaMultiValueHeadersEnabled?: boolean;
+
+  /**
+   * CloudWatch alarm configuration for unhealthy hosts
+   */
+  alarmConfig?: TargetGroupAlarmConfig;
 }
