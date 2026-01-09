@@ -2,6 +2,7 @@
 
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
+import * as logs from "aws-cdk-lib/aws-logs";
 
 import {
   MIN_SUBNET_CIDR_MASK,
@@ -11,6 +12,10 @@ import {
   MIN_HEALTH_CHECK_THRESHOLD,
   MIN_TARGET_GROUP_PORT,
 } from "../constants/networking-constants";
+import {
+  MAX_CLUSTER_NAME_LENGTH,
+  MIN_CLUSTER_NAME_LENGTH,
+} from "../constants/compute-constants";
 
 /**
  * Validate subnet CIDR mask is within acceptable range
@@ -732,6 +737,76 @@ export function validateVpcForTargetGroup(
   if (targetType !== elbv2.TargetType.LAMBDA && !vpc) {
     throw new Error(
       "VPC is required for instance or IP target groups. Provide a VPC when targetType is not LAMBDA."
+    );
+  }
+}
+
+/**
+ * Validate ECS cluster name formatting
+ */
+export function validateClusterName(clusterName: string): void {
+  if (!clusterName || typeof clusterName !== "string") {
+    throw new Error("Cluster name is required and must be a string.");
+  }
+
+  const trimmed = clusterName.trim();
+  if (trimmed.length < MIN_CLUSTER_NAME_LENGTH || trimmed.length > MAX_CLUSTER_NAME_LENGTH) {
+    throw new Error(
+      `Cluster name must be between ${MIN_CLUSTER_NAME_LENGTH} and ${MAX_CLUSTER_NAME_LENGTH} characters. Received: ${trimmed.length}`
+    );
+  }
+
+  const regex = /^[A-Za-z0-9\-_]+$/;
+  if (!regex.test(trimmed)) {
+    throw new Error(
+      "Cluster name may only contain alphanumeric characters, hyphens, and underscores."
+    );
+  }
+}
+
+/**
+ * Validate capacity ordering: min <= desired <= max
+ */
+export function validateCapacityOrder(
+  min: number,
+  desired: number,
+  max: number
+): void {
+  if (min > desired) {
+    throw new Error("Minimum capacity cannot exceed desired capacity.");
+  }
+  if (desired > max) {
+    throw new Error("Desired capacity cannot exceed maximum capacity.");
+  }
+}
+
+/**
+ * Validate VPC has a valid ID
+ */
+export function validateVpcIdPresent(vpc: ec2.IVpc): void {
+  if (!vpc || !vpc.vpcId || vpc.vpcId.trim().length === 0) {
+    throw new Error("VPC is required and must have a valid VPC ID.");
+  }
+}
+
+/**
+ * Validate CloudWatch Log Group name format
+ */
+export function validateLogGroupName(name: string): void {
+  if (!name || typeof name !== "string") {
+    throw new Error("Log group name must be a non-empty string.");
+  }
+  const trimmed = name.trim();
+  if (trimmed.length === 0) {
+    throw new Error("Log group name cannot be empty.");
+  }
+  if (trimmed.length > 512) {
+    throw new Error("Log group name must be 512 characters or fewer.");
+  }
+  const pattern = /^[.\-_/#A-Za-z0-9]+$/;
+  if (!pattern.test(trimmed)) {
+    throw new Error(
+      "Log group name may only include alphanumeric characters and the symbols . - _ / #"
     );
   }
 }

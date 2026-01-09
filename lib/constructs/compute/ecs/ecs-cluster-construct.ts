@@ -5,96 +5,42 @@ import * as autoscaling from "aws-cdk-lib/aws-autoscaling";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as iam from "aws-cdk-lib/aws-iam";
+import * as kms from "aws-cdk-lib/aws-kms";
 import * as logs from "aws-cdk-lib/aws-logs";
 import { Tags } from "aws-cdk-lib";
 import { NagSuppressions } from "cdk-nag";
 import { Construct } from "constructs";
 
-export interface EcsClusterConstructProps {
-  /**
-   * VPC where the ECS cluster will be created
-   */
-  vpc: ec2.IVpc;
-
-  /**
-   * Environment name for resource naming and tagging
-   */
-  envName: string;
-
-  /**
-   * Whether to enable Container Insights
-   * @default true
-   */
-  enableContainerInsights?: boolean;
-
-  /**
-   * Whether to enable execute command capability
-   * @default true
-   */
-  enableExecuteCommand?: boolean;
-
-  /**
-   * CloudWatch log group retention period
-   * @default logs.RetentionDays.TWO_WEEKS
-   */
-  logRetention?: logs.RetentionDays;
-
-  /**
-   * Custom cluster name
-   * @default `${envName}-monitoring-cluster`
-   */
-  clusterName?: string;
-
-  /**
-   * EC2 instance type for the Auto Scaling Group
-   * @default t3.micro
-   */
-  instanceType?: ec2.InstanceType;
-
-  /**
-   * Minimum number of instances
-   * @default 1
-   */
-  minCapacity?: number;
-
-  /**
-   * Maximum number of instances
-   * @default 1
-   */
-  maxCapacity?: number;
-
-  /**
-   * Desired number of instances
-   * @default 1
-   */
-  desiredCapacity?: number;
-
-  /**
-   * Whether to use public subnets
-   * @default false
-   */
-  usePublicSubnets?: boolean;
-
-  /**
-   * Additional security groups to attach to the instances
-   * @default []
-   */
-  additionalSecurityGroups?: ec2.ISecurityGroup[];
-
-  /**
-   * Custom launch template to use instead of creating a default one
-   * If provided, instanceType and other launch template related props are ignored
-   * @default undefined (creates default launch template)
-   */
-  customLaunchTemplate?: ec2.ILaunchTemplate;
-
-  /**
-   * Custom user data to use instead of creating default ECS user data
-   * If provided, the construct will not create default ECS configuration user data
-   * @default undefined (creates default ECS user data)
-   */
-  customUserData?: ec2.UserData;
-}
+import {
+  DEFAULT_ECS_ALLOW_INTERNAL_PORT_CIDR_FALLBACK,
+  DEFAULT_ECS_BLOCK_DEVICE,
+  DEFAULT_ECS_CAPACITY_STEP_SIZE,
+  DEFAULT_ECS_CLUSTER_NAME_SUFFIX,
+  DEFAULT_ECS_DESIRED_CAPACITY,
+  DEFAULT_ECS_ENABLE_CONTAINER_INSIGHTS,
+  DEFAULT_ECS_ENABLE_EXECUTE_COMMAND,
+  DEFAULT_ECS_FARGATE_CAPACITY_PROVIDERS,
+  DEFAULT_ECS_HEALTH_GRACE_PERIOD_SECONDS,
+  DEFAULT_ECS_INSTANCE_TYPE,
+  DEFAULT_ECS_LOG_GROUP_PREFIX,
+  DEFAULT_ECS_LOG_RETENTION,
+  DEFAULT_ECS_LOG_RETENTION_DEV,
+  DEFAULT_ECS_MAX_CAPACITY,
+  DEFAULT_ECS_MIN_CAPACITY,
+  DEFAULT_ECS_SLOW_START_SECONDS,
+  DEFAULT_ECS_STICKINESS_SECONDS,
+  DEFAULT_ECS_TARGET_CAPACITY_PERCENT,
+  DEFAULT_ECS_VOLUME_SIZE_GB,
+} from "../../../shared/constants/compute-constants";
+import { EcsClusterConstructProps } from "../../../shared/types/compute-types";
+import {
+  validateCapacityOrder,
+  validateClusterName,
+  validateEnvName,
+  validateLogGroupName,
+  validatePortInRange,
+  validateVpcIdPresent,
+} from "../../../shared/utils/validation";
 
 /**
  * Construct for creating an ECS cluster with Auto Scaling Group for EC2 capacity
@@ -111,43 +57,74 @@ export class EcsClusterConstruct extends Construct {
     const {
       vpc,
       envName,
-      enableContainerInsights = true,
-      enableExecuteCommand = true,
-      logRetention = logs.RetentionDays.TWO_WEEKS,
-      clusterName = `${envName}-cluster`,
-      instanceType = new ec2.InstanceType("t3.micro"),
-      minCapacity = 1,
-      maxCapacity = 1,
-      desiredCapacity = 1,
+      projectName,
+      enableContainerInsights = DEFAULT_ECS_ENABLE_CONTAINER_INSIGHTS,
+      enableFargateCapacityProviders = DEFAULT_ECS_FARGATE_CAPACITY_PROVIDERS,
+      enableExecuteCommand = DEFAULT_ECS_ENABLE_EXECUTE_COMMAND,
+      executeCommandConfig,
+      logRetention,
+      logGroupKmsKey,
+      logRemovalPolicy,
+      clusterName = `${envName}-${DEFAULT_ECS_CLUSTER_NAME_SUFFIX}`,
+      instanceType = new ec2.InstanceType(DEFAULT_ECS_INSTANCE_TYPE),
+      minCapacity = DEFAULT_ECS_MIN_CAPACITY,
+      maxCapacity = DEFAULT_ECS_MAX_CAPACITY,
+      desiredCapacity = DEFAULT_ECS_DESIRED_CAPACITY,
       usePublicSubnets = false,
       additionalSecurityGroups = [],
       customLaunchTemplate,
       customUserData,
+      capacityProviderManagedScaling,
+      spotOptions,
+      detailedMonitoring = false,
+      launchTemplateRole,
     } = props;
+
+    validateEnvName(envName);
+    validateClusterName(clusterName);
+    validateCapacityOrder(minCapacity, desiredCapacity, maxCapacity);
+    validateVpcIdPresent(vpc);
+
+    const logGroupName = `${DEFAULT_ECS_LOG_GROUP_PREFIX}${clusterName}`;
+    validateLogGroupName(logGroupName);
+
+    const retention =
+      logRetention ??
+      (envName === "production" || envName === "prod"
+        ? DEFAULT_ECS_LOG_RETENTION
+        : DEFAULT_ECS_LOG_RETENTION_DEV);
+    const removalPolicy =
+      logRemovalPolicy ??
+      (envName === "production" || envName === "prod"
+        ? cdk.RemovalPolicy.RETAIN
+        : cdk.RemovalPolicy.DESTROY);
 
     // Create CloudWatch log group for cluster
     this.logGroup = new logs.LogGroup(this, "ClusterLogGroup", {
-      logGroupName: `/aws/ecs/cluster/${clusterName}`,
-      retention: logRetention,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      logGroupName,
+      retention,
+      encryptionKey: logGroupKmsKey,
+      removalPolicy,
     });
 
     // Create ECS cluster
     this.cluster = new ecs.Cluster(this, "Cluster", {
       vpc,
       clusterName,
-      containerInsightsV2: enableContainerInsights
-        ? ecs.ContainerInsights.ENABLED
-        : ecs.ContainerInsights.DISABLED,
-      enableFargateCapacityProviders: false, // Using EC2 for compute
-      executeCommandConfiguration: enableExecuteCommand
-        ? {
-            logging: ecs.ExecuteCommandLogging.OVERRIDE,
-            logConfiguration: {
-              cloudWatchLogGroup: this.logGroup,
-            },
-          }
-        : undefined,
+      containerInsights: enableContainerInsights,
+      enableFargateCapacityProviders,
+      executeCommandConfiguration:
+        enableExecuteCommand || executeCommandConfig?.enable
+          ? {
+              logging:
+                executeCommandConfig?.logging ?? ecs.ExecuteCommandLogging.OVERRIDE,
+              kmsKey: executeCommandConfig?.kmsKey,
+              logConfiguration: {
+                cloudWatchLogGroup: this.logGroup,
+                s3Bucket: executeCommandConfig?.logBucket,
+              },
+            }
+          : undefined,
     });
 
     // Use custom launch template if provided, otherwise create default one
@@ -162,13 +139,10 @@ export class EcsClusterConstruct extends Construct {
         {
           vpc,
           description: `Security group for ${envName} ECS instances`,
-          allowAllOutbound: true,
+          allowAllOutbound: false,
         }
       );
 
-      // Even though allowAllOutbound=true adds a default egress rule, we add an explicit
-      // outbound HTTPS rule because SSM/ECS/ECR all require outbound 443 and it's a
-      // common source of “SSM not working” confusion when reviewing SG rules.
       instanceSecurityGroup.addEgressRule(
         ec2.Peer.anyIpv4(),
         ec2.Port.tcp(443),
@@ -272,7 +246,7 @@ export class EcsClusterConstruct extends Construct {
         instanceType,
         machineImage: ecs.EcsOptimizedImage.amazonLinux2023(),
         userData,
-        role: instanceRole,
+        role: launchTemplateRole ?? instanceRole,
         // Use securityGroup (singular) if no additional groups, securityGroups (plural) if additional groups
         ...(additionalSecurityGroups.length > 0
           ? {
@@ -284,8 +258,8 @@ export class EcsClusterConstruct extends Construct {
           : { securityGroup: instanceSecurityGroup }),
         blockDevices: [
           {
-            deviceName: "/dev/xvda",
-            volume: autoscaling.BlockDeviceVolume.ebs(30, {
+            deviceName: DEFAULT_ECS_BLOCK_DEVICE,
+            volume: autoscaling.BlockDeviceVolume.ebs(DEFAULT_ECS_VOLUME_SIZE_GB, {
               volumeType: autoscaling.EbsDeviceVolumeType.GP3,
               encrypted: true,
             }),
@@ -296,22 +270,6 @@ export class EcsClusterConstruct extends Construct {
         requireImdsv2: true,
       });
 
-      // Explicitly set IMDSv2 to required via CloudFormation property override
-      // This ensures the setting is applied correctly in the generated template
-      const cfnLaunchTemplate = this.launchTemplate.node
-        .defaultChild as ec2.CfnLaunchTemplate;
-      cfnLaunchTemplate.addPropertyOverride(
-        "LaunchTemplateData.MetadataOptions.HttpTokens",
-        "required"
-      );
-      cfnLaunchTemplate.addPropertyOverride(
-        "LaunchTemplateData.MetadataOptions.HttpEndpoint",
-        "enabled"
-      );
-      cfnLaunchTemplate.addPropertyOverride(
-        "LaunchTemplateData.MetadataOptions.HttpPutResponseHopLimit",
-        2
-      );
     }
 
     // Create Auto Scaling Group
@@ -321,44 +279,28 @@ export class EcsClusterConstruct extends Construct {
       minCapacity,
       maxCapacity,
       desiredCapacity,
+      spotPrice: spotOptions?.spotPrice,
       vpcSubnets: {
         subnetType: usePublicSubnets
           ? ec2.SubnetType.PUBLIC
           : ec2.SubnetType.PRIVATE_WITH_EGRESS,
       },
       healthChecks: autoscaling.HealthChecks.ec2({
-        gracePeriod: cdk.Duration.seconds(300),
+        gracePeriod: cdk.Duration.seconds(DEFAULT_ECS_HEALTH_GRACE_PERIOD_SECONDS),
       }),
+      instanceMonitoring: detailedMonitoring
+        ? autoscaling.Monitoring.DETAILED
+        : autoscaling.Monitoring.BASIC,
     });
 
-    // Tag ASG - tags will propagate to EC2 instances automatically
-    // These tags are required for Prometheus EC2 service discovery
-    // Access the CloudFormation resource to set tags with PropagateAtLaunch
-    const cfnAsg = this.asg.node
-      .defaultChild as autoscaling.CfnAutoScalingGroup;
-    // Use addPropertyOverride to ensure tags are set correctly in CloudFormation
-    cfnAsg.addPropertyOverride("Tags", [
-      {
-        Key: "Name",
-        Value: `${props.envName}-asg`,
-        PropagateAtLaunch: true,
-      },
-      {
-        Key: "Environment",
-        Value: props.envName,
-        PropagateAtLaunch: true,
-      },
-      {
-        Key: "Service",
-        Value: "monitoring",
-        PropagateAtLaunch: true,
-      },
-      {
-        Key: "ManagedBy",
-        Value: "CDK",
-        PropagateAtLaunch: true,
-      },
-    ]);
+    Tags.of(this.asg).add("Name", `${envName}-asg`, { applyToLaunchedInstances: true });
+    Tags.of(this.asg).add("Environment", envName, { applyToLaunchedInstances: true });
+    Tags.of(this.asg).add("ManagedBy", "CDK", { applyToLaunchedInstances: true });
+    if (projectName) {
+      Tags.of(this.asg).add("Project", projectName, {
+        applyToLaunchedInstances: true,
+      });
+    }
 
     // CDK Nag suppressions for Auto Scaling Group and its resources
     // Apply recursively to child resources (including Lambda function and its role policy)
@@ -397,19 +339,21 @@ export class EcsClusterConstruct extends Construct {
     // 5. Check security groups allow outbound traffic (for ECS agent communication)
     // 6. For public subnets: verify instances have public IPs
     // 7. For private subnets: verify NAT gateway is configured
-    const capacityProvider = new ecs.AsgCapacityProvider(
-      this,
-      "CapacityProvider",
-      {
-        autoScalingGroup: this.asg,
-        // Enable managed scaling - ECS will scale based on task demand
-        // The ASG will still launch instances based on desiredCapacity initially
-        // If you need instances to launch immediately regardless of tasks, consider
-        // setting enableManagedScaling: false temporarily for troubleshooting
-        enableManagedScaling: false,
-        enableManagedTerminationProtection: false,
-      }
-    );
+    const capacityProvider = new ecs.AsgCapacityProvider(this, "CapacityProvider", {
+      autoScalingGroup: this.asg,
+      enableManagedScaling:
+        capacityProviderManagedScaling?.enableManagedScaling ?? true,
+      managedScalingTargetCapacity:
+        capacityProviderManagedScaling?.targetCapacityPercent ??
+        DEFAULT_ECS_TARGET_CAPACITY_PERCENT,
+      minimumScalingStepSize:
+        capacityProviderManagedScaling?.minimumScalingStepSize ??
+        DEFAULT_ECS_CAPACITY_STEP_SIZE,
+      maximumScalingStepSize:
+        capacityProviderManagedScaling?.maximumScalingStepSize ??
+        DEFAULT_ECS_CAPACITY_STEP_SIZE,
+      enableManagedTerminationProtection: false,
+    });
 
     this.cluster.addAsgCapacityProvider(capacityProvider);
 
@@ -417,6 +361,45 @@ export class EcsClusterConstruct extends Construct {
     Tags.of(this.cluster).add("Name", clusterName);
     Tags.of(this.cluster).add("Environment", envName);
     Tags.of(this.cluster).add("ManagedBy", "CDK");
+    if (projectName) {
+      Tags.of(this.cluster).add("Project", projectName);
+    }
+
+    if (
+      (envName === "production" || envName === "prod") &&
+      minCapacity < 2
+    ) {
+      cdk.Annotations.of(this).addWarning(
+        "Minimum capacity is below 2 in production. Consider at least two instances for high availability."
+      );
+    }
+
+    if (
+      (envName === "production" || envName === "prod") &&
+      instanceType.toString().includes("t3.micro")
+    ) {
+      cdk.Annotations.of(this).addWarning(
+        "Instance type t3.micro is small for production ECS clusters. Consider larger sizes for reliability."
+      );
+    }
+
+    if (
+      (envName === "production" || envName === "prod") &&
+      !logGroupKmsKey
+    ) {
+      cdk.Annotations.of(this).addWarning(
+        "Cluster log group does not use a customer-managed KMS key in production. Consider providing logGroupKmsKey."
+      );
+    }
+
+    if (
+      enableContainerInsights &&
+      (envName === "production" || envName === "prod")
+    ) {
+      cdk.Annotations.of(this).addWarning(
+        "Container Insights is enabled. Review potential cost impact in production."
+      );
+    }
 
     // Note: Outputs are handled at the stack level to avoid cyclic dependencies
     // The stack that uses this construct should create the necessary outputs
@@ -430,8 +413,10 @@ export class EcsClusterConstruct extends Construct {
     description: string,
     cidr?: string
   ): void {
-    // Use provided CIDR or a default to avoid cyclic dependencies
-    const vpcCidr = cidr || "10.0.0.0/16";
+    validatePortInRange(port, "Internal port");
+    // Use provided CIDR or the VPC CIDR as the default
+    const vpcCidr =
+      cidr || this.asg.vpc.vpcCidrBlock || DEFAULT_ECS_ALLOW_INTERNAL_PORT_CIDR_FALLBACK;
     // Use ASG connections rather than a construct-owned SG so this continues to
     // work even when the launch template is responsible for the security groups.
     this.asg.connections.allowFrom(
