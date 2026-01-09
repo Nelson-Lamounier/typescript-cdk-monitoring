@@ -1,6 +1,5 @@
 /** @format */
 
-import * as autoscaling from "aws-cdk-lib/aws-autoscaling";
 import * as cdk from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecs from "aws-cdk-lib/aws-ecs";
@@ -25,7 +24,6 @@ export interface EcsCapacityProviderManagedScaling {
 
 export interface EcsSpotOptions {
   spotPrice?: string;
-  capacityType?: autoscaling.CapacityRebalance;
 }
 
 export interface EcsClusterConstructProps {
@@ -52,4 +50,59 @@ export interface EcsClusterConstructProps {
   spotOptions?: EcsSpotOptions;
   detailedMonitoring?: boolean;
   launchTemplateRole?: iam.IRole;
+}
+
+export interface AutoScalingGroupConstructProps {
+  vpc: ec2.IVpc;
+  cluster: ecs.ICluster;
+  envName: string;
+  projectName?: string;
+  launchTemplate: ec2.ILaunchTemplate;
+  minCapacity?: number;
+  maxCapacity?: number;
+  desiredCapacity?: number;
+  subnetSelection?: ec2.SubnetSelection;
+  enableManagedScaling?: boolean;
+  enableManagedTerminationProtection?: boolean;
+  healthCheckGraceSeconds?: number;
+  updateMaxBatchSize?: number;
+  updateMinInstancesInService?: number;
+  updatePauseTimeSeconds?: number;
+}
+
+/**
+ * User data strategy for launch template
+ */
+export type UserDataStrategy = "minimal" | "comprehensive";
+export interface EcsConfig {
+  clusterName: string;
+  enableContainerMetadata?: boolean;
+  enableTaskIamRole?: boolean;
+}
+
+export interface MonitoringConfig {
+  installNodeExporter?: boolean;
+  installCloudWatchAgent?: boolean;
+}
+
+
+export interface LaunchTemplateConstructProps {
+  vpc: ec2.IVpc;
+  envName: string;
+  projectName?: string;
+  launchTemplateName?: string;
+  userDataStrategy?: UserDataStrategy;
+  userData?: ec2.UserData;
+  ecsConfig?: EcsConfig;
+  monitoring?: MonitoringConfig;
+  instanceType?: ec2.InstanceType;
+  machineImage?: ec2.IMachineImage;
+  securityGroup?: ec2.ISecurityGroup;
+  additionalSecurityGroups?: ec2.ISecurityGroup[];
+  role?: iam.IRole;
+  keyPair?: ec2.IKeyPair;
+  blockDevices?: ec2.BlockDevice[];
+  enableDetailedMonitoring?: boolean;
+  associatePublicIpAddress?: boolean;
+  customTags?: Record<string, string>;
 }

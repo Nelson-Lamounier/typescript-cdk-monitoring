@@ -1,49 +1,76 @@
 /** @format */
 
-// lib/constructs/launch-template-construct.ts
 import * as cdk from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as iam from "aws-cdk-lib/aws-iam";
-import { Tags } from "aws-cdk-lib";
 import { Construct } from "constructs";
 
-export interface LaunchTemplateConstructProps {
-  vpc: ec2.IVpc;
-  envName: string;
-  instanceType?: ec2.InstanceType;
-  machineImage?: ec2.IMachineImage;
-  /**
-   * @deprecated Use `keyPair` instead
-   */
-  keyName?: string;
-  /**
-   * EC2 Key Pair for SSH access to instances.
-   * If both `keyName` and `keyPair` are provided, `keyPair` takes precedence.
-   */
-  keyPair?: ec2.IKeyPair;
-  securityGroups?: ec2.ISecurityGroup[];
-  userData?: ec2.UserData;
-  role?: iam.Role;
-  enableMonitoring?: boolean;
-  associatePublicIpAddress?: boolean;
-  blockDevices?: ec2.BlockDevice[];
-  /**
-   * Add an SSH (22/tcp) ingress rule from anywhere.
-   * Default false (least privilege).
-   */
-  allowSshFromAnywhere?: boolean;
-  /**
-   * Add an HTTP (80/tcp) ingress rule from anywhere.
-   * Default false (least privilege).
-   */
-  allowHttpFromAnywhere?: boolean;
-}
+// Import types
+import type { LaunchTemplateConstructProps } from "../../../shared/types";
+// Import helpers
+import { UserDataConstruct } from "../../../shared/helpers/user-data-construct";
 
+/**
+ * Launch Template Construct
+ *
+ * Creates EC2 launch templates with flexible user data strategies:
+ *
+ * **User Data Strategies:**
+ *
+ * 1. **Minimal (SSM Bootstrap)** - RECOMMENDED for production
+ *    - Installs SSM agent only
+ *    - Fast boot (~30 seconds)
+ *    - Rest handled by SSM State Manager
+ *    - Use: `userDataStrategy: 'minimal'`
+ *
+ * 2. **Comprehensive (All-in-One)** - For standalone instances
+ *    - Installs everything in user data
+ *    - Slower boot (3-5 minutes)
+ *    - No SSM dependency
+ *    - Use: `userDataStrategy: 'comprehensive'`
+ *
+ * 3. **Custom** - Full control
+ *    - Provide your own userData
+ *    - Use: `userData: ec2.UserData.forLinux()`
+ *
+ * @example
+ * ```typescript
+ * // Minimal user data (SSM approach)
+ * const lt = new LaunchTemplateConstruct(this, 'LT', {
+ *   vpc: myVpc,
+ *   envName: 'production',
+ *   userDataStrategy: 'minimal',
+ *   ecsConfig: {
+ *     clusterName: 'my-cluster',
+ *   },
+ * });
+ *
+ * // Comprehensive user data (standalone)
+ * const lt = new LaunchTemplateConstruct(this, 'LT', {
+ *   vpc: myVpc,
+ *   envName: 'dev',
+ *   userDataStrategy: 'comprehensive',
+ *   monitoring: {
+ *     installNodeExporter: true,
+ *   },
+ * });
+ *
+ * // Custom user data
+ * const customUserData = ec2.UserData.forLinux();
+ * customUserData.addCommands('echo "Hello World"');
+ *
+ * const lt = new LaunchTemplateConstruct(this, 'LT', {
+ *   vpc: myVpc,
+ *   envName: 'dev',
+ *   userData: customUserData,
+ * });
+ * ```
+ */
 export class LaunchTemplateConstruct extends Construct {
   public readonly launchTemplate: ec2.LaunchTemplate;
   public readonly securityGroup: ec2.SecurityGroup;
-  public readonly role: iam.Role; // Always concrete Role type
+  public readonly role: iam.Role;
 
   constructor(
     scope: Construct,
@@ -52,98 +79,257 @@ export class LaunchTemplateConstruct extends Construct {
   ) {
     super(scope, id);
 
-    // Create security group for the instances
-    // CRITICAL: allowAllOutbound must be true for ECS container instances to register
-    // This allows instances to communicate with ECS, SSM, ECR, CloudWatch, and other AWS services
-    this.securityGroup = new ec2.SecurityGroup(this, "SecurityGroup", {
+    // Validate inputs
+    this.validateInputs(props);
+
+    // Create security group
+    this.securityGroup = this.createSecurityGroup(props);
+
+    // Create IAM role
+    this.role = this.createInstanceRole(props);
+
+    // Build user data based on strategy
+    const userData = this.buildUserData(props);
+
+    // Create launch template
+    this.launchTemplate = this.createLaunchTemplate(props, userData);
+
+    // Apply tags
+    this.applyTags(props);
+
+    // Create outputs
+    this.createOutputs(props.envName);
+  }
+
+  /**
+   * Validate inputs
+   */
+  private validateInputs(props: LaunchTemplateConstructProps): void {
+    if (!props.vpc || !props.vpc.vpcId) {
+      throw new Error("VPC is required and must have a valid VPC ID");
+    }
+
+    if (!props.envName || props.envName.trim().length === 0) {
+      throw new Error("Environment name is required");
+    }
+
+    // Validate strategy
+    if (props.userDataStrategy && props.userData) {
+      throw new Error(
+        "Cannot specify both userDataStrategy and userData. " +
+          "Use userDataStrategy for predefined strategies, or userData for custom scripts."
+      );
+    }
+  }
+
+  /**
+   * Create security group
+   */
+  private createSecurityGroup(
+    props: LaunchTemplateConstructProps
+  ): ec2.SecurityGroup {
+    // Use custom security group if provided
+    if (props.securityGroup) {
+      return props.securityGroup as ec2.SecurityGroup;
+    }
+
+    const sg = new ec2.SecurityGroup(this, "SecurityGroup", {
       vpc: props.vpc,
-      description: "Security group for launch template instances",
-      allowAllOutbound: true, // Required for ECS container instance registration
+      description: `Security group for ${props.envName} instances`,
+      allowAllOutbound: false, // Least privilege
     });
 
-    // Add explicit outbound HTTPS rule for visibility and documentation
-    // Even though allowAllOutbound=true creates a default "allow all" rule,
-    // adding this explicit rule makes it clear what ports are needed and ensures
-    // the rule is visible in the AWS console
-    this.securityGroup.addEgressRule(
+    // Add required egress rules
+    sg.addEgressRule(
       ec2.Peer.anyIpv4(),
       ec2.Port.tcp(443),
-      "Allow outbound HTTPS for SSM/ECS/ECR/CloudWatch endpoints"
+      "Allow HTTPS for AWS API endpoints (ECR, ECS, SSM, CloudWatch)"
     );
 
-    // Add explicit HTTP rule for package updates (yum/dnf)
-    this.securityGroup.addEgressRule(
+    sg.addEgressRule(
       ec2.Peer.anyIpv4(),
-      ec2.Port.tcp(80),
-      "Allow outbound HTTP for package updates"
+      ec2.Port.udp(123),
+      "Allow NTP for time synchronization"
     );
 
-    // Optional ingress rules (disabled by default for least privilege)
-    if (props.allowSshFromAnywhere) {
-      this.securityGroup.addIngressRule(
-        ec2.Peer.anyIpv4(),
-        ec2.Port.tcp(22),
-        "Allow SSH access"
-      );
-    }
-
-    if (props.allowHttpFromAnywhere) {
-      this.securityGroup.addIngressRule(
+    // Optional: HTTP for package updates (only if comprehensive strategy)
+    if (props.userDataStrategy === "comprehensive") {
+      sg.addEgressRule(
         ec2.Peer.anyIpv4(),
         ec2.Port.tcp(80),
-        "Allow HTTP access"
+        "Allow HTTP for package updates"
       );
     }
 
-    // Create IAM role for EC2 instances
-    // Create IAM role for EC2 instances
-    // If a role is passed in, it must be a concrete Role, not just IRole
-    this.role =
-      (props.role as iam.Role) ??
-      new iam.Role(this, "InstanceRole", {
-        assumedBy: new iam.ServicePrincipal("ec2.amazonaws.com"),
-        description: "IAM role for EC2 instances launched from template",
-        managedPolicies: [
-          iam.ManagedPolicy.fromAwsManagedPolicyName(
-            "AmazonSSMManagedInstanceCore"
-          ),
-          iam.ManagedPolicy.fromAwsManagedPolicyName(
-            "CloudWatchAgentServerPolicy"
-          ),
-        ],
-      });
+    return sg;
+  }
 
-    // CRITICAL: Create instance profile explicitly
-    // Even though CDK creates one automatically when we pass role to LaunchTemplate,
-    // we create our own to ensure we can reference it explicitly and it's not lost
-    // when we override NetworkInterfaces
-    const instanceProfile = new iam.InstanceProfile(this, "InstanceProfile", {
-      role: this.role,
+  /**
+   * Create IAM role
+   */
+  private createInstanceRole(props: LaunchTemplateConstructProps): iam.Role {
+    // Use custom role if provided
+    if (props.role) {
+      return props.role as iam.Role;
+    }
+
+    const managedPolicies = [
+      iam.ManagedPolicy.fromAwsManagedPolicyName(
+        "AmazonSSMManagedInstanceCore"
+      ),
+      iam.ManagedPolicy.fromAwsManagedPolicyName("CloudWatchAgentServerPolicy"),
+    ];
+
+    // Add ECS policy if ECS configuration is provided
+    if (props.ecsConfig) {
+      managedPolicies.push(
+        iam.ManagedPolicy.fromAwsManagedPolicyName(
+          "service-role/AmazonEC2ContainerServiceforEC2Role"
+        )
+      );
+    }
+
+    const role = new iam.Role(this, "InstanceRole", {
+      assumedBy: new iam.ServicePrincipal("ec2.amazonaws.com"),
+      description: "IAM role for EC2 instances launched from template",
+      managedPolicies,
     });
 
-    // Default user data - ensure SSM agent is installed and running
-    const userData = props.userData || ec2.UserData.forLinux();
-    if (!props.userData) {
-      userData.addCommands(
-        "#!/bin/bash",
-        "set -e",
-        "",
-        "# Choose package manager (AL2023 uses dnf, AL2 uses yum)",
-        "PKG_MGR=yum",
-        "command -v dnf >/dev/null 2>&1 && PKG_MGR=dnf",
-        "$PKG_MGR -y update",
-        "$PKG_MGR -y install amazon-ssm-agent amazon-cloudwatch-agent",
-        "systemctl enable --now amazon-ssm-agent",
+    // Add CloudWatch Logs permissions if ECS
+    if (props.ecsConfig) {
+      role.addToPrincipalPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: [
+            "logs:CreateLogStream",
+            "logs:PutLogEvents",
+            "logs:DescribeLogStreams",
+          ],
+          resources: [
+            `arn:aws:logs:${cdk.Stack.of(this).region}:${
+              cdk.Stack.of(this).account
+            }:log-group:/ecs/*:*`,
+            `arn:aws:logs:${cdk.Stack.of(this).region}:${
+              cdk.Stack.of(this).account
+            }:log-group:/aws/ecs/*:*`,
+          ],
+        })
+      );
+    }
 
-        // Install Node Exporter for Prometheus monitoring
+    return role;
+  }
+
+  /**
+   * Build user data based on strategy
+   */
+  private buildUserData(props: LaunchTemplateConstructProps): ec2.UserData {
+    // 1. Custom user data takes precedence
+    if (props.userData) {
+      return props.userData;
+    }
+
+    // 2. Strategy-based user data
+    const strategy = props.userDataStrategy || "minimal"; // Default to minimal
+
+    switch (strategy) {
+      case "minimal":
+        return this.buildMinimalUserData(props);
+
+      case "comprehensive":
+        return this.buildComprehensiveUserData(props);
+
+      default:
+        throw new Error(`Unknown user data strategy: ${strategy}`);
+    }
+  }
+
+  /**
+   * Build minimal user data (SSM bootstrap only)
+   */
+  private buildMinimalUserData(
+    props: LaunchTemplateConstructProps
+  ): ec2.UserData {
+    const minimalUserData = new UserDataConstruct(this, "MinimalUserData", {
+      envName: props.envName,
+      clusterName: props.ecsConfig?.clusterName || "",
+    });
+
+    return minimalUserData.userData;
+  }
+
+  /**
+   * Build comprehensive user data (all-in-one)
+   */
+  private buildComprehensiveUserData(
+    props: LaunchTemplateConstructProps
+  ): ec2.UserData {
+    const userData = ec2.UserData.forLinux();
+    const commands: string[] = [
+      "#!/bin/bash",
+      "set -e",
+      "",
+      "# Enable logging",
+      "exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1",
+      "",
+      "echo '========================================='",
+      `echo 'Comprehensive Setup - ${props.envName}'`,
+      "echo 'Timestamp:' $(date)",
+      "echo '========================================='",
+      "",
+      "# Choose package manager",
+      "PKG_MGR=yum",
+      "command -v dnf >/dev/null 2>&1 && PKG_MGR=dnf",
+      "",
+      "# Update system",
+      "echo 'Updating system packages...'",
+      "$PKG_MGR -y update",
+      "",
+      "# Install SSM agent",
+      "echo 'Installing SSM agent...'",
+      "$PKG_MGR -y install amazon-ssm-agent",
+      "systemctl enable amazon-ssm-agent",
+      "systemctl start amazon-ssm-agent",
+    ];
+
+    // Add ECS configuration if provided
+    if (props.ecsConfig) {
+      commands.push(
+        "",
+        "# Configure ECS",
+        "echo 'Configuring ECS agent...'",
+        `echo ECS_CLUSTER=${props.ecsConfig.clusterName} >> /etc/ecs/ecs.config`,
+        "echo ECS_ENABLE_CONTAINER_METADATA=true >> /etc/ecs/ecs.config",
+        "echo ECS_ENABLE_TASK_IAM_ROLE=true >> /etc/ecs/ecs.config",
+        "systemctl enable ecs",
+        "systemctl start ecs"
+      );
+    }
+
+    // Add CloudWatch agent if requested
+    if (props.monitoring?.installCloudWatchAgent) {
+      commands.push(
+        "",
+        "# Install CloudWatch Agent",
+        "echo 'Installing CloudWatch agent...'",
+        "$PKG_MGR -y install amazon-cloudwatch-agent"
+      );
+    }
+
+    // Add Node Exporter if requested
+    if (props.monitoring?.installNodeExporter) {
+      commands.push(
+        "",
+        "# Install Node Exporter",
+        "echo 'Installing Node Exporter...'",
         "useradd --no-create-home --shell /bin/false node_exporter",
         "cd /tmp",
         "curl -LO https://github.com/prometheus/node_exporter/releases/download/v1.7.0/node_exporter-1.7.0.linux-amd64.tar.gz",
         "tar -xvf node_exporter-1.7.0.linux-amd64.tar.gz",
         "cp node_exporter-1.7.0.linux-amd64/node_exporter /usr/local/bin/",
         "chown node_exporter:node_exporter /usr/local/bin/node_exporter",
-
-        // Create systemd service for Node Exporter
+        "",
+        "# Create systemd service",
         "cat <<EOF > /etc/systemd/system/node_exporter.service",
         "[Unit]",
         "Description=Node Exporter",
@@ -158,27 +344,37 @@ export class LaunchTemplateConstruct extends Construct {
         "[Install]",
         "WantedBy=multi-user.target",
         "EOF",
-
+        "",
         "systemctl daemon-reload",
-        "systemctl start node_exporter",
         "systemctl enable node_exporter",
-
-        // Signal completion
-        'echo "User data execution completed"'
+        "systemctl start node_exporter"
       );
     }
-    // Default instance type
-    const instanceType =
-      props.instanceType ||
-      ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MICRO);
 
-    // Default machine image - ECS-Optimized Amazon Linux 2023
-    // This AMI includes Docker/container runtime + ECS agent (required for EC2 instances to register to ECS).
+    commands.push(
+      "",
+      "echo '========================================='",
+      "echo '✓ Comprehensive setup completed!'",
+      "echo 'Timestamp:' $(date)",
+      "echo '========================================='"
+    );
+
+    userData.addCommands(...commands);
+    return userData;
+  }
+
+  /**
+   * Create launch template
+   */
+  private createLaunchTemplate(
+    props: LaunchTemplateConstructProps,
+    userData: ec2.UserData
+  ): ec2.LaunchTemplate {
+    const instanceType = props.instanceType || new ec2.InstanceType("t3.micro");
+
     const machineImage =
       props.machineImage || ecs.EcsOptimizedImage.amazonLinux2023();
 
-    // Default block devices
-    // Note: ECS-optimized AMI snapshots require at least 30GB, so default to 30GB
     const blockDevices = props.blockDevices || [
       {
         deviceName: "/dev/xvda",
@@ -190,121 +386,75 @@ export class LaunchTemplateConstruct extends Construct {
       },
     ];
 
-    // Resolve key pair: prefer keyPair over keyName (for backward compatibility)
-    const keyPair =
-      props.keyPair ||
-      (props.keyName
-        ? ec2.KeyPair.fromKeyPairName(this, "KeyPair", props.keyName)
-        : undefined);
+    // Build security groups list
+    const allSecurityGroups = props.additionalSecurityGroups
+      ? [this.securityGroup, ...props.additionalSecurityGroups]
+      : [this.securityGroup];
 
-    // Create the launch template
-    // NOTE: We pass role (not instanceProfile) - CDK will create instance profile automatically
-    // But we also created instanceProfile explicitly above to ensure it exists
-    this.launchTemplate = new ec2.LaunchTemplate(this, "LaunchTemplate", {
-      launchTemplateName: `${cdk.Stack.of(this).stackName}-template`,
+    const launchTemplate = new ec2.LaunchTemplate(this, "LaunchTemplate", {
+      launchTemplateName:
+        props.launchTemplateName || `${cdk.Stack.of(this).stackName}-template`,
       instanceType,
       machineImage,
       userData,
-      role: this.role, // CDK will create instance profile automatically from this role
-      ...(props.securityGroups && props.securityGroups.length > 0
-        ? {
-            securityGroups: [this.securityGroup, ...props.securityGroups],
-          }
-        : { securityGroup: this.securityGroup }),
-      ...(keyPair ? { keyPair } : {}),
-      detailedMonitoring: props.enableMonitoring ?? true,
+      role: this.role,
+      securityGroup: allSecurityGroups[0],
+      keyPair: props.keyPair,
+      detailedMonitoring: props.enableDetailedMonitoring ?? false,
       associatePublicIpAddress: props.associatePublicIpAddress ?? false,
       blockDevices,
-      requireImdsv2: true, // Security best practice
-      httpTokens: ec2.LaunchTemplateHttpTokens.REQUIRED, // IMDSv2 required
+      requireImdsv2: true,
+      httpTokens: ec2.LaunchTemplateHttpTokens.REQUIRED,
     });
 
-    // CDK automatically compresses user data if it exceeds 16KB using gzip compression
-    // and multi-part MIME format. No explicit configuration needed - CDK handles this.
-    // The user data will be base64 encoded and gzip compressed automatically.
-
-    // Explicitly enforce IMDSv2 requirement via CloudFormation property override
-    // This ensures the setting is applied correctly in the generated template
-    // Even though we set requireImdsv2 and httpTokens, the override guarantees it works
-    const cfnLaunchTemplate = this.launchTemplate.node
-      .defaultChild as ec2.CfnLaunchTemplate;
-    cfnLaunchTemplate.addPropertyOverride(
-      "LaunchTemplateData.MetadataOptions.HttpTokens",
-      "required"
-    );
-    cfnLaunchTemplate.addPropertyOverride(
-      "LaunchTemplateData.MetadataOptions.HttpEndpoint",
-      "enabled"
-    );
-    cfnLaunchTemplate.addPropertyOverride(
-      "LaunchTemplateData.MetadataOptions.HttpPutResponseHopLimit",
-      2
-    );
-
-    // CRITICAL FIX: Explicitly set security groups in NetworkInterfaces
-    // When multiple security groups are provided, they must be in NetworkInterfaces
-    // Otherwise, AWS may fall back to the default VPC security group
-    if (props.securityGroups && props.securityGroups.length > 0) {
-      const allSecurityGroups = [this.securityGroup, ...props.securityGroups];
-      cfnLaunchTemplate.addPropertyOverride(
-        "LaunchTemplateData.NetworkInterfaces",
-        [
-          {
-            DeviceIndex: 0,
-            Groups: allSecurityGroups.map((sg) => sg.securityGroupId),
-            AssociatePublicIpAddress: props.associatePublicIpAddress ?? false,
-          },
-        ]
-      );
-    } else {
-      // For single security group, also explicitly set it in NetworkInterfaces to be safe
-      cfnLaunchTemplate.addPropertyOverride(
-        "LaunchTemplateData.NetworkInterfaces",
-        [
-          {
-            DeviceIndex: 0,
-            Groups: [this.securityGroup.securityGroupId],
-            AssociatePublicIpAddress: props.associatePublicIpAddress ?? false,
-          },
-        ]
+    // Apply additional security groups if needed
+    if (allSecurityGroups.length > 1) {
+      const cfnLt = launchTemplate.node.defaultChild as ec2.CfnLaunchTemplate;
+      cfnLt.addPropertyOverride(
+        "LaunchTemplateData.SecurityGroupIds",
+        allSecurityGroups.map((sg) => sg.securityGroupId)
       );
     }
 
-    // CRITICAL: Explicitly set IamInstanceProfile using our instance profile
-    // We create the instance profile explicitly above, and now we reference it
-    // This ensures it's set even when we override NetworkInterfaces
-    const cfnInstanceProfile = instanceProfile.node
-      .defaultChild as iam.CfnInstanceProfile;
-    // Use the instance profile's ARN - this is the most reliable way
-    // The ARN will be resolved at CloudFormation deployment time
-    cfnLaunchTemplate.addPropertyOverride(
-      "LaunchTemplateData.IamInstanceProfile",
-      {
-        Arn: cfnInstanceProfile.getAtt("Arn"),
-      }
-    );
+    return launchTemplate;
+  }
 
-    // Tag launch template (tags will propagate to instances via ASG)
-    Tags.of(this.launchTemplate).add("Environment", props.envName);
-    Tags.of(this.launchTemplate).add("Service", "monitoring"); // Required for EC2 service discovery
-    Tags.of(this.launchTemplate).add("ManagedBy", "CDK");
+  /**
+   * Apply tags
+   */
+  private applyTags(props: LaunchTemplateConstructProps): void {
+    cdk.Tags.of(this.launchTemplate).add("Environment", props.envName);
+    cdk.Tags.of(this.launchTemplate).add("ManagedBy", "CDK");
 
-    // Output the launch template ID
+    if (props.projectName) {
+      cdk.Tags.of(this.launchTemplate).add("Project", props.projectName);
+    }
+
+    if (props.ecsConfig) {
+      cdk.Tags.of(this.launchTemplate).add("Service", "ecs");
+    }
+
+    // Custom tags
+    if (props.customTags) {
+      Object.entries(props.customTags).forEach(([key, value]) => {
+        cdk.Tags.of(this.launchTemplate).add(key, value);
+      });
+    }
+  }
+
+  /**
+   * Create outputs
+   */
+  private createOutputs(envName: string): void {
     new cdk.CfnOutput(this, "LaunchTemplateId", {
-      value: this.launchTemplate.launchTemplateId ?? "",
+      value: this.launchTemplate.launchTemplateId || "",
       description: "Launch Template ID",
-      exportName: `${cdk.Stack.of(this).stackName}-LaunchTemplateId`,
-    });
-
-    new cdk.CfnOutput(this, "LaunchTemplateName", {
-      value:
-        this.launchTemplate.launchTemplateName ||
-        `${cdk.Stack.of(this).stackName}-template`,
-      description: "Launch Template Name",
+      exportName: `${envName}-launch-template-id`,
     });
   }
+
   /**
-   * Add custom security group ingress rules
+   * Add ingress rule to security group
    */
   public addIngressRule(
     peer: ec2.IPeer,
@@ -313,8 +463,20 @@ export class LaunchTemplateConstruct extends Construct {
   ): void {
     this.securityGroup.addIngressRule(peer, connection, description);
   }
+
   /**
-   * Grant additional IAM permissions to the instance role
+   * Add egress rule to security group
+   */
+  public addEgressRule(
+    peer: ec2.IPeer,
+    connection: ec2.Port,
+    description?: string
+  ): void {
+    this.securityGroup.addEgressRule(peer, connection, description);
+  }
+
+  /**
+   * Grant additional IAM permissions
    */
   public grantPermissions(policy: iam.PolicyStatement): void {
     this.role.addToPolicy(policy);

@@ -742,6 +742,15 @@ export function validateVpcForTargetGroup(
 }
 
 /**
+ * Validate ECS cluster reference
+ */
+export function validateClusterProvided(cluster: ecs.ICluster): void {
+  if (!cluster || !cluster.clusterName) {
+    throw new Error("ECS cluster is required and must have a valid clusterName.");
+  }
+}
+
+/**
  * Validate ECS cluster name formatting
  */
 export function validateClusterName(clusterName: string): void {

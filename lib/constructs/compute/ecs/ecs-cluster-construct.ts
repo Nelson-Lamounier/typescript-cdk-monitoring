@@ -5,7 +5,6 @@ import * as autoscaling from "aws-cdk-lib/aws-autoscaling";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as iam from "aws-cdk-lib/aws-iam";
-import * as kms from "aws-cdk-lib/aws-kms";
 import * as logs from "aws-cdk-lib/aws-logs";
 import { Tags } from "aws-cdk-lib";
 import { NagSuppressions } from "cdk-nag";
@@ -14,7 +13,6 @@ import { Construct } from "constructs";
 import {
   DEFAULT_ECS_ALLOW_INTERNAL_PORT_CIDR_FALLBACK,
   DEFAULT_ECS_BLOCK_DEVICE,
-  DEFAULT_ECS_CAPACITY_STEP_SIZE,
   DEFAULT_ECS_CLUSTER_NAME_SUFFIX,
   DEFAULT_ECS_DESIRED_CAPACITY,
   DEFAULT_ECS_ENABLE_CONTAINER_INSIGHTS,
@@ -27,9 +25,6 @@ import {
   DEFAULT_ECS_LOG_RETENTION_DEV,
   DEFAULT_ECS_MAX_CAPACITY,
   DEFAULT_ECS_MIN_CAPACITY,
-  DEFAULT_ECS_SLOW_START_SECONDS,
-  DEFAULT_ECS_STICKINESS_SECONDS,
-  DEFAULT_ECS_TARGET_CAPACITY_PERCENT,
   DEFAULT_ECS_VOLUME_SIZE_GB,
 } from "../../../shared/constants/compute-constants";
 import { EcsClusterConstructProps } from "../../../shared/types/compute-types";
@@ -117,7 +112,8 @@ export class EcsClusterConstruct extends Construct {
         enableExecuteCommand || executeCommandConfig?.enable
           ? {
               logging:
-                executeCommandConfig?.logging ?? ecs.ExecuteCommandLogging.OVERRIDE,
+                executeCommandConfig?.logging ??
+                ecs.ExecuteCommandLogging.OVERRIDE,
               kmsKey: executeCommandConfig?.kmsKey,
               logConfiguration: {
                 cloudWatchLogGroup: this.logGroup,
@@ -259,17 +255,19 @@ export class EcsClusterConstruct extends Construct {
         blockDevices: [
           {
             deviceName: DEFAULT_ECS_BLOCK_DEVICE,
-            volume: autoscaling.BlockDeviceVolume.ebs(DEFAULT_ECS_VOLUME_SIZE_GB, {
-              volumeType: autoscaling.EbsDeviceVolumeType.GP3,
-              encrypted: true,
-            }),
+            volume: autoscaling.BlockDeviceVolume.ebs(
+              DEFAULT_ECS_VOLUME_SIZE_GB,
+              {
+                volumeType: autoscaling.EbsDeviceVolumeType.GP3,
+                encrypted: true,
+              }
+            ),
           },
         ],
         // Security: Require IMDSv2 (Instance Metadata Service Version 2)
         // This prevents SSRF attacks and is an AWS security best practice
         requireImdsv2: true,
       });
-
     }
 
     // Create Auto Scaling Group
@@ -286,16 +284,24 @@ export class EcsClusterConstruct extends Construct {
           : ec2.SubnetType.PRIVATE_WITH_EGRESS,
       },
       healthChecks: autoscaling.HealthChecks.ec2({
-        gracePeriod: cdk.Duration.seconds(DEFAULT_ECS_HEALTH_GRACE_PERIOD_SECONDS),
+        gracePeriod: cdk.Duration.seconds(
+          DEFAULT_ECS_HEALTH_GRACE_PERIOD_SECONDS
+        ),
       }),
       instanceMonitoring: detailedMonitoring
         ? autoscaling.Monitoring.DETAILED
         : autoscaling.Monitoring.BASIC,
     });
 
-    Tags.of(this.asg).add("Name", `${envName}-asg`, { applyToLaunchedInstances: true });
-    Tags.of(this.asg).add("Environment", envName, { applyToLaunchedInstances: true });
-    Tags.of(this.asg).add("ManagedBy", "CDK", { applyToLaunchedInstances: true });
+    Tags.of(this.asg).add("Name", `${envName}-asg`, {
+      applyToLaunchedInstances: true,
+    });
+    Tags.of(this.asg).add("Environment", envName, {
+      applyToLaunchedInstances: true,
+    });
+    Tags.of(this.asg).add("ManagedBy", "CDK", {
+      applyToLaunchedInstances: true,
+    });
     if (projectName) {
       Tags.of(this.asg).add("Project", projectName, {
         applyToLaunchedInstances: true,
@@ -339,21 +345,16 @@ export class EcsClusterConstruct extends Construct {
     // 5. Check security groups allow outbound traffic (for ECS agent communication)
     // 6. For public subnets: verify instances have public IPs
     // 7. For private subnets: verify NAT gateway is configured
-    const capacityProvider = new ecs.AsgCapacityProvider(this, "CapacityProvider", {
-      autoScalingGroup: this.asg,
-      enableManagedScaling:
-        capacityProviderManagedScaling?.enableManagedScaling ?? true,
-      managedScalingTargetCapacity:
-        capacityProviderManagedScaling?.targetCapacityPercent ??
-        DEFAULT_ECS_TARGET_CAPACITY_PERCENT,
-      minimumScalingStepSize:
-        capacityProviderManagedScaling?.minimumScalingStepSize ??
-        DEFAULT_ECS_CAPACITY_STEP_SIZE,
-      maximumScalingStepSize:
-        capacityProviderManagedScaling?.maximumScalingStepSize ??
-        DEFAULT_ECS_CAPACITY_STEP_SIZE,
-      enableManagedTerminationProtection: false,
-    });
+    const capacityProvider = new ecs.AsgCapacityProvider(
+      this,
+      "CapacityProvider",
+      {
+        autoScalingGroup: this.asg,
+        enableManagedScaling:
+          capacityProviderManagedScaling?.enableManagedScaling ?? true,
+        enableManagedTerminationProtection: false,
+      }
+    );
 
     this.cluster.addAsgCapacityProvider(capacityProvider);
 
@@ -365,10 +366,7 @@ export class EcsClusterConstruct extends Construct {
       Tags.of(this.cluster).add("Project", projectName);
     }
 
-    if (
-      (envName === "production" || envName === "prod") &&
-      minCapacity < 2
-    ) {
+    if ((envName === "production" || envName === "prod") && minCapacity < 2) {
       cdk.Annotations.of(this).addWarning(
         "Minimum capacity is below 2 in production. Consider at least two instances for high availability."
       );
@@ -383,10 +381,7 @@ export class EcsClusterConstruct extends Construct {
       );
     }
 
-    if (
-      (envName === "production" || envName === "prod") &&
-      !logGroupKmsKey
-    ) {
+    if ((envName === "production" || envName === "prod") && !logGroupKmsKey) {
       cdk.Annotations.of(this).addWarning(
         "Cluster log group does not use a customer-managed KMS key in production. Consider providing logGroupKmsKey."
       );
@@ -416,7 +411,9 @@ export class EcsClusterConstruct extends Construct {
     validatePortInRange(port, "Internal port");
     // Use provided CIDR or the VPC CIDR as the default
     const vpcCidr =
-      cidr || this.asg.vpc.vpcCidrBlock || DEFAULT_ECS_ALLOW_INTERNAL_PORT_CIDR_FALLBACK;
+      cidr ||
+      this.cluster.vpc.vpcCidrBlock ||
+      DEFAULT_ECS_ALLOW_INTERNAL_PORT_CIDR_FALLBACK;
     // Use ASG connections rather than a construct-owned SG so this continues to
     // work even when the launch template is responsible for the security groups.
     this.asg.connections.allowFrom(

@@ -23,3 +23,17 @@ export const DEFAULT_ECS_ENABLE_EXECUTE_COMMAND = true;
 export const DEFAULT_ECS_FARGATE_CAPACITY_PROVIDERS = false;
 export const MIN_CLUSTER_NAME_LENGTH = 1;
 export const MAX_CLUSTER_NAME_LENGTH = 255;
+
+/**
+ * Auto Scaling Group defaults for ECS capacity
+ */
+export const DEFAULT_ASG_MIN_CAPACITY = 1;
+export const DEFAULT_ASG_MAX_CAPACITY = 2;
+export const DEFAULT_ASG_DESIRED_CAPACITY = 1;
+export const DEFAULT_ASG_INSTANCE_TYPE = "t3.micro";
+export const DEFAULT_ASG_HEALTH_GRACE_SECONDS = 300;
+export const DEFAULT_ASG_UPDATE_MAX_BATCH_SIZE = 1;
+export const DEFAULT_ASG_UPDATE_MIN_IN_SERVICE = 0;
+export const DEFAULT_ASG_UPDATE_PAUSE_TIME_SECONDS = 300;
+export const DEFAULT_ASG_BLOCK_DEVICE_NAME = "/dev/xvda";
+export const DEFAULT_ASG_BLOCK_DEVICE_SIZE_GB = 30;
