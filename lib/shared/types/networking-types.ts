@@ -307,3 +307,111 @@ export interface AlbConstructProps {
    */
   vpcSubnets?: ec2.SubnetSelection;
 }
+
+/**
+ * Application Load Balancer Listener construct properties
+ */
+export interface AlbListenerConstructProps {
+  /**
+   * The Application Load Balancer to add the listener to
+   * Required - cannot be undefined
+   */
+  loadBalancer: elbv2.IApplicationLoadBalancer;
+
+  /**
+   * Environment name for tagging and resource naming
+   * Used for standard tagging (Environment tag)
+   */
+  envName: string;
+
+  /**
+   * Project name for resource naming and tagging (optional)
+   * Used for project-specific tagging when provided
+   */
+  projectName?: string;
+
+  /**
+   * Whether to enable HTTP listener
+   * @default true
+   */
+  enableHttp?: boolean;
+
+  /**
+   * Whether to enable HTTPS listener
+   * @default false
+   *
+   * WARNING: HTTPS should be enabled in production environments for security.
+   */
+  enableHttps?: boolean;
+
+  /**
+   * HTTP listener port
+   * @default 80
+   */
+  httpPort?: number;
+
+  /**
+   * HTTPS listener port
+   * @default 443
+   */
+  httpsPort?: number;
+
+  /**
+   * SSL certificate ARN for HTTPS listeners
+   * Required when enableHttps is true
+   */
+  certificateArn?: string;
+
+  /**
+   * Additional SSL certificates for SNI (Server Name Indication)
+   * Allows multiple domains on the same listener
+   */
+  additionalCertificates?: string[];
+
+  /**
+   * Whether to redirect HTTP to HTTPS
+   * @default false
+   *
+   * Note: Requires both enableHttp and enableHttps to be true
+   */
+  redirectHttpToHttps?: boolean;
+
+  /**
+   * SSL policy for HTTPS listeners
+   * @default ELBSecurityPolicy-TLS13-1-2-2021-06 (TLS 1.3)
+   *
+   * WARNING: Using TLS 1.2 or older in production is not recommended.
+   * Consider using TLS 1.3 for better security.
+   */
+  sslPolicy?: elbv2.SslPolicy;
+
+  /**
+   * Default action for HTTP listener when not redirecting
+   * @default Fixed response 404
+   */
+  httpDefaultAction?: elbv2.ListenerAction;
+
+  /**
+   * Default action for HTTPS listener
+   * @default Fixed response 404
+   */
+  httpsDefaultAction?: elbv2.ListenerAction;
+
+  /**
+   * X-Forwarded-For header configuration
+   * @default true (preserve client IP)
+   */
+  preserveXForwardedFor?: boolean;
+
+  /**
+   * X-Forwarded-Proto header configuration
+   * @default true (preserve original protocol)
+   */
+  preserveXForwardedProto?: boolean;
+
+  /**
+   * Load balancer name for unique export names
+   * Used to avoid export name conflicts
+   */
+  loadBalancerName?: string;
+}

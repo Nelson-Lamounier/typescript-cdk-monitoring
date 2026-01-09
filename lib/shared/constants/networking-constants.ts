@@ -423,3 +423,32 @@ export const ALB_ACCESS_LOG_RETENTION_RECOMMENDATIONS = {
    */
   HIGH_COMPLIANCE: 365,
 } as const;
+
+/**
+ * Application Load Balancer Listener default configuration constants
+ */
+
+/**
+ * Default HTTP listener port
+ */
+export const DEFAULT_ALB_HTTP_PORT = 80;
+
+/**
+ * Default HTTPS listener port
+ */
+export const DEFAULT_ALB_HTTPS_PORT = 443;
+
+/**
+ * Default fixed response status code for listeners without target groups
+ */
+export const DEFAULT_ALB_FIXED_RESPONSE_STATUS_CODE = 404;
+
+/**
+ * Default fixed response content type
+ */
+export const DEFAULT_ALB_FIXED_RESPONSE_CONTENT_TYPE = "text/plain";
+
+/**
+ * Default fixed response message body
+ */
+export const DEFAULT_ALB_FIXED_RESPONSE_MESSAGE = "Not Found";

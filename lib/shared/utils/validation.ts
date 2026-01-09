@@ -506,3 +506,110 @@ export function validatePublicSubnetsForInternetFacing(
     );
   }
 }
+
+/**
+ * Validate that certificate is provided when HTTPS is enabled
+ *
+ * @param enableHttps - Whether HTTPS is enabled
+ * @param certificateArn - Certificate ARN (optional)
+ * @throws Error if HTTPS enabled without certificate
+ *
+ * @example
+ * ```typescript
+ * validateCertificateForHttps(true, "arn:aws:acm:..."); // Valid
+ * validateCertificateForHttps(true, undefined); // Throws error
+ * ```
+ */
+export function validateCertificateForHttps(
+  enableHttps: boolean,
+  certificateArn?: string
+): void {
+  if (enableHttps && !certificateArn) {
+    throw new Error(
+      "Certificate ARN is required when HTTPS is enabled.\n\n" +
+        "Troubleshooting Steps:\n" +
+        " 1. Provide certificateArn in AlbListenerConstructProps when enableHttps is true\n" +
+        " 2. Ensure the certificate is in the same region as the load balancer\n" +
+        " 3. Verify the certificate is issued by ACM or imported into ACM\n\n" +
+        "Example:\n" +
+        "  const listener = new AlbListenerConstruct(this, 'Listener', {\n" +
+        "    loadBalancer: alb,\n" +
+        "    enableHttps: true,\n" +
+        "    certificateArn: 'arn:aws:acm:region:account:certificate/cert-id',\n" +
+        "  });"
+    );
+  }
+}
+
+/**
+ * Validate that redirect prerequisites are met
+ *
+ * @param redirectHttpToHttps - Whether redirect is enabled
+ * @param enableHttp - Whether HTTP is enabled
+ * @param enableHttps - Whether HTTPS is enabled
+ * @throws Error if redirect enabled without both HTTP and HTTPS
+ *
+ * @example
+ * ```typescript
+ * validateRedirectPrerequisites(true, true, true); // Valid
+ * validateRedirectPrerequisites(true, false, true); // Throws error
+ * ```
+ */
+export function validateRedirectPrerequisites(
+  redirectHttpToHttps: boolean,
+  enableHttp: boolean,
+  enableHttps: boolean
+): void {
+  if (redirectHttpToHttps && (!enableHttp || !enableHttps)) {
+    throw new Error(
+      "HTTP to HTTPS redirect requires both HTTP and HTTPS listeners to be enabled.\n\n" +
+        "Troubleshooting Steps:\n" +
+        " 1. Set enableHttp: true when using redirectHttpToHttps\n" +
+        " 2. Set enableHttps: true when using redirectHttpToHttps\n" +
+        " 3. Ensure certificateArn is provided for HTTPS listener\n\n" +
+        "Example:\n" +
+        "  const listener = new AlbListenerConstruct(this, 'Listener', {\n" +
+        "    loadBalancer: alb,\n" +
+        "    enableHttp: true,\n" +
+        "    enableHttps: true,\n" +
+        "    certificateArn: 'arn:aws:acm:...',\n" +
+        "    redirectHttpToHttps: true,\n" +
+        "  });"
+    );
+  }
+}
+
+/**
+ * Validate that at least one listener is enabled
+ *
+ * @param enableHttp - Whether HTTP is enabled
+ * @param enableHttps - Whether HTTPS is enabled
+ * @throws Error if both listeners are disabled
+ *
+ * @example
+ * ```typescript
+ * validateAtLeastOneListener(true, false); // Valid
+ * validateAtLeastOneListener(false, true); // Valid
+ * validateAtLeastOneListener(false, false); // Throws error
+ * ```
+ */
+export function validateAtLeastOneListener(
+  enableHttp: boolean,
+  enableHttps: boolean
+): void {
+  if (!enableHttp && !enableHttps) {
+    throw new Error(
+      "At least one listener (HTTP or HTTPS) must be enabled.\n\n" +
+        "Troubleshooting Steps:\n" +
+        " 1. Set enableHttp: true to enable HTTP listener\n" +
+        " 2. Set enableHttps: true to enable HTTPS listener (requires certificateArn)\n" +
+        " 3. You can enable both listeners for maximum flexibility\n\n" +
+        "Example:\n" +
+        "  const listener = new AlbListenerConstruct(this, 'Listener', {\n" +
+        "    loadBalancer: alb,\n" +
+        "    enableHttp: true, // At least one must be true\n" +
+        "    enableHttps: false,\n" +
+        "  });"
+    );
+  }
+}

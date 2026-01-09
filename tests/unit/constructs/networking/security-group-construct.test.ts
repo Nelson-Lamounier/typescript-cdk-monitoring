@@ -93,7 +93,8 @@ describe("SecurityGroupConstruct", () => {
       expect(egressRules).toBeInstanceOf(Array);
       // Should NOT have an allow-all rule (0.0.0.0/0 with protocol -1)
       const hasAllowAll = (egressRules as Array<Record<string, unknown>>).some(
-        (rule) => rule.CidrIp === "0.0.0.0/0" && rule.IpProtocol === "-1"
+        (rule) =>
+          rule.CidrIp === "0.0.0.0/0" && rule.IpProtocol === "-1"
       );
       expect(hasAllowAll).toBe(false);
     });
@@ -785,17 +786,13 @@ describe("SecurityGroupConstruct", () => {
         envName: "production",
       }).vpc;
 
-      const construct = new SecurityGroupConstruct(
-        productionStack,
-        "SecurityGroup",
-        {
-          vpc: productionVpc,
-          groupName: "prod-sg",
-          description: "Production security group description",
-          envName: "production",
-          allowAllOutbound: true,
-        }
-      );
+      const construct = new SecurityGroupConstruct(productionStack, "SecurityGroup", {
+        vpc: productionVpc,
+        groupName: "prod-sg",
+        description: "Production security group description",
+        envName: "production",
+        allowAllOutbound: true,
+      });
 
       // Construct should be created (warnings don't prevent creation)
       expect(construct).toBeDefined();
@@ -886,8 +883,7 @@ describe("SecurityGroupConstruct", () => {
       const construct = new SecurityGroupConstruct(stack, "SecurityGroup", {
         vpc,
         groupName: "web-server-sg",
-        description:
-          "Security group for web servers allowing HTTP/HTTPS traffic",
+        description: "Security group for web servers allowing HTTP/HTTPS traffic",
         envName: "production",
         projectName: "monitoring",
         allowAllOutbound: false,
@@ -924,8 +920,7 @@ describe("SecurityGroupConstruct", () => {
 
       // Verify properties
       template.hasResourceProperties("AWS::EC2::SecurityGroup", {
-        GroupDescription:
-          "Security group for web servers allowing HTTP/HTTPS traffic",
+        GroupDescription: "Security group for web servers allowing HTTP/HTTPS traffic",
         GroupName: "web-server-sg",
       });
 
