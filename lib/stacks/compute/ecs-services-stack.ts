@@ -9,7 +9,7 @@ import * as logs from "aws-cdk-lib/aws-logs";
 import { Tags } from "aws-cdk-lib";
 import { Construct } from "constructs";
 
-import { EcsTaskExecutionRole } from "../../iam/ecs-task-execution-role";
+import { EcsTaskExecutionRole } from "../../constructs/iam/ecs-task-execution-role";
 import {
   EcsServiceConfig,
   VolumeMountConfig,

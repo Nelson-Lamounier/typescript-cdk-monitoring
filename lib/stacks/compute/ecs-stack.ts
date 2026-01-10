@@ -12,7 +12,7 @@ import { Tags } from "aws-cdk-lib";
 import { NagSuppressions } from "cdk-nag";
 import { Construct } from "constructs";
 
-import { EcsTaskExecutionRole } from "../../iam/ecs-task-execution-role";
+import { EcsTaskExecutionRole } from "../../constructs/iam/ecs-task-execution-role";
 import { SuppressionManager } from "../../cdk-nag/suppression-manager";
 import { CrossAccountTarget } from "../../types";
 import { EcsApplicationConfig } from "../../types/ecs-service-config";

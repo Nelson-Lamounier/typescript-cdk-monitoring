@@ -51,7 +51,7 @@ const stackProps: cdk.StackProps = {
 // RESOLVE CERTIFICATE (for HTTPS)
 // ============================================================================
 const { rootDomainName, hostedZoneId } = resolveDomainConfig(app);
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+// Certificate config will be used when HTTPS services are added
 const certificateConfig = resolveCertificate(
   app,
   config.envName,
@@ -59,13 +59,14 @@ const certificateConfig = resolveCertificate(
   rootDomainName,
   hostedZoneId
 );
+void certificateConfig; // Will be used for ALB HTTPS listeners
 
 // ============================================================================
 // 1. FOUNDATION: NETWORKING
 // ============================================================================
 // networkingStack will be used for cross-stack dependencies (VPC peering, etc.)
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const { networkingStack } = deployFoundationStacks(app, config, stackProps);
+void networkingStack; // Will be used for VPC peering and dependent stacks
 
 // ============================================================================
 // 4. VPC PEERING (for cross-account monitoring)

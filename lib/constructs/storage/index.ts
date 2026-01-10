@@ -1,7 +1,7 @@
 /** @format */
 
-// Storage constructs
-export * from "./ecr-construct";
+// ECR constructs
+export * from "./ecr/ecr-construct";
 
 // EFS constructs
 export * from "./efs";

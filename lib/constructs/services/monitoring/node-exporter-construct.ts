@@ -43,8 +43,7 @@ export class NodeExporterConstruct extends Construct {
       {
         envName: props.envName,
         enablePublicEcr: true, // Node Exporter uses public Docker Hub image
-        enableCloudWatchLogs: true, // Required for awslogs driver
-        logGroupArn: this.logGroup.logGroupArn, // Grant permissions to specific log group
+        logGroupArn: this.logGroup.logGroupArn, // Grants CloudWatch Logs permissions
       }
     );
     const executionRole = executionRoleConstruct.role;

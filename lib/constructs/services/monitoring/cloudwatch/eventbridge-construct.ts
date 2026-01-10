@@ -7,7 +7,7 @@ import * as sns from "aws-cdk-lib/aws-sns";
 import * as logs from "aws-cdk-lib/aws-logs";
 import { Construct } from "constructs";
 
-import { EventBridgeCrossAccountRole } from "../../iam";
+import { EventBridgeCrossAccountRole } from "../../../iam";
 
 export interface EventBridgeConstructProps {
   envName: string;
