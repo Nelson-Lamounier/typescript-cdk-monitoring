@@ -38,70 +38,17 @@ export interface VpcFlowLogsConstructProps {
  * VPC Peering configuration properties
  */
 export interface VpcPeeringConstructProps {
-  /**
-   * The VPC in the current account (requester)
-   */
   vpc: ec2.IVpc;
-
-  /**
-   * The VPC ID in the peer account (accepter)
-   */
   peerVpcId: string;
-
-  /**
-   * The AWS account ID of the peer VPC (12-digit number)
-   */
   peerAccountId: string;
-
-  /**
-   * The region of the peer VPC
-   * @default - same region as requester VPC
-   */
   peerRegion?: string;
-
-  /**
-   * The CIDR block of the peer VPC (for route table updates)
-   * Must not overlap with the requester VPC CIDR
-   */
   peerVpcCidr: string;
-
-  /**
-   * Environment name for tagging and resource naming
-   */
   envName: string;
-
-  /**
-   * Name for the peering connection
-   */
   peeringName: string;
-
-  /**
-   * IAM role ARN in peer account that allows accepting peering connections
-   * This role must exist in the peer account with trust relationship to this account
-   */
   peerRoleArn: string;
-
-  /**
-   * Project name for resource naming and tagging (optional)
-   */
   projectName?: string;
-
-  /**
-   * Custom SSM parameter path for storing peering connection ID
-   * @default `/vpc-peering/${envName}/connection-id`
-   */
   ssmParameterPath?: string;
-
-  /**
-   * Lambda timeout for peering operations (seconds)
-   * @default 60 seconds
-   */
   lambdaTimeoutSeconds?: number;
-
-  /**
-   * Enable DNS resolution for peered VPC
-   * @default true
-   */
   enableDnsResolution?: boolean;
 }
 
@@ -118,56 +65,13 @@ export interface SecurityGroupRule {
  * Security Group construct properties
  */
 export interface SecurityGroupConstructProps {
-  /**
-   * VPC where the security group will be created
-   * Required - cannot be undefined
-   */
   vpc: ec2.IVpc;
-
-  /**
-   * Name for the security group
-   * Must be non-empty and follow AWS naming conventions
-   */
   groupName: string;
-
-  /**
-   * Description for the security group
-   * Must be at least 10 characters and provide meaningful context
-   */
   description: string;
-
-  /**
-   * Environment name for tagging and resource naming
-   * Used for standard tagging (Environment tag)
-   */
   envName: string;
-
-  /**
-   * Project name for resource naming and tagging (optional)
-   * Used for project-specific tagging when provided
-   */
   projectName?: string;
-
-  /**
-   * Allow all outbound traffic
-   * @default false (security best practice - requires explicit egress rules)
-   *
-   * WARNING: Setting to true allows unrestricted outbound access.
-   * In production environments, prefer explicit egress rules for better security.
-   */
   allowAllOutbound?: boolean;
-
-  /**
-   * Ingress rules to add to the security group
-   * @default []
-   */
   ingressRules?: SecurityGroupRule[];
-
-  /**
-   * Egress rules to add to the security group
-   * Note: These are always respected, even if allowAllOutbound=true
-   * @default []
-   */
   egressRules?: SecurityGroupRule[];
 }
 
@@ -175,137 +79,25 @@ export interface SecurityGroupConstructProps {
  * Application Load Balancer construct properties
  */
 export interface AlbConstructProps {
-  /**
-   * VPC where the ALB will be created
-   * Required - cannot be undefined
-   */
   vpc: ec2.IVpc;
-
-  /**
-   * Environment name for tagging and resource naming
-   * Used for standard tagging (Environment tag)
-   */
   envName: string;
-
-  /**
-   * Name for the load balancer
-   * Must be non-empty and follow AWS naming conventions
-   */
   loadBalancerName: string;
-
-  /**
-   * Project name for resource naming and tagging (optional)
-   * Used for project-specific tagging when provided
-   */
   projectName?: string;
-
-  /**
-   * Whether the load balancer is internet-facing
-   * @default true
-   *
-   * WARNING: Internet-facing ALBs are exposed to the public internet.
-   * Ensure proper security group rules and WAF protection are configured.
-   */
   internetFacing?: boolean;
-
-  /**
-   * Security group for the load balancer
-   * If not provided, a default security group will be created
-   */
   securityGroup?: ec2.ISecurityGroup;
-
-  /**
-   * Enable deletion protection
-   * @default false
-   *
-   * WARNING: Deletion protection should be enabled in production environments
-   * to prevent accidental deletion of load balancers.
-   */
   deletionProtection?: boolean;
-
-  /**
-   * Enable access logs
-   * @default false
-   *
-   * WARNING: Access logs should be enabled in production environments
-   * for security auditing and troubleshooting.
-   */
   accessLogEnabled?: boolean;
-
-  /**
-   * S3 bucket for access logs
-   * If not provided and accessLogEnabled is true, a bucket will be created
-   */
   accessLogBucket?: s3.IBucket;
-
-  /**
-   * Prefix for access logs in S3 bucket
-   * @default "alb-logs"
-   */
   accessLogPrefix?: string;
-
-  /**
-   * KMS key for S3 bucket encryption (if bucket is created)
-   * If not provided, SSE-S3 encryption will be used
-   */
   accessLogBucketEncryptionKey?: kms.IKey;
-
-  /**
-   * Lifecycle rule expiration days for access logs
-   * @default 90 days
-   */
   accessLogRetentionDays?: number;
-
-  /**
-   * Lifecycle rule transition to Infrequent Access after days
-   * @default 30 days
-   */
   accessLogTransitionToIADays?: number;
-
-  /**
-   * Separate S3 bucket for server access logs (to avoid circular logging)
-   * If not provided and bucket is created, server access logs will be disabled
-   */
   serverAccessLogsBucket?: s3.IBucket;
-
-  /**
-   * Idle timeout for connections (seconds)
-   * @default 60 seconds
-   */
   idleTimeout?: cdk.Duration;
-
-  /**
-   * Enable cross-zone load balancing
-   * @default true
-   *
-   * Note: For Application Load Balancers, cross-zone load balancing is always enabled
-   * and cannot be disabled (unlike Network Load Balancers). This property is kept
-   * for API compatibility but has no effect on ALB behavior.
-   */
   crossZoneLoadBalancing?: boolean;
-
-  /**
-   * Enable HTTP/2
-   * @default true
-   */
   http2Enabled?: boolean;
-
-  /**
-   * Enable dropping invalid header fields
-   * @default true (security best practice)
-   */
   dropInvalidHeaderFields?: boolean;
-
-  /**
-   * Desync mitigation mode
-   * @default "defensive" (security best practice)
-   */
   desyncMitigationMode?: elbv2.DesyncMitigationMode;
-
-  /**
-   * Subnet selection for the load balancer
-   * If not provided, will use PUBLIC for internet-facing or PRIVATE_WITH_EGRESS for internal
-   */
   vpcSubnets?: ec2.SubnetSelection;
 }
 
@@ -313,107 +105,21 @@ export interface AlbConstructProps {
  * Application Load Balancer Listener construct properties
  */
 export interface AlbListenerConstructProps {
-  /**
-   * The Application Load Balancer to add the listener to
-   * Required - cannot be undefined
-   */
   loadBalancer: elbv2.IApplicationLoadBalancer;
-
-  /**
-   * Environment name for tagging and resource naming
-   * Used for standard tagging (Environment tag)
-   */
   envName: string;
-
-  /**
-   * Project name for resource naming and tagging (optional)
-   * Used for project-specific tagging when provided
-   */
   projectName?: string;
-
-  /**
-   * Whether to enable HTTP listener
-   * @default true
-   */
   enableHttp?: boolean;
-
-  /**
-   * Whether to enable HTTPS listener
-   * @default false
-   *
-   * WARNING: HTTPS should be enabled in production environments for security.
-   */
   enableHttps?: boolean;
-
-  /**
-   * HTTP listener port
-   * @default 80
-   */
   httpPort?: number;
-
-  /**
-   * HTTPS listener port
-   * @default 443
-   */
   httpsPort?: number;
-
-  /**
-   * SSL certificate ARN for HTTPS listeners
-   * Required when enableHttps is true
-   */
   certificateArn?: string;
-
-  /**
-   * Additional SSL certificates for SNI (Server Name Indication)
-   * Allows multiple domains on the same listener
-   */
   additionalCertificates?: string[];
-
-  /**
-   * Whether to redirect HTTP to HTTPS
-   * @default false
-   *
-   * Note: Requires both enableHttp and enableHttps to be true
-   */
   redirectHttpToHttps?: boolean;
-
-  /**
-   * SSL policy for HTTPS listeners
-   * @default TLS13_RES (TLS 1.3)
-   *
-   * WARNING: Using TLS 1.2 or older in production is not recommended.
-   * Consider using TLS 1.3 for better security.
-   */
   sslPolicy?: elbv2.SslPolicy;
-
-  /**
-   * Default action for HTTP listener when not redirecting
-   * @default Fixed response 404
-   */
   httpDefaultAction?: elbv2.ListenerAction;
-
-  /**
-   * Default action for HTTPS listener
-   * @default Fixed response 404
-   */
   httpsDefaultAction?: elbv2.ListenerAction;
-
-  /**
-   * X-Forwarded-For header configuration
-   * @default true (preserve client IP)
-   */
   preserveXForwardedFor?: boolean;
-
-  /**
-   * X-Forwarded-Proto header configuration
-   * @default true (preserve original protocol)
-   */
   preserveXForwardedProto?: boolean;
-
-  /**
-   * Load balancer name for unique export names
-   * Used to avoid export name conflicts
-   */
   loadBalancerName?: string;
 }
 
@@ -421,14 +127,7 @@ export interface AlbListenerConstructProps {
  * Matcher configuration for ALB target group health checks
  */
 export interface AlbTargetGroupHealthCheckMatcher {
-  /**
-   * HTTP success codes to match (e.g., "200-399")
-   */
   httpCodes?: string;
-
-  /**
-   * gRPC success codes to match (e.g., "0-99")
-   */
   grpcCodes?: string;
 }
 
@@ -436,54 +135,14 @@ export interface AlbTargetGroupHealthCheckMatcher {
  * CloudWatch alarm configuration for target groups
  */
 export interface TargetGroupAlarmConfig {
-  /**
-   * Whether to create an alarm on unhealthy hosts
-   * @default true when unhealthyHostThreshold is provided
-   */
   createUnhealthyHostAlarm?: boolean;
-
-  /**
-   * Threshold for unhealthy host count to trigger the alarm
-   */
   unhealthyHostThreshold: number;
-
-  /**
-   * Evaluation periods for the alarm
-   * @default 2
-   */
   evaluationPeriods?: number;
-
-  /**
-   * Datapoints to alarm
-   */
   datapointsToAlarm?: number;
-
-  /**
-   * Comparison operator for the alarm
-   * @default GREATER_THAN_OR_EQUAL_TO_THRESHOLD
-   */
   comparisonOperator?: cloudwatch.ComparisonOperator;
-
-  /**
-   * Treat missing data configuration
-   * @default NOT_BREACHING
-   */
   treatMissingData?: cloudwatch.TreatMissingData;
-
-  /**
-   * Metric period
-   * @default 1 minute
-   */
   metricPeriod?: cdk.Duration;
-
-  /**
-   * Optional alarm name override
-   */
   alarmName?: string;
-
-  /**
-   * Optional alarm description override
-   */
   alarmDescription?: string;
 }
 
@@ -491,130 +150,29 @@ export interface TargetGroupAlarmConfig {
  * Application Load Balancer Target Group construct properties
  */
 export interface AlbTargetGroupConstructProps {
-  /**
-   * VPC for the target group. Required unless targetType is LAMBDA
-   */
   vpc?: ec2.IVpc;
-
-  /**
-   * Environment name for tagging and warnings
-   */
   envName: string;
-
-  /**
-   * Project name for tagging
-   */
   projectName?: string;
-
-  /**
-   * Optional component tag (e.g., "api", "frontend")
-   */
   component?: string;
-
-  /**
-   * Target group name (1-32 characters, alphanumeric and hyphens)
-   */
   name: string;
-
-  /**
-   * Listener port (required for non-Lambda targets)
-   */
   port?: number;
-
-  /**
-   * Application protocol
-   * @default HTTP (HTTPS when port is 443)
-   */
   protocol?: elbv2.ApplicationProtocol;
-
-  /**
-   * Application protocol version (e.g., GRPC)
-   */
   protocolVersion?: elbv2.ApplicationProtocolVersion;
-
-  /**
-   * Target type (INSTANCE, IP, LAMBDA)
-   * @default INSTANCE
-   */
   targetType?: elbv2.TargetType;
-
-  /**
-   * Health check path (HTTP/HTTPS only)
-   */
   healthCheckPath?: string;
-
-  /**
-   * Health check protocol
-   */
   healthCheckProtocol?: elbv2.Protocol;
-
-  /**
-   * Health check port (number or "traffic-port")
-   */
   healthCheckPort?: string;
-
-  /**
-   * Health check interval (seconds)
-   */
   healthCheckIntervalSeconds?: number;
-
-  /**
-   * Health check timeout (seconds)
-   */
   healthCheckTimeoutSeconds?: number;
-
-  /**
-   * Consecutive healthy check threshold
-   */
   healthyThresholdCount?: number;
-
-  /**
-   * Consecutive unhealthy check threshold
-   */
   unhealthyThresholdCount?: number;
-
-  /**
-   * Success matcher for health checks
-   */
   healthCheckMatcher?: AlbTargetGroupHealthCheckMatcher;
-
-  /**
-   * Deregistration delay (seconds)
-   */
   deregistrationDelaySeconds?: number;
-
-  /**
-   * Enable sticky sessions
-   */
   stickinessEnabled?: boolean;
-
-  /**
-   * Sticky session cookie duration (seconds)
-   */
   stickinessCookieDurationSeconds?: number;
-
-  /**
-   * Slow start duration (seconds)
-   */
   slowStartDurationSeconds?: number;
-
-  /**
-   * Load balancing algorithm
-   */
   loadBalancingAlgorithm?: elbv2.TargetGroupLoadBalancingAlgorithmType;
-
-  /**
-   * Additional target group attributes
-   */
   targetGroupAttributes?: Record<string, string>;
-
-  /**
-   * Enable multi-value headers for Lambda targets
-   */
   lambdaMultiValueHeadersEnabled?: boolean;
-
-  /**
-   * CloudWatch alarm configuration for unhealthy hosts
-   */
   alarmConfig?: TargetGroupAlarmConfig;
 }

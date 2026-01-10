@@ -29,13 +29,9 @@
     "bin/**/*.ts",
     "config/**/*.ts",
     "handlers/**/*.ts",
+    "lambda/**/*.ts",
     "lib/**/*.ts",
     "tests/**/*.ts"
   ],
-  "exclude": [
-    "node_modules",
-    "cdk.out",
-    "**/*.js",
-    "**/*.d.ts"
-  ]
+  "exclude": ["node_modules", "cdk.out", "**/*.js", "**/*.d.ts"]
 }
