@@ -1,5 +1,8 @@
 /** @format */
 
+import * as ec2 from "aws-cdk-lib/aws-ec2";
+import * as logs from "aws-cdk-lib/aws-logs";
+
 /**
  * Default CIDR mask for subnets
  * /24 provides 251 usable IP addresses per subnet
@@ -472,3 +475,42 @@ export const MIN_TARGET_GROUP_PORT = 1;
 export const MAX_TARGET_GROUP_PORT = 65535;
 export const MIN_HEALTH_CHECK_THRESHOLD = 2;
 export const MAX_HEALTH_CHECK_THRESHOLD = 10;
+
+/**
+ * Networking Constants
+ */
+
+/**
+ * Default VPC CIDR blocks by environment
+ */
+export const VPC_CIDR_BLOCKS = {
+  DEV: "10.0.0.0/16",
+  STAGING: "10.1.0.0/16",
+  PRODUCTION: "10.2.0.0/16",
+  PIPELINE: "10.10.0.0/16",
+} as const;
+
+/**
+ * Default max AZs
+ */
+export const VPC_MAX_AZS = 2;
+
+/**
+ * NAT Gateway defaults by environment
+ */
+export const VPC_NAT_GATEWAYS = {
+  DEV: 0, // No NAT = lower cost, private subnets can't reach internet
+  STAGING: 1, // Single NAT = cost optimized
+  PRODUCTION: 2, // NAT per AZ = high availability
+} as const;
+
+/**
+ * VPC Flow Logs defaults
+ */
+export const VPC_FLOW_LOG_TRAFFIC_TYPE = ec2.FlowLogTrafficType.ALL;
+export const VPC_FLOW_LOG_RETENTION = logs.RetentionDays.ONE_MONTH;
+
+/**
+ * SSM parameter path prefix for networking
+ */
+export const NETWORKING_SSM_PREFIX = "/networking";

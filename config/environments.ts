@@ -20,6 +20,9 @@ export interface EnvironmentConfig {
   alertEmail?: string; // Email address for CloudWatch alarms
   isMonitoringAccount?: boolean; // True if this account hosts centralized monitoring
   monitoredAccounts?: string[]; // List of account IDs to monitor (for monitoring account)
+  vpcCidr: string; // ADD THIS
+  natGateways?: number; // ADD THIS
+  isProduction: boolean; // ADD THIS
 }
 
 // Record type provides type-safe access with autocomplete
@@ -29,10 +32,14 @@ export const environments: Record<string, EnvironmentConfig> = {
   development: {
     account: process.env.AWS_ACCOUNT_ID_DEV || "",
     region: process.env.AWS_REGION || "eu-west-1",
+    vpcCidr: "10.1.0.0/16", // ADD
+    natGateways: 0, // ADD
+    isProduction: false, // ADD
     envName: "development",
     pipelineAccount: process.env.AWS_PIPELINE_ACCOUNT_ID || "",
     enableMonitoring: false, // Using centralised monitoring in pipeline account
     enableEventBridge: true, // Allows pipeline account to collect metrics
+    isMonitoringAccount: false, // ADD
   },
 
   // SECOND DEPLOYMENT TARGET: All services deploy here after development
@@ -40,6 +47,9 @@ export const environments: Record<string, EnvironmentConfig> = {
   staging: {
     account: process.env.AWS_ACCOUNT_ID_STAGING || "",
     region: process.env.AWS_REGION || "eu-west-1",
+    vpcCidr: "10.2.0.0/16", // ADD
+    natGateways: 0, // ADD
+    isProduction: false, // ADD
     envName: "staging",
     pipelineAccount: process.env.AWS_PIPELINE_ACCOUNT_ID || "",
     enableMonitoring: false, // Using centralised monitoring in pipeline account
@@ -51,6 +61,9 @@ export const environments: Record<string, EnvironmentConfig> = {
   production: {
     account: process.env.AWS_ACCOUNT_ID_PROD || "",
     region: process.env.AWS_REGION || "eu-west-1",
+    vpcCidr: "10.2.0.0/16", // ADD
+    natGateways: 0, // ADD
+    isProduction: true, // ADD
     envName: "production",
     pipelineAccount: process.env.AWS_PIPELINE_ACCOUNT_ID || "",
     enableMonitoring: false, // Using centralised monitoring in pipeline account
@@ -64,6 +77,9 @@ export const environments: Record<string, EnvironmentConfig> = {
   pipeline: {
     account: process.env.AWS_PIPELINE_ACCOUNT_ID || "",
     region: process.env.AWS_REGION || "eu-west-1",
+    vpcCidr: "10.0.0.0/16", // ADD
+    natGateways: 0, // ADD
+    isProduction: false, // ADD
     envName: "pipeline",
     enableMonitoring: true, // Centralised monitoring enabled
     enableEventBridge: true, // Receives events from all accounts
