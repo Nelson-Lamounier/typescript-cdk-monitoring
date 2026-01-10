@@ -33,7 +33,10 @@ export class NodeExporterConstruct extends Construct {
     this.logGroup = new logs.LogGroup(this, "LogGroup", {
       logGroupName: `/ecs/${props.envName}-node-exporter`,
       retention: props.logRetention || logs.RetentionDays.ONE_WEEK,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      removalPolicy:
+        props.envName === "production"
+          ? cdk.RemovalPolicy.RETAIN
+          : cdk.RemovalPolicy.DESTROY,
     });
 
     // Use centralized ECS task execution role construct with CloudWatch Logs permissions

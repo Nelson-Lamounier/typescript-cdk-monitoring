@@ -71,7 +71,10 @@ export class GrafanaServiceConstruct extends Construct {
       logGroupName,
       retention: props.logRetention ?? DEFAULT_GRAFANA_LOG_RETENTION,
       encryptionKey: props.logGroupKmsKey,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      removalPolicy:
+        props.envName === "production"
+          ? cdk.RemovalPolicy.RETAIN
+          : cdk.RemovalPolicy.DESTROY,
     });
 
     const adminSecret = secretsmanager.Secret.fromSecretCompleteArn(

@@ -68,7 +68,10 @@ export class PrometheusConstruct extends Construct {
       logGroupName,
       retention: props.logRetention ?? DEFAULT_PROMETHEUS_LOG_RETENTION,
       encryptionKey: props.logGroupKmsKey,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      removalPolicy:
+        props.envName === "production"
+          ? cdk.RemovalPolicy.RETAIN
+          : cdk.RemovalPolicy.DESTROY,
     });
 
     const configArtifacts = buildPrometheusConfig(props);

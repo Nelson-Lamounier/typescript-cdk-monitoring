@@ -122,7 +122,10 @@ export class LambdaFunctionConstruct extends Construct {
     this.logGroup = new logs.LogGroup(this, "LogGroup", {
       logGroupName: `/aws/lambda/${props.envName}-${props.functionName}`,
       retention: props.logRetention || logs.RetentionDays.ONE_WEEK,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      removalPolicy:
+        props.envName === "production"
+          ? cdk.RemovalPolicy.RETAIN
+          : cdk.RemovalPolicy.DESTROY,
     });
 
     // Create Lambda function with TypeScript support
