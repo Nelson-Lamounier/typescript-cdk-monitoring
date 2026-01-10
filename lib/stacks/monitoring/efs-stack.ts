@@ -13,7 +13,7 @@ import {
   EfsFileSystemConstruct,
   EfsAccessPointConstruct,
 } from "../../constructs/storage/efs";
-import { EfsSecurityGroupConstruct } from "../../stacks/storage/efs-file-system-stack";
+import { EfsSecurityGroupConstruct } from "../storage/efs-file-system-stack";
 import { SsmParametersConstruct } from "../../constructs/config";
 import { applyStackTags } from "../../shared/helpers/stack-tagging-helper";
 import { buildPrometheusConfig } from "../../shared/helpers/prometheus-config-builder";

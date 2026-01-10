@@ -2,7 +2,7 @@
 
 import * as cdk from "aws-cdk-lib";
 
-import { MonitoringEfsStack } from "../../lib/stacks/monitoring/monitoring-efs-stack";
+import { MonitoringEfsStack } from "../../lib/stacks/monitoring/efs-stack";
 import { NetworkingStack } from "../../lib/stacks/foundation/networking-stack";
 import { CrossAccountTarget } from "../../lib/shared/types/monitoring-types";
 import { EnvironmentConfig } from "../../config/environments";
