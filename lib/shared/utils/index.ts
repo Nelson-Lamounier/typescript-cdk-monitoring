@@ -16,6 +16,7 @@ export {
 
 export {
   validateCidr,
+  validateEnvName,
   validateSubnetCidrMask,
   validateSubnetConfiguration,
   cidrOverlaps,
@@ -25,3 +26,4 @@ export {
 
 export { createVpcPeeringProvider } from "./lambda-helpers";
 export { getUniqueRouteTables } from "./route-table-helpers";
+export * from "./environment";
