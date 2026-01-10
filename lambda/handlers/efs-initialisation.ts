@@ -297,7 +297,7 @@ if ! mountpoint -q /mnt/efs; then
   exit 1
 fi
 
-echo "✅ EFS mounted at /mnt/efs"
+echo "EFS mounted at /mnt/efs"
 
 # ============================================================================
 # CREATE DIRECTORY STRUCTURE
@@ -321,7 +321,7 @@ mkdir -p /mnt/efs/config/grafana/dashboards
 # Alertmanager directory (future use)
 mkdir -p /mnt/efs/config/alertmanager
 
-echo "✅ Directories created"
+echo "Directories created"
 
 # ============================================================================
 # SET PERMISSIONS
@@ -347,7 +347,7 @@ chmod 777 /mnt/efs/grafana-data/logs
 chmod 777 /mnt/efs/grafana-data/csv
 chmod 777 /mnt/efs/grafana-data/png
 
-echo "✅ Permissions set"
+echo "Permissions set"
 
 # ============================================================================
 # DOWNLOAD CONFIGURATION FILES
@@ -383,7 +383,7 @@ aws ssm get-parameter \
   --output text \
   > /mnt/efs/config/grafana/provisioning/dashboards/dashboards.yml
 
-echo "✅ Configuration files downloaded"
+echo "Configuration files downloaded"
 
 # ============================================================================
 # SET CONFIG FILE PERMISSIONS
@@ -429,7 +429,7 @@ ls -lh /mnt/efs/config/grafana/provisioning/dashboards/dashboards.yml
 
 echo ""
 echo "================================================================"
-echo "✅ EFS setup completed successfully - $(date)"
+echo "EFS setup completed successfully - $(date)"
 echo "================================================================"
 `;
 
@@ -472,7 +472,7 @@ async function markInitializationComplete(
     "EFS initialization status"
   );
 
-  console.log(`✅ Initialization marked complete at ${timestamp}`);
+  console.log(`Initialization marked complete at ${timestamp}`);
 }
 
 /**
@@ -503,7 +503,7 @@ function jsonToYaml(jsonString: string, configName: string): string {
       throw new Error(`Generated YAML cannot be parsed back`);
     }
 
-    console.log(`  ✅ ${configName}: ${yamlString.length} chars`);
+    console.log(` ${configName}: ${yamlString.length} chars`);
     return yamlString;
   } catch (error) {
     console.error(`Failed to convert ${configName} to YAML:`, error);
@@ -544,7 +544,7 @@ async function getParameter(name: string, _region: string): Promise<string> {
       throw new Error(`Parameter ${name} exists but has no value`);
     }
 
-    console.log(`  ✅ Retrieved ${name}`);
+    console.log(`  Retrieved ${name}`);
     return value;
   } catch (error) {
     if (
@@ -575,19 +575,52 @@ async function putParameter(
   _region: string,
   description: string
 ): Promise<void> {
+  const MAX_STANDARD_TIER_SIZE = 4096;
+
+  // Determine tier based on value size
+  // Standard: FREE, max 4096 characters
+  // Advanced: $0.05/month, max 8192 characters
+
+  const tier = value.length > MAX_STANDARD_TIER_SIZE ? "Advanced" : "Standard";
   try {
+    console.log(`  Storing ${name}:`);
+    console.log(`    - Size: ${value.length} characters`);
+    console.log(
+      `    - Tier: ${tier}${
+        tier === "Advanced" ? " (+$0.05/month)" : " (FREE)"
+      }`
+    );
+
     const command = new PutParameterCommand({
       Name: name,
       Value: value,
       Type: "String",
+      Tier: tier,
       Overwrite: true,
       Description: description,
     });
 
     await ssmClient.send(command);
-    console.log(`  ✅ Stored ${name}`);
+    console.log(`  Stored ${name} successfully`);
   } catch (error) {
     console.error(`Failed to put parameter ${name}:`, error);
+    // Provide actionable error message
+    if (error instanceof Error) {
+      if (error.name === "ParameterMaxVersionLimitExceeded") {
+        throw new Error(
+          `Parameter ${name} has too many versions. ` +
+            `Delete old versions or use a new parameter name.`
+        );
+      }
+
+      if (error.message.includes("ParameterLimitExceeded")) {
+        throw new Error(
+          `Parameter ${name} exceeds size limit. ` +
+            `Standard tier: 4096 chars max. Advanced tier: 8192 chars max. ` +
+            `Current size: ${value.length} chars`
+        );
+      }
+    }
     throw error;
   }
 }

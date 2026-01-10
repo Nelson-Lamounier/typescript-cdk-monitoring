@@ -14,6 +14,7 @@ import {
   resolveDomainConfig,
 } from "./helpers/certificate-helper";
 import { deployFoundationStacks } from "./stacks/foundation-stack";
+import { deployMonitoringStacks } from "./stacks/monitoring-stack";
 
 // ============================================================================
 // INITIALIZE CDK APP
@@ -66,10 +67,25 @@ void certificateConfig; // Will be used for ALB HTTPS listeners
 // ============================================================================
 // networkingStack will be used for cross-stack dependencies (VPC peering, etc.)
 const { networkingStack } = deployFoundationStacks(app, config, stackProps);
-void networkingStack; // Will be used for VPC peering and dependent stacks
 
 // ============================================================================
-// 4. VPC PEERING (for cross-account monitoring)
+// 2. MONITORING: EFS STORAGE
+// ============================================================================
+// Deploy monitoring stacks if enabled (default: enabled)
+// Set DEPLOY_MONITORING=false to skip monitoring stack deployment
+if (process.env.DEPLOY_MONITORING !== "false") {
+  const { efsStack } = deployMonitoringStacks(
+    app,
+    config,
+    stackProps,
+    networkingStack,
+    certificateConfig.certificateArn
+  );
+  void efsStack; // Will be used for future infrastructure stacks
+}
+
+// ============================================================================
+// 3. VPC PEERING (for cross-account monitoring)
 // ============================================================================
 // TODO: Implement VPC peering helper and stack deployment
 

@@ -252,7 +252,7 @@ export class MonitoringEfsStack extends cdk.Stack {
       functionName: props.projectName
         ? `${props.envName}-${props.projectName}-efs-init`
         : `${props.envName}-efs-initialization`,
-      entry: "lambda/handlers/efs-initialization.ts",
+      entry: "lambda/handlers/efs-initialisation.ts",
       handler: "handler",
       timeout: initializationTimeout,
       environment: {
@@ -298,6 +298,7 @@ export class MonitoringEfsStack extends cdk.Stack {
           FileSystemId: this.fileSystem.fileSystemId,
           AccessPointId: this.accessPoint.accessPointId,
           Environment: props.envName,
+          Region: this.region,
           Timestamp: Date.now().toString(),
         },
       }

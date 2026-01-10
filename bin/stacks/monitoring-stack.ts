@@ -89,9 +89,9 @@ export function deployMonitoringStacks(
 
   //   serviceStack.addDependency(infraStack);
 
-  //   return {
-  //     efsStack,
-  //     infraStack,
-  //     serviceStack,
-  //   };
+  return {
+    efsStack,
+    // infraStack,
+    // serviceStack,
+  };
 }
