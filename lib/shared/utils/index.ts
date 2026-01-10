@@ -16,6 +16,7 @@ export {
 
 export {
   validateCidr,
+  validateSecurityGroupCidr,
   validateEnvName,
   validateSubnetCidrMask,
   validateSubnetConfiguration,

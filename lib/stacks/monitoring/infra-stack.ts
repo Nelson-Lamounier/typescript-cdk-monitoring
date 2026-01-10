@@ -35,7 +35,7 @@ import {
 import { DEFAULT_ASG_BLOCK_DEVICE_SIZE_GB } from "../../shared/constants/compute-constants";
 import {
   validateEnvName,
-  validateCidr,
+  validateSecurityGroupCidr,
   validateCapacityOrder,
 } from "../../shared/utils/validation";
 import { isProductionEnvironment } from "../../shared/utils/environment";
@@ -210,7 +210,7 @@ export class MonitoringInfraStack extends cdk.Stack {
     // Validate allowed IP ranges
     const allowedIpRanges = props.allowedIpRanges || ["0.0.0.0/0"];
     allowedIpRanges.forEach((cidr: string) => {
-      validateCidr(cidr);
+      validateSecurityGroupCidr(cidr);
     });
 
     // Environment-aware defaults
@@ -493,18 +493,7 @@ export class MonitoringInfraStack extends cdk.Stack {
     );
 
     // ========================================================================
-    // 10. SSM STATE MANAGER - ECS AGENT CONFIGURATION
-    // ========================================================================
-    // Note: Application setup logic will be added in future iteration
-    // Currently using SSM State Manager for ECS agent configuration only
-    new SsmStateManagerConstruct(this, "SsmStateManager", {
-      envName: props.envName,
-      clusterName,
-      instanceRole: ltConstruct.role,
-    });
-
-    // ========================================================================
-    // 11. ECS EVENT RULE
+    // 10. ECS EVENT RULE
     // ========================================================================
     new events.Rule(this, "EcsEventRule", {
       description: `Capture ECS events for ${props.envName} monitoring`,
@@ -523,13 +512,13 @@ export class MonitoringInfraStack extends cdk.Stack {
     });
 
     // ========================================================================
-    // 12. DEPENDENCIES
+    // 11. DEPENDENCIES
     // ========================================================================
     this.cluster.node.addDependency(props.efsInitializationComplete);
     this.autoScalingGroup.node.addDependency(props.efsInitializationComplete);
 
     // ========================================================================
-    // 13. SSM PARAMETERS (for cross-stack discovery)
+    // 12. SSM PARAMETERS (for cross-stack discovery)
     // ========================================================================
     if (props.createSsmParameters !== false) {
       this.ssmParameters = new SsmParametersConstruct(this, "Parameters", {
@@ -567,14 +556,14 @@ export class MonitoringInfraStack extends cdk.Stack {
     }
 
     // ========================================================================
-    // 14. CLOUDFORMATION OUTPUTS
+    // 13. CLOUDFORMATION OUTPUTS
     // ========================================================================
     if (props.createOutputs !== false) {
       this.createOutputs(props);
     }
 
     // ========================================
-    // 15. RESOURCE TAGGING
+    // 14. RESOURCE TAGGING
     // ========================================
     applyStackTags(this, props.envName, props.projectName, {
       ...props.customTags,
@@ -583,7 +572,7 @@ export class MonitoringInfraStack extends cdk.Stack {
     });
 
     // ========================================================================
-    // 16. CDK NAG SUPPRESSIONS
+    // 15. CDK NAG SUPPRESSIONS
     // ========================================================================
     SuppressionManager.applyToStack(
       this,

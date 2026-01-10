@@ -77,11 +77,21 @@ export class GrafanaServiceConstruct extends Construct {
           : cdk.RemovalPolicy.DESTROY,
     });
 
-    const adminSecret = secretsmanager.Secret.fromSecretCompleteArn(
-      this,
-      "AdminPasswordSecret",
-      props.adminPasswordSecretArn
-    );
+    // Lookup secret by name
+    // The adminPasswordSecretArn property can be either:
+    // - A secret name (e.g., "grafana-admin-password")
+    // - A complete ARN with the 6-character suffix
+    const adminSecret = props.adminPasswordSecretArn.startsWith("arn:")
+      ? secretsmanager.Secret.fromSecretCompleteArn(
+          this,
+          "AdminPasswordSecret",
+          props.adminPasswordSecretArn
+        )
+      : secretsmanager.Secret.fromSecretNameV2(
+          this,
+          "AdminPasswordSecret",
+          props.adminPasswordSecretArn
+        );
     const adminSecretForEcs = ecs.Secret.fromSecretsManager(adminSecret);
 
     const smtpSecret = props.smtp?.passwordArn

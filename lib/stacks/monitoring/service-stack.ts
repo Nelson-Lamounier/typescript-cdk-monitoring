@@ -184,6 +184,13 @@ export class MonitoringServiceStack extends cdk.Stack {
     // ========================================================================
     // 2. CREATE GRAFANA SERVICE
     // ========================================================================
+    // Grafana admin password secret name
+    // The secret must exist in AWS Secrets Manager before deployment
+    // Create it with: aws secretsmanager create-secret --name grafana-admin-password --secret-string "your-password"
+    const grafanaSecretName =
+      process.env.GRAFANA_ADMIN_PASSWORD_SECRET_NAME ||
+      "grafana-admin-password";
+
     const grafanaConstruct = new GrafanaServiceConstruct(this, "Grafana", {
       cluster: props.cluster as ecs.Cluster,
       envName: props.envName,
@@ -196,8 +203,7 @@ export class MonitoringServiceStack extends cdk.Stack {
       dashboardsVolume: {
         hostPath: grafanaDashboardsPath,
       },
-      adminPasswordSecretArn:
-        "arn:aws:secretsmanager:*:*:secret:grafana-admin-password-*",
+      adminPasswordSecretArn: grafanaSecretName,
       rootUrl: grafanaRootUrl,
       enableExecuteCommand,
       logRetention,

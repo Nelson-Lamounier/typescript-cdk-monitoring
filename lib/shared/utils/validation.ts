@@ -160,6 +160,70 @@ export function validateCidr(cidr: string): void {
 }
 
 /**
+ * Validate security group ingress CIDR block
+ *
+ * Validates CIDR blocks used for security group ingress rules.
+ * Unlike VPC CIDR blocks, security group rules allow /0 (all addresses).
+ *
+ * @param cidr - CIDR block to validate (e.g., "0.0.0.0/0", "10.0.0.0/16")
+ * @throws Error if CIDR format is invalid
+ *
+ * @example
+ * ```typescript
+ * validateSecurityGroupCidr("0.0.0.0/0");     // Valid (allow all)
+ * validateSecurityGroupCidr("10.0.0.0/16");   // Valid
+ * validateSecurityGroupCidr("192.168.1.1/32"); // Valid (single IP)
+ * validateSecurityGroupCidr("invalid");       // Throws error
+ * ```
+ */
+export function validateSecurityGroupCidr(cidr: string): void {
+  if (!cidr || typeof cidr !== "string") {
+    throw new Error("CIDR block must be a non-empty string");
+  }
+
+  // Check format: should be IP address followed by /mask
+  const cidrRegex = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/;
+  if (!cidrRegex.test(cidr)) {
+    throw new Error(
+      `Invalid CIDR format: "${cidr}". Expected format: "x.x.x.x/mask" (e.g., "10.0.0.0/16", "0.0.0.0/0")`
+    );
+  }
+
+  // Extract and validate IP address parts
+  const [ipAddress, maskStr] = cidr.split("/");
+  const mask = parseInt(maskStr, 10);
+
+  if (isNaN(mask)) {
+    throw new Error(
+      `Invalid CIDR mask: "${maskStr}". Must be a number between 0 and 32`
+    );
+  }
+
+  // Validate mask range (0-32 for security group CIDR blocks)
+  // /0 = all addresses, /32 = single IP
+  if (mask < 0 || mask > 32) {
+    throw new Error(
+      `CIDR mask must be between 0 and 32. Received: ${mask}. ` +
+        `Common values: /0 (all), /16 (65,536 IPs), /24 (256 IPs), /32 (single IP)`
+    );
+  }
+
+  // Validate IP address octets
+  const octets = ipAddress.split(".").map((octet) => parseInt(octet, 10));
+  if (octets.length !== 4) {
+    throw new Error(`Invalid IP address format: "${ipAddress}"`);
+  }
+
+  for (const octet of octets) {
+    if (isNaN(octet) || octet < 0 || octet > 255) {
+      throw new Error(
+        `Invalid IP address: "${ipAddress}". Each octet must be between 0 and 255`
+      );
+    }
+  }
+}
+
+/**
  * Check if two CIDR blocks overlap
  *
  * Two CIDR blocks overlap if one contains the other or they share any IP addresses.

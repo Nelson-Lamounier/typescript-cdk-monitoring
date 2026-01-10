@@ -106,7 +106,9 @@ export class EcsClusterConstruct extends Construct {
     this.cluster = new ecs.Cluster(this, "Cluster", {
       vpc,
       clusterName,
-      containerInsights: enableContainerInsights,
+      containerInsightsV2: enableContainerInsights
+        ? ecs.ContainerInsights.ENABLED
+        : ecs.ContainerInsights.DISABLED,
       enableFargateCapacityProviders,
       executeCommandConfiguration:
         enableExecuteCommand || executeCommandConfig?.enable

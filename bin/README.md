@@ -1,718 +1,287 @@
 # CDK Application Deployment Guide
 
-This directory contains the CDK application entry point and deployment helpers for all infrastructure stacks, including foundation networking and monitoring infrastructure.
-
-**Note**: This project uses **Yarn** (v4+) as the package manager, not npm. All dependency management commands should use `yarn` instead of `npm`.
+This directory contains the CDK application entry point for deploying the monitoring infrastructure using a layered architecture approach.
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [Directory Structure](#directory-structure)
+- [Architecture Overview](#architecture-overview)
+- [Why This Architecture](#why-this-architecture)
 - [Prerequisites](#prerequisites)
-- [Environment Configuration](#environment-configuration)
-- [Quick Start](#quick-start)
 - [Deployment Guide](#deployment-guide)
-- [Monitoring EFS Stack Deployment](#monitoring-efs-stack-deployment)
-- [Stack Configuration](#stack-configuration)
-- [Dynamic Stack Integration](#dynamic-stack-integration)
-- [Manual Deployment Commands Reference](#manual-deployment-commands-reference)
+- [Individual Stack Deployment](#individual-stack-deployment)
 - [Troubleshooting](#troubleshooting)
-- [Next Steps](#next-steps)
-- [Key Points Summary](#key-points-summary)
-- [Additional Resources](#additional-resources)
-- [Support](#support)
+- [Advanced Topics](#advanced-topics)
 
-## Overview
+## Architecture Overview
 
-The `bin/` directory is the entry point for deploying AWS CDK stacks. It orchestrates:
+The monitoring infrastructure is organised into three distinct layers, each deployed as a separate CloudFormation stack. This layered approach allows independent updates to different concerns without affecting the entire infrastructure.
 
-- **Foundation Infrastructure**: VPC, subnets, NAT gateways, VPC Flow Logs
-- **Monitoring Infrastructure**: EFS storage for Prometheus and Grafana
-- **Certificate Management**: ACM certificate resolution for HTTPS
-- **Environment Configuration**: Multi-environment deployment support
-- **CDK Nag Integration**: Security and best practices validation
-
-### Stack Deployment Order
-
-Stacks must be deployed in the following order due to dependencies:
+### Three-Layer Architecture
 
 ```
-1. NetworkingStack (Foundation)
-   └── Provides: VPC, subnets, security groups
-   └── Required by: All other stacks
+Layer 0: Storage (MonitoringEfsStack)
+└── EFS file system, access points, Lambda initialisation
+└── Deployed when: Storage configuration changes
 
-2. MonitoringEfsStack (Storage Layer)
-   └── Depends on: NetworkingStack (VPC)
-   └── Provides: EFS file system, access points, SSM parameters
-   └── Required by: MonitoringInfraStack (future)
+Layer 1: Infrastructure (MonitoringInfraStack)
+└── ECS cluster, Auto Scaling Group, Load Balancer
+└── Deployed when: Compute or networking infrastructure changes
 
-3. MonitoringInfraStack (Infrastructure Layer - Future)
-   └── Depends on: NetworkingStack, MonitoringEfsStack
-   └── Provides: ECS cluster, load balancer
-
-4. MonitoringServiceStack (Services Layer - Future)
-   └── Depends on: MonitoringInfraStack
-   └── Provides: Prometheus, Grafana services
+Layer 2: Services (MonitoringServiceStack)
+└── Prometheus, Grafana, Node Exporter ECS services
+└── Deployed when: Container images or service configuration changes
 ```
 
-### Application Flow (`app.ts`)
+### Foundation Layer
 
-The `app.ts` file is the main CDK application entry point that orchestrates the entire deployment:
-
-```
-bin/app.ts Execution Flow:
-  │
-  ├── 1. Initialize CDK App
-  │   └── Creates new cdk.App() instance
-  │
-  ├── 2. Load Environment Configuration
-  │   ├── Reads ENVIRONMENT variable (default: "development")
-  │   ├── Loads config from config/environments.ts
-  │   └── Validates account ID is configured
-  │
-  ├── 3. Resolve Domain & Certificate (Optional)
-  │   ├── resolveDomainConfig() - Gets domain from env vars or SSM
-  │   └── resolveCertificate() - Resolves ACM certificate for HTTPS
-  │
-  ├── 4. Deploy Foundation Stacks
-  │   └── deployFoundationStacks()
-  │       └── Creates NetworkingStack with name: "${envName}-Networking"
-  │           Example: "development-Networking", "production-Networking"
-  │
-  ├── 5. Deploy Monitoring Stacks (Optional - Manual)
-  │   └── deployMonitoringStacks() - Not called in app.ts yet
-  │       └── Creates MonitoringEfsStack with name: "${envName}-MonitoringEfs"
-  │           Example: "development-MonitoringEfs", "pipeline-MonitoringEfs"
-  │
-  ├── 6. Apply CDK Nag Checks
-  │   └── Adds AwsSolutionsChecks if ENABLE_CDK_NAG !== "false"
-  │
-  └── 7. Synthesize CloudFormation Templates
-      └── app.synth() - Generates CloudFormation templates
-```
-
-**Note**: Currently, `app.ts` only deploys foundation stacks. Monitoring stacks must be deployed manually or integrated into `app.ts` (see [Dynamic Stack Integration](#dynamic-stack-integration) section).
-
-### Stack Naming Convention
-
-All stacks follow a consistent naming pattern: **`${envName}-${StackType}`**
-
-| Stack Type | Pattern | Example Stack Names |
-|------------|---------|---------------------|
-| **NetworkingStack** | `${envName}-Networking` | `development-Networking`, `production-Networking` |
-| **MonitoringEfsStack** | `${envName}-MonitoringEfs` | `development-MonitoringEfs`, `pipeline-MonitoringEfs` |
-| **MonitoringInfraStack** (Future) | `${envName}-MonitoringInfra` | `development-MonitoringInfra` |
-| **MonitoringServiceStack** (Future) | `${envName}-MonitoringService` | `development-MonitoringService` |
-
-**Stack Name Sources**:
-- **NetworkingStack**: Defined in `bin/stacks/foundation-stack.ts:19`
-- **MonitoringEfsStack**: Defined in `bin/stacks/monitoring-stack.ts:28`
-- **Future Stacks**: Follow the same pattern in their respective stack files
-
-**Important**: The `ENVIRONMENT` variable must match one of the keys in `config/environments.ts` (`development`, `staging`, `production`, or `pipeline`).
-
-### Integration with NetworkingStack
-
-The `app.ts` integrates with the NetworkingStack through the `deployFoundationStacks()` function:
-
-1. **Environment Configuration**: `app.ts` reads the environment from `ENVIRONMENT` variable and loads the corresponding config from `config/environments.ts`
-
-2. **Stack Creation**: Calls `deployFoundationStacks(app, config, stackProps)` which:
-   - Creates a new `NetworkingStack` instance
-   - Passes environment-specific configuration (VPC CIDR, NAT gateways)
-   - Returns the stack instance for potential cross-stack references
-
-3. **Stack Props**: The stack receives:
-   - `envName`: Environment identifier (e.g., "development")
-   - `projectName`: "portfolio" (hardcoded)
-   - `vpcCidr`: From environment config
-   - `maxAzs`: 2 (fixed)
-   - `natGateways`: From environment config (default: 0)
-   - `enableVpcFlowLogs`: true (always enabled)
-   - `enableVpcEndpoints`: true (S3, DynamoDB endpoints)
-
-4. **CDK Nag Validation**: After stack creation, CDK Nag checks are applied to validate security best practices
-
-## Directory Structure
+Before deploying monitoring stacks, the foundation layer must exist:
 
 ```
-bin/
-├── app.ts                    # Main CDK application entry point
-├── app-deprecated.ts         # Legacy app (not used)
-├── stacks/
-│   ├── foundation-stack.ts   # Foundation stack deployment (NetworkingStack)
-│   └── monitoring-stack.ts   # Monitoring stack deployment (MonitoringEfsStack)
-└── helpers/
-    ├── certificate-helper.ts  # ACM certificate resolution
-    └── vpc-peering-helper.ts # VPC peering (placeholder)
+NetworkingStack (Foundation)
+└── VPC, subnets, security groups, NAT gateways
+└── Required by: All monitoring stacks
 ```
 
-### Key Files
+## Why This Architecture
 
-**`app.ts`** - Main entry point that:
-- Initializes the CDK app
-- Loads environment configuration from `config/environments.ts`
-- Resolves certificates (if needed) via `helpers/certificate-helper.ts`
-- Deploys foundation stacks via `stacks/foundation-stack.ts`
-- Applies CDK Nag checks for security validation
-- Synthesizes CloudFormation templates
+### Problems Solved
 
-**`stacks/foundation-stack.ts`** - Creates the NetworkingStack with:
-- Stack name: `${envName}-Networking` (e.g., `development-Networking`)
-- VPC with configurable CIDR from environment config
-- Public and private subnets across 2 AZs
-- NAT Gateways (configurable count from environment config)
-- VPC Flow Logs (enabled by default)
-- VPC Endpoints (S3, DynamoDB)
-- Returns stack instance for cross-stack references
+#### 1. Minimise Deployment Frequency and Blast Radius
 
-**`stacks/monitoring-stack.ts`** - Creates the MonitoringEfsStack with:
-- Stack name: `${envName}-MonitoringEfs` (e.g., `development-MonitoringEfs`)
-- EFS file system with encryption
-- EFS access point with POSIX permissions
-- Lambda function for EFS initialization
-- SSM parameters for Prometheus and Grafana configuration
-- Requires NetworkingStack (VPC dependency)
-- Returns stack instance for future infrastructure stacks
+Traditional monolithic infrastructure requires redeploying everything for any change. This creates several problems:
 
-**`helpers/certificate-helper.ts`** - Resolves ACM certificates:
-- Priority: Environment variable → Create new → SSM lookup
-- Supports wildcard certificates
-- Stores certificate ARN in SSM Parameter Store
-- Returns `CertificateConfig` with ARN and stack reference
+- **Long Deployment Times**: A single change to a service container requires rebuilding the entire infrastructure, including EFS, ECS cluster, and services.
+- **Increased Risk**: Every deployment touches all resources, increasing the chance of unintended changes or failures.
+- **Downtime**: Updating service containers shouldn't require touching the underlying infrastructure.
 
-## Application Integration (`app.ts`)
+**Solution**: By separating concerns into layers, you only deploy what changes:
+- Storage configuration change? Deploy Layer 0 only (MonitoringEfsStack).
+- Infrastructure scaling? Deploy Layer 1 only (MonitoringInfraStack).
+- New container image? Deploy Layer 2 only (MonitoringServiceStack).
 
-### How `app.ts` Works
+#### 2. Independent Update Cycles
 
-The `app.ts` file serves as the orchestrator for all CDK stack deployments. Here's how it integrates with the NetworkingStack:
+Different components have different update frequencies:
 
-#### 1. Environment Resolution
+- **Storage (EFS)**: Rarely changes once configured (maybe once per quarter).
+- **Infrastructure (ECS Cluster, ALB)**: Changes occasionally for scaling or configuration (monthly).
+- **Services (Containers)**: Changes frequently for updates, patches, or features (weekly or daily).
 
-```typescript
-// Line 26: Read environment from ENVIRONMENT variable or default to "development"
-const envName = process.env.ENVIRONMENT || "development";
+**Solution**: Each layer has its own CloudFormation stack with independent lifecycle:
+- Layer 0 (Storage) remains stable for months.
+- Layer 1 (Infrastructure) updates as needed for capacity.
+- Layer 2 (Services) updates frequently without touching infrastructure.
 
-// Line 27: Load environment-specific configuration
-const config = environments[envName];
-```
+#### 3. Clear Dependency Management
 
-The environment configuration includes:
-- AWS Account ID
-- AWS Region
-- VPC CIDR block
-- NAT Gateway count
-- Production flag
+When everything is in one stack, dependencies are implicit and hard to reason about. This makes troubleshooting difficult and increases deployment complexity.
 
-#### 2. Stack Properties Preparation
+**Solution**: Explicit dependencies between stacks:
+- MonitoringEfsStack depends on NetworkingStack (VPC required).
+- MonitoringInfraStack depends on MonitoringEfsStack (EFS required for mounting).
+- MonitoringServiceStack depends on MonitoringInfraStack (cluster and ALB required).
 
-```typescript
-// Lines 43-48: Prepare stack properties with account and region
-const stackProps: cdk.StackProps = {
-  env: {
-    account: config.account,
-    region: config.region,
-  },
-};
-```
+CDK enforces these dependencies automatically, preventing out-of-order deployments.
 
-#### 3. Certificate Resolution (Optional)
+#### 4. Faster Iteration for Developers
 
-```typescript
-// Lines 53-62: Resolve domain and certificate configuration
-const { rootDomainName, hostedZoneId } = resolveDomainConfig(app);
-const certificateConfig = resolveCertificate(
-  app,
-  config.envName,
-  stackProps,
-  rootDomainName,
-  hostedZoneId
-);
-```
+When developing new features or testing configurations, developers need rapid feedback. Redeploying a monolithic stack takes 15-20 minutes. Deploying just the service layer takes 3-5 minutes.
 
-**Note**: Certificates are resolved but not currently used. They will be used when HTTPS services (ALB listeners) are added.
+**Solution**: Developers can iterate quickly on:
+- Service configurations (Layer 2) without waiting for infrastructure provisioning.
+- Infrastructure changes (Layer 1) without touching stable storage.
+- Storage changes (Layer 0) in isolation when necessary.
 
-#### 4. Foundation Stack Deployment
+#### 5. Safer Production Deployments
 
-```typescript
-// Lines 68-69: Deploy foundation stacks (NetworkingStack)
-const { networkingStack } = deployFoundationStacks(app, config, stackProps);
-```
+In production, you want to minimise the scope of changes. A container image update shouldn't risk modifying load balancer configuration or EFS settings.
 
-This calls `bin/stacks/foundation-stack.ts` which:
-- Creates a `NetworkingStack` instance
-- Names it `${config.envName}-Networking`
-- Passes environment-specific configuration
-- Returns the stack for potential cross-stack references
+**Solution**: Each layer deployment is scoped to specific resources:
+- Updating Prometheus image? Only Layer 2 changes, ALB and EFS untouched.
+- Scaling ECS cluster? Only Layer 1 changes, storage and services untouched.
+- Adjusting EFS lifecycle policies? Only Layer 0 changes, compute and services untouched.
 
-#### 4b. Monitoring Stack Deployment (Manual)
+#### 6. Cost Optimisation Through Granular Control
 
-**Note**: Monitoring stacks are not automatically deployed in `app.ts`. They must be deployed manually or integrated (see [Dynamic Stack Integration](#dynamic-stack-integration)).
+When storage, compute, and services are in one stack, it's difficult to identify which resources drive costs. The layered approach makes cost attribution clear.
 
-The `deployMonitoringStacks()` function in `bin/stacks/monitoring-stack.ts`:
-- Creates a `MonitoringEfsStack` instance
-- Names it `${config.envName}-MonitoringEfs`
-- Requires `networkingStack` as a dependency (for VPC)
-- Configures EFS with encryption and lifecycle policies
-- Sets up cross-account targets for Prometheus scraping
-- Returns the stack for future infrastructure dependencies
+**Solution**:
+- Layer 0 costs: EFS storage, Lambda executions.
+- Layer 1 costs: EC2 instances, ALB, NAT gateway (if used).
+- Layer 2 costs: CloudWatch Logs, container registry pulls.
 
-#### 5. CDK Nag Integration
+You can optimise each layer independently based on actual usage patterns.
 
-```typescript
-// Lines 79-85: Apply security checks if enabled
-if (process.env.ENABLE_CDK_NAG !== "false") {
-  Aspects.of(app).add(
-    new AwsSolutionsChecks({
-      verbose: true,
-      logIgnores: !config.isProduction,
-    })
-  );
-}
-```
+### How It Works
 
-CDK Nag validates:
-- IAM policies for least privilege
-- VPC Flow Logs enabled
-- Encryption at rest
-- Security group configurations
-- And other AWS best practices
+The `app.ts` file orchestrates all three layers:
 
-#### 6. Synthesis
+1. **Environment Resolution**: Reads environment name from CDK context or defaults to development.
+2. **Foundation Deployment**: Creates or references NetworkingStack (VPC required for all monitoring).
+3. **Layer 0 Deployment**: Creates MonitoringEfsStack with persistent storage.
+4. **Layer 1 Deployment**: Creates MonitoringInfraStack with ECS cluster and ALB.
+5. **Layer 2 Deployment**: Creates MonitoringServiceStack with Prometheus and Grafana services.
 
-```typescript
-// Line 91: Generate CloudFormation templates
-app.synth();
-```
+Each layer explicitly depends on the previous layer, ensuring correct deployment order.
 
-This generates CloudFormation templates in the `cdk.out/` directory.
+### What It Does
 
-### Stack Name Resolution
+#### Layer 0: MonitoringEfsStack (Storage)
 
-The NetworkingStack name is constructed as follows:
+Creates persistent storage infrastructure:
 
-1. **Environment Name**: Read from `ENVIRONMENT` variable or defaults to `"development"`
-2. **Stack Name Pattern**: `${envName}-Networking`
-3. **Final Stack Name**: Examples:
-   - `ENVIRONMENT=development` → Stack name: `development-Networking`
-   - `ENVIRONMENT=staging` → Stack name: `staging-Networking`
-   - `ENVIRONMENT=production` → Stack name: `production-Networking`
+- **EFS File System**: Encrypted storage for Prometheus time-series data and Grafana dashboards.
+- **Access Point**: POSIX permissions allowing containers to read/write data.
+- **Security Group**: NFS access from VPC CIDR.
+- **Lambda Initialisation**: Creates directory structure on first deployment.
+- **SSM Parameters**: Stores Prometheus configuration, Grafana datasource configuration, and EFS discovery information.
 
-**Code Reference** (`bin/stacks/foundation-stack.ts:19`):
-```typescript
-const networkingStack = new NetworkingStack(
-  app,
-  `${config.envName}-Networking`,  // Stack ID/Name
-  { /* props */ }
-);
-```
+**Deployment Triggers**:
+- Storage capacity changes.
+- Lifecycle policy modifications.
+- Access control changes.
+- Cross-account target updates.
 
-### Deployment Command Mapping
+**Typical Deployment Frequency**: Once per quarter or when storage requirements change.
 
-When you run CDK commands, the stack name must match the pattern:
+#### Layer 1: MonitoringInfraStack (Infrastructure)
 
-```bash
-# Development environment
-export ENVIRONMENT=development
-cdk deploy development-Networking
+Creates compute and networking infrastructure:
 
-# Staging environment
-export ENVIRONMENT=staging
-cdk deploy staging-Networking
+- **ECS Cluster**: Container orchestration with Container Insights enabled.
+- **Auto Scaling Group**: EC2 instances with ECS-optimised Amazon Linux 2023 AMI.
+- **Application Load Balancer**: HTTP/HTTPS routing to monitoring services.
+- **Security Groups**: Controls traffic between ALB, ECS instances, and EFS.
+- **CloudWatch Log Groups**: Captures ECS task logs and events.
+- **SSM State Manager**: Configures ECS agents and application setup.
 
-# Production environment
-export ENVIRONMENT=production
-cdk deploy production-Networking
-```
+**Deployment Triggers**:
+- Scaling requirements (min/max/desired capacity).
+- Instance type changes.
+- ALB configuration (idle timeout, deletion protection).
+- Security group rule modifications.
 
-**Important**: The `ENVIRONMENT` variable must match the stack name prefix. If `ENVIRONMENT=dev`, the stack name would be `dev-Networking`, but the environment config expects `development`, `staging`, `production`, or `pipeline`.
+**Typical Deployment Frequency**: Monthly or when infrastructure scaling is needed.
+
+#### Layer 2: MonitoringServiceStack (Services)
+
+Creates monitoring application services:
+
+- **Prometheus Service**: Metrics collection with EC2 service discovery.
+- **Grafana Service**: Dashboard and visualisation with CloudWatch integration.
+- **Node Exporter Service**: Host-level metrics from ECS instances.
+- **ALB Target Groups**: Health checks and routing rules for each service.
+- **Path-Based Routing**: /prometheus and /grafana URL paths.
+
+**Deployment Triggers**:
+- Container image updates (new Prometheus or Grafana version).
+- Service configuration changes (resource limits, environment variables).
+- Health check modifications.
+- Port mapping adjustments.
+
+**Typical Deployment Frequency**: Weekly or daily for image updates and feature rollouts.
+
+### Benefits in Practice
+
+#### Scenario 1: Updating Grafana Version
+
+**Without Layered Architecture** (Monolithic Stack):
+1. Update Grafana container image tag.
+2. Deploy entire stack (15-20 minutes).
+3. CloudFormation updates EFS, ECS cluster, ALB, and services.
+4. Risk: Unintended changes to infrastructure or storage.
+
+**With Layered Architecture**:
+1. Update Grafana container image tag in Layer 2.
+2. Deploy only MonitoringServiceStack (3-5 minutes).
+3. CloudFormation updates only the Grafana ECS service.
+4. Infrastructure and storage remain untouched.
+
+#### Scenario 2: Scaling ECS Cluster for Black Friday
+
+**Without Layered Architecture**:
+1. Update desired capacity.
+2. Deploy entire stack.
+3. Risk: Service definitions might change unintentionally.
+4. Rollback requires redeploying entire stack.
+
+**With Layered Architecture**:
+1. Update capacity in Layer 1 (MonitoringInfraStack).
+2. Deploy only infrastructure stack.
+3. Services continue running on new capacity.
+4. Rollback is isolated to infrastructure only.
+
+#### Scenario 3: Adjusting EFS Lifecycle Policy
+
+**Without Layered Architecture**:
+1. Change lifecycle policy.
+2. Deploy entire stack.
+3. Risk: Service updates might occur during deployment.
+4. No clear separation between storage and compute changes.
+
+**With Layered Architecture**:
+1. Update lifecycle policy in Layer 0.
+2. Deploy only MonitoringEfsStack.
+3. No impact on running services or infrastructure.
+4. Clear audit trail of storage-specific changes.
 
 ## Prerequisites
 
 ### Required Tools
 
+- **Node.js**: v18 or higher.
+- **Yarn**: v4 or higher (this project uses Yarn, not npm).
+- **AWS CDK CLI**: v2.x or higher.
+- **AWS CLI**: v2.x or higher.
+- **Docker**: Required for Lambda function bundling.
+
+Verify installations:
+
 ```bash
-# Node.js (v18+)
-node --version
-
-# Yarn (v4+ - project uses yarn, not npm)
-yarn --version
-
-# AWS CDK CLI (installed globally or via yarn)
-yarn global add aws-cdk
-# Or: npm install -g aws-cdk
-cdk --version
-
-# AWS CLI
-aws --version
-
-# Git
-git --version
+node --version    # Should be v18+
+yarn --version    # Should be v4+
+cdk --version     # Should be v2.x+
+aws --version     # Should be v2.x+
+docker --version  # Required for asset bundling
 ```
 
 ### AWS Account Setup
 
-1. **Configure AWS Credentials**
+1. **Configure AWS Credentials**:
 
 ```bash
-# Option 1: Environment variables
+aws configure
+# Or use environment variables:
 export AWS_ACCESS_KEY_ID="your-access-key"
 export AWS_SECRET_ACCESS_KEY="your-secret-key"
 export AWS_REGION="eu-west-1"
-
-# Option 2: AWS CLI profile
-aws configure --profile dev
-
-# Verify credentials
-aws sts get-caller-identity
 ```
 
-2. **Bootstrap CDK** (one-time per account/region)
+2. **Bootstrap CDK** (one-time per account/region):
 
 ```bash
-export AWS_ACCOUNT_ID_DEV="$(aws sts get-caller-identity --query Account --output text)"
+export AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
 export AWS_REGION="eu-west-1"
 
-cdk bootstrap aws://$AWS_ACCOUNT_ID_DEV/$AWS_REGION
+cdk bootstrap aws://$AWS_ACCOUNT_ID/$AWS_REGION
 ```
 
-### Project Dependencies
+3. **Install Project Dependencies**:
 
 ```bash
-# Install dependencies (project uses yarn)
 yarn install
-
-# Build TypeScript
 yarn build
-```
-
-## Environment Configuration
-
-### Environment Variables
-
-Create a `.env` file in the project root:
-
-```bash
-# AWS Account IDs
-AWS_ACCOUNT_ID_DEV=123456789012
-AWS_ACCOUNT_ID_STAGING=123456789012
-AWS_ACCOUNT_ID_PROD=123456789012
-AWS_PIPELINE_ACCOUNT_ID=123456789012
-
-# AWS Region
-AWS_REGION=eu-west-1
-
-# Deployment Environment
-ENVIRONMENT=development
-
-# Optional: Certificate Configuration
-CERTIFICATE_ARN=arn:aws:acm:eu-west-1:123456789012:certificate/...
-ROOT_DOMAIN_NAME=example.com
-HOSTED_ZONE_ID=Z1234567890ABC
-
-# Optional: CDK Nag
-ENABLE_CDK_NAG=true  # Set to "false" to disable CDK Nag checks
-```
-
-### Environment Configuration File
-
-Environment-specific settings are defined in `config/environments.ts`:
-
-| Environment | VPC CIDR | NAT Gateways | Purpose |
-|-------------|----------|--------------|---------|
-| `development` | `10.1.0.0/16` | `0` | Local development, cost-optimised |
-| `staging` | `10.2.0.0/16` | `0` | Pre-production testing |
-| `production` | `10.2.0.0/16` | `0` | Live environment |
-| `pipeline` | `10.0.0.0/16` | `0` | CI/CD infrastructure |
-
-**Note**: NAT Gateway count can be overridden via environment configuration. Set `natGateways: 1` or `2` for production environments requiring internet access from private subnets.
-
-## Quick Start
-
-### 1. Set Environment Variables
-
-```bash
-export ENVIRONMENT=development
-export AWS_ACCOUNT_ID_DEV="$(aws sts get-caller-identity --query Account --output text)"
-export AWS_REGION="eu-west-1"
-```
-
-### 2. Bootstrap CDK (if not already done)
-
-```bash
-cdk bootstrap aws://$AWS_ACCOUNT_ID_DEV/$AWS_REGION
-```
-
-### 3. Synthesise CloudFormation Template
-
-```bash
-cdk synth development-Networking
-```
-
-### 4. Deploy Networking Stack
-
-```bash
-cdk deploy development-Networking
-```
-
-### 5. Deploy Monitoring EFS Stack (After Networking)
-
-```bash
-# First, ensure NetworkingStack is deployed
-cdk deploy development-Networking
-
-# Then deploy MonitoringEfsStack
-cdk deploy development-MonitoringEfs
 ```
 
 ## Deployment Guide
 
-### Step-by-Step Deployment
+### Complete Monitoring Infrastructure Deployment
 
-#### 1. Verify Prerequisites
+This section walks through deploying all three layers from scratch.
 
-```bash
-# Check Node.js version
-node --version  # Should be v18+
+#### Step 1: Configure Environment
 
-# Check AWS credentials
-aws sts get-caller-identity
-
-# Check CDK version
-cdk --version  # Should be 2.x+
-
-# Verify project dependencies (project uses yarn)
-yarn install
-```
-
-#### 2. Configure Environment
-
-```bash
-# Set environment variables
-export ENVIRONMENT=development
-export AWS_ACCOUNT_ID_DEV="$(aws sts get-caller-identity --query Account --output text)"
-export AWS_REGION="eu-west-1"
-
-# Or use .env file (loaded automatically via dotenv)
-cat > .env << EOF
-ENVIRONMENT=development
-AWS_ACCOUNT_ID_DEV=$(aws sts get-caller-identity --query Account --output text)
-AWS_REGION=eu-west-1
-EOF
-```
-
-#### 3. Bootstrap CDK (First Time Only)
-
-```bash
-cdk bootstrap aws://$AWS_ACCOUNT_ID_DEV/$AWS_REGION
-
-# Verify bootstrap
-aws cloudformation describe-stacks \
-  --stack-name CDKToolkit \
-  --query 'Stacks[0].StackStatus'
-```
-
-#### 4. Preview Changes
-
-```bash
-# Synthesise CloudFormation template
-cdk synth development-Networking
-
-# Preview changes (diff)
-cdk diff development-Networking
-```
-
-#### 5. Deploy Foundation Stack (Networking)
-
-```bash
-# Deploy with approval prompt
-cdk deploy development-Networking
-
-# Deploy without approval (for CI/CD)
-cdk deploy development-Networking --require-approval never
-
-# Deploy with verbose output
-cdk deploy development-Networking --verbose
-```
-
-#### 5b. Deploy Monitoring EFS Stack
-
-**Prerequisites**: NetworkingStack must be deployed first.
-
-```bash
-# Verify NetworkingStack is deployed
-aws cloudformation describe-stacks \
-  --stack-name development-Networking \
-  --query 'Stacks[0].StackStatus'
-
-# Deploy MonitoringEfsStack
-cdk deploy development-MonitoringEfs
-
-# Deploy with cross-account targets (via CDK context)
-cdk deploy development-MonitoringEfs \
-  --context crossAccountTargets='[{"envName":"staging","targetType":"node-exporter","port":9100,"accountId":"123456789012","roleArn":"arn:aws:iam::123456789012:role/prometheus-scraper"}]'
-
-# Deploy without approval (for CI/CD)
-cdk deploy development-MonitoringEfs --require-approval never
-```
-
-#### 6. Verify Deployment
-
-**Verify NetworkingStack**:
-
-```bash
-# Check stack status
-aws cloudformation describe-stacks \
-  --stack-name development-Networking \
-  --query 'Stacks[0].StackStatus'
-
-# List stack outputs
-aws cloudformation describe-stacks \
-  --stack-name development-Networking \
-  --query 'Stacks[0].Outputs[*].[OutputKey,OutputValue]' \
-  --output table
-
-# Verify SSM parameters
-aws ssm get-parameters-by-path \
-  --path "/networking/development" \
-  --query 'Parameters[*].[Name,Value]' \
-  --output table
-```
-
-**Verify MonitoringEfsStack**:
-
-```bash
-# Check stack status
-aws cloudformation describe-stacks \
-  --stack-name development-MonitoringEfs \
-  --query 'Stacks[0].StackStatus'
-
-# List stack outputs
-aws cloudformation describe-stacks \
-  --stack-name development-MonitoringEfs \
-  --query 'Stacks[0].Outputs[*].[OutputKey,OutputValue]' \
-  --output table
-
-# Verify EFS resources
-EFS_ID=$(aws cloudformation describe-stacks \
-  --stack-name development-MonitoringEfs \
-  --query 'Stacks[0].Outputs[?OutputKey==`FileSystemId`].OutputValue' \
-  --output text)
-
-aws efs describe-file-systems \
-  --file-system-id $EFS_ID
-
-# Verify SSM parameters for monitoring
-aws ssm get-parameters-by-path \
-  --path "/monitoring/development" \
-  --query 'Parameters[*].[Name,Value]' \
-  --output table
-
-# Check Prometheus config
-aws ssm get-parameter \
-  --name "/monitoring/development/prometheus-config-yaml" \
-  --query 'Parameter.Value' \
-  --output text
-```
-
-### Deployment Options
-
-#### Disable CDK Nag (Faster Deployment)
-
-```bash
-ENABLE_CDK_NAG=false cdk deploy development-Networking
-```
-
-#### Use Specific AWS Profile
-
-```bash
-cdk deploy development-Networking --profile dev
-```
-
-#### Deploy to Different Environment
-
-```bash
-export ENVIRONMENT=staging
-export AWS_ACCOUNT_ID_STAGING="123456789012"
-
-cdk deploy staging-Networking
-```
-
-#### Deploy with Role Assumption
-
-```bash
-cdk deploy development-Networking \
-  --role-arn arn:aws:iam::123456789012:role/CDKDeployRole
-```
-
-## Stack Deployment
-
-### Deploying All Stacks
-
-To deploy all stacks in the correct order:
-
-```bash
-# 1. Set environment
-export ENVIRONMENT=development
-export AWS_ACCOUNT_ID_DEV="$(aws sts get-caller-identity --query Account --output text)"
-export AWS_REGION="eu-west-1"
-
-# 2. Deploy foundation (NetworkingStack)
-cdk deploy development-Networking
-
-# 3. Deploy monitoring storage (MonitoringEfsStack)
-cdk deploy development-MonitoringEfs
-
-# 4. Future: Deploy monitoring infrastructure
-# cdk deploy development-MonitoringInfra
-
-# 5. Future: Deploy monitoring services
-# cdk deploy development-MonitoringService
-```
-
-### Deploying Individual Stacks
-
-You can deploy stacks individually, but must respect dependencies:
-
-```bash
-# Foundation stack (no dependencies)
-cdk deploy development-Networking
-
-# Monitoring EFS stack (depends on NetworkingStack)
-cdk deploy development-MonitoringEfs
-
-# List all available stacks
-cdk list
-```
-
-## Monitoring EFS Stack Deployment
-
-### Overview
-
-The `MonitoringEfsStack` provides persistent storage for Prometheus and Grafana monitoring services. It creates:
-
-- **EFS File System**: Encrypted, persistent storage for monitoring data
-- **EFS Access Point**: POSIX permissions for Prometheus/Grafana
-- **Security Group**: Allows NFS access from VPC CIDR
-- **Lambda Function**: One-time EFS initialization (creates directory structure)
-- **SSM Parameters**: Prometheus and Grafana configuration files
-
-### Prerequisites
-
-**Required**: NetworkingStack must be deployed first.
-
-```bash
-# Verify NetworkingStack is deployed
-aws cloudformation describe-stacks \
-  --stack-name development-Networking \
-  --query 'Stacks[0].StackStatus'
-
-# Should return: "CREATE_COMPLETE" or "UPDATE_COMPLETE"
-```
-
-### Manual Deployment Steps
-
-#### Step 1: Set Environment Variables
+Set the environment you're deploying to:
 
 ```bash
 export ENVIRONMENT=development
@@ -720,887 +289,723 @@ export AWS_ACCOUNT_ID_DEV="$(aws sts get-caller-identity --query Account --outpu
 export AWS_REGION="eu-west-1"
 ```
 
-#### Step 2: Prepare Cross-Account Targets (Optional)
-
-If you need Prometheus to scrape metrics from other AWS accounts, prepare the cross-account targets configuration:
+Or use CDK context (recommended):
 
 ```bash
-# Create cdk.json context (or pass via --context flag)
-cat > cdk.json << 'EOF'
-{
-  "app": "npx ts-node --prefer-ts-exts bin/app.ts",
-  "context": {
-    "crossAccountTargets": [
-      {
-        "envName": "staging",
-        "targetType": "node-exporter",
-        "port": 9100,
-        "accountId": "123456789012",
-        "roleArn": "arn:aws:iam::123456789012:role/prometheus-scraper",
-        "useEc2ServiceDiscovery": true
-      }
-    ]
-  }
-}
-EOF
+# Via command line
+cdk deploy --context environment=development
+
+# Or via cdk.context.json
+echo '{"environment": "development"}' > cdk.context.json
 ```
 
-#### Step 3: Synthesise MonitoringEfsStack
+#### Step 2: Preview All Stacks
+
+List all stacks that will be created:
 
 ```bash
-cdk synth development-MonitoringEfs
-```
-
-#### Step 4: Preview Changes
-
-```bash
-cdk diff development-MonitoringEfs
-```
-
-#### Step 5: Deploy MonitoringEfsStack
-
-```bash
-# Basic deployment
-cdk deploy development-MonitoringEfs
-
-# With cross-account targets (if not in cdk.json)
-cdk deploy development-MonitoringEfs \
-  --context crossAccountTargets='[{"envName":"staging","targetType":"node-exporter","port":9100,"accountId":"123456789012","roleArn":"arn:aws:iam::123456789012:role/prometheus-scraper"}]'
-
-# Without approval prompt (for CI/CD)
-cdk deploy development-MonitoringEfs --require-approval never
-```
-
-#### Step 6: Verify Deployment
-
-```bash
-# Check stack status
-aws cloudformation describe-stacks \
-  --stack-name development-MonitoringEfs \
-  --query 'Stacks[0].StackStatus'
-
-# Get EFS file system ID
-EFS_ID=$(aws cloudformation describe-stacks \
-  --stack-name development-MonitoringEfs \
-  --query 'Stacks[0].Outputs[?OutputKey==`FileSystemId`].OutputValue' \
-  --output text)
-
-echo "EFS ID: $EFS_ID"
-
-# Verify EFS file system
-aws efs describe-file-systems \
-  --file-system-id $EFS_ID
-
-# Check EFS access point
-AP_ID=$(aws cloudformation describe-stacks \
-  --stack-name development-MonitoringEfs \
-  --query 'Stacks[0].Outputs[?OutputKey==`AccessPointId`].OutputValue' \
-  --output text)
-
-aws efs describe-access-points \
-  --access-point-id $AP_ID
-
-# Verify SSM parameters
-aws ssm get-parameters-by-path \
-  --path "/monitoring/development" \
-  --query 'Parameters[*].[Name]' \
-  --output table
-
-# Check Prometheus config
-aws ssm get-parameter \
-  --name "/monitoring/development/prometheus-config-yaml" \
-  --query 'Parameter.Value' \
-  --output text | head -20
-```
-
-### MonitoringEfsStack Configuration Options
-
-The stack can be configured via `bin/stacks/monitoring-stack.ts`:
-
-```typescript
-const efsStack = new MonitoringEfsStack(
-  app,
-  `${config.envName}-MonitoringEfs`,
-  {
-    envName: config.envName,
-    projectName: "monitoring",
-    vpc: networkingStack.vpc,
-    crossAccountTargets: [],  // Or from CDK context
-    enableEncryption: true,   // Always enabled
-    lifecyclePolicy: config.isProduction
-      ? efs.LifecyclePolicy.AFTER_30_DAYS
-      : efs.LifecyclePolicy.AFTER_7_DAYS,
-    removalPolicy: config.isProduction
-      ? cdk.RemovalPolicy.RETAIN
-      : cdk.RemovalPolicy.DESTROY,
-  }
-);
-```
-
-### Cross-Account Targets Configuration
-
-Cross-account targets allow Prometheus to scrape metrics from EC2 instances in other AWS accounts:
-
-**Via CDK Context** (Recommended):
-
-```bash
-# Inline JSON
-cdk deploy development-MonitoringEfs \
-  --context crossAccountTargets='[
-    {
-      "envName": "staging",
-      "targetType": "node-exporter",
-      "port": 9100,
-      "accountId": "123456789012",
-      "roleArn": "arn:aws:iam::123456789012:role/prometheus-scraper",
-      "useEc2ServiceDiscovery": true
-    }
-  ]'
-```
-
-**Via cdk.json**:
-
-```json
-{
-  "context": {
-    "crossAccountTargets": [
-      {
-        "envName": "staging",
-        "targetType": "node-exporter",
-        "port": 9100,
-        "accountId": "123456789012",
-        "roleArn": "arn:aws:iam::123456789012:role/prometheus-scraper",
-        "useEc2ServiceDiscovery": true
-      }
-    ]
-  }
-}
-```
-
-**Target Configuration Fields**:
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `envName` | Yes | Environment name for the target |
-| `targetType` | Yes | Type of target (e.g., "node-exporter") |
-| `port` | Yes | Port number for metrics endpoint |
-| `accountId` | No | AWS account ID (required for EC2 service discovery) |
-| `roleArn` | No | IAM role ARN for cross-account access (required for EC2 service discovery) |
-| `privateIp` | No | Static private IP address (fallback if service discovery not used) |
-| `useEc2ServiceDiscovery` | No | Use EC2 service discovery (default: true) |
-| `metricsPath` | No | Custom metrics path (default: "/metrics") |
-
-### EFS Initialization
-
-The stack includes a Lambda function that initializes the EFS file system:
-
-- Creates directory structure: `/monitoring/prometheus-data`, `/monitoring/grafana-data`, etc.
-- Sets POSIX permissions
-- Runs as a CloudFormation Custom Resource
-- Takes approximately 2-5 minutes to complete
-
-**Monitor Initialization**:
-
-```bash
-# Check Lambda function logs
-aws logs tail /aws/lambda/development-monitoring-efs-init --follow
-
-# Check CloudFormation custom resource status
-aws cloudformation describe-stack-resources \
-  --stack-name development-MonitoringEfs \
-  --logical-resource-id EfsInitialization \
-  --query 'StackResources[0].ResourceStatus'
-```
-
-### Troubleshooting MonitoringEfsStack
-
-**Issue: "Stack dependency error"**
-
-```
-Error: Stack development-MonitoringEfs depends on development-Networking
-```
-
-**Solution**:
-```bash
-# Deploy NetworkingStack first
-cdk deploy development-Networking
-
-# Then deploy MonitoringEfsStack
-cdk deploy development-MonitoringEfs
-```
-
-**Issue: "EFS initialization timeout"**
-
-**Solution**: The Lambda timeout is configurable. Check the initialization Lambda logs:
-```bash
-aws logs tail /aws/lambda/development-monitoring-efs-init --follow
-```
-
-**Issue: "Cross-account targets not working"**
-
-**Solution**: Verify IAM role exists and has correct permissions:
-```bash
-# Check role exists
-aws iam get-role --role-name prometheus-scraper
-
-# Verify trust policy allows cross-account assumption
-aws iam get-role --role-name prometheus-scraper \
-  --query 'Role.AssumeRolePolicyDocument'
-```
-
-## Stack Configuration
-
-### NetworkingStack Configuration
-
-The NetworkingStack is configured in `bin/stacks/foundation-stack.ts`:
-
-```typescript
-const networkingStack = new NetworkingStack(
-  app,
-  `${config.envName}-Networking`,
-  {
-    envName: config.envName,
-    projectName: "portfolio",
-    vpcCidr: config.vpcCidr,        // From environments.ts
-    maxAzs: 2,                       // Fixed: 2 availability zones
-    natGateways: config.natGateways ?? 0,  // From environments.ts
-    enableVpcFlowLogs: true,        // Always enabled
-    enableVpcEndpoints: true,        // S3 and DynamoDB endpoints
-  }
-);
-```
-
-### Customising Configuration
-
-To modify the NetworkingStack configuration:
-
-1. **Edit `bin/stacks/foundation-stack.ts`**:
-
-```typescript
-const networkingStack = new NetworkingStack(
-  app,
-  `${config.envName}-Networking`,
-  {
-    ...stackProps,
-    envName: config.envName,
-    projectName: "portfolio",
-    vpcCidr: config.vpcCidr,
-    maxAzs: 3,                    // Change to 3 AZs
-    natGateways: 2,               // Override: 2 NAT gateways
-    enableVpcFlowLogs: true,
-    enableVpcEndpoints: true,
-    // Add custom tags
-    customTags: {
-      CostCenter: "Engineering",
-      Team: "Platform",
-    },
-  }
-);
-```
-
-2. **Or modify `config/environments.ts`**:
-
-```typescript
-development: {
-  // ...
-  natGateways: 1,  // Override default
-  // ...
-}
-```
-
-### MonitoringEfsStack Configuration
-
-The MonitoringEfsStack is configured in `bin/stacks/monitoring-stack.ts`:
-
-```typescript
-const efsStack = new MonitoringEfsStack(
-  app,
-  `${config.envName}-MonitoringEfs`,
-  {
-    envName: config.envName,
-    projectName: "monitoring",
-    vpc: networkingStack.vpc,              // From NetworkingStack
-    crossAccountTargets,                   // From CDK context or empty array
-    enableEncryption: true,                // Always enabled
-    lifecyclePolicy: config.isProduction
-      ? efs.LifecyclePolicy.AFTER_30_DAYS  // Production: 30 days
-      : efs.LifecyclePolicy.AFTER_7_DAYS,  // Non-prod: 7 days
-    removalPolicy: config.isProduction
-      ? cdk.RemovalPolicy.RETAIN          // Production: retain data
-      : cdk.RemovalPolicy.DESTROY,        // Non-prod: allow deletion
-  }
-);
-```
-
-**Key Configuration Points**:
-- **VPC Dependency**: Requires `networkingStack.vpc` from NetworkingStack
-- **Cross-Account Targets**: Can be provided via CDK context (see below)
-- **Encryption**: Always enabled for security
-- **Lifecycle Policy**: Automatically set based on `config.isProduction`
-- **Removal Policy**: Production retains data, non-prod allows deletion
-
-**Cross-Account Targets Configuration**:
-
-Cross-account targets can be provided via CDK context for Prometheus scraping:
-
-```bash
-# Via CDK context (JSON format)
-cdk deploy development-MonitoringEfs \
-  --context crossAccountTargets='[
-    {
-      "envName": "staging",
-      "targetType": "node-exporter",
-      "port": 9100,
-      "accountId": "123456789012",
-      "roleArn": "arn:aws:iam::123456789012:role/prometheus-scraper",
-      "useEc2ServiceDiscovery": true
-    }
-  ]'
-
-# Or via cdk.json
-# {
-#   "context": {
-#     "crossAccountTargets": [
-#       {
-#         "envName": "staging",
-#         "targetType": "node-exporter",
-#         "port": 9100,
-#         "accountId": "123456789012",
-#         "roleArn": "arn:aws:iam::123456789012:role/prometheus-scraper"
-#       }
-#     ]
-#   }
-# }
-```
-
-### Certificate Configuration
-
-Certificates are resolved automatically via `helpers/certificate-helper.ts`:
-
-**Priority Order:**
-1. `CERTIFICATE_ARN` environment variable (from CI/CD)
-2. Create new certificate (if `ROOT_DOMAIN_NAME` and `HOSTED_ZONE_ID` provided)
-3. SSM Parameter lookup (`/portfolio/domain/acm-arn`)
-
-**To Skip Certificate Resolution:**
-
-```bash
-export SKIP_DOMAIN_LOOKUP=true
-cdk deploy development-Networking
-```
-
-## Troubleshooting
-
-### Common Issues
-
-**Issue: "Account not bootstrapped"**
-
-```
-Error: This stack uses assets, but the environment ... doesn't have CDK bootstrap
-```
-
-**Solution:**
-```bash
-cdk bootstrap aws://$AWS_ACCOUNT_ID_DEV/$AWS_REGION
-```
-
-**Issue: "Unknown environment"**
-
-```
-Error: Unknown environment: dev. Valid options: development, staging, production, pipeline
-```
-
-**Solution:**
-```bash
-# Use correct environment name
-export ENVIRONMENT=development  # Not "dev"
-```
-
-**Issue: "Account ID not configured"**
-
-```
-Error: Account ID not configured for development. Set AWS_PIPELINE_ACCOUNT_ID environment variable.
-```
-
-**Solution:**
-```bash
-# Set the correct account ID variable
-export AWS_ACCOUNT_ID_DEV="123456789012"
-# Or use .env file
-```
-
-**Issue: "VPC CIDR conflicts with existing VPC"**
-
-```
-Error: The CIDR '10.1.0.0/16' conflicts with another subnet
-```
-
-**Solution:**
-```bash
-# List existing VPCs
-aws ec2 describe-vpcs --query 'Vpcs[*].[VpcId,CidrBlock]' --output table
-
-# Update config/environments.ts with non-overlapping CIDR
-vpcCidr: "10.99.0.0/16"
-```
-
-**Issue: "TypeScript compilation errors"**
-
-```
-Error: Unable to compile TypeScript
-```
-
-**Solution:**
-```bash
-# Clean and rebuild
-rm -rf node_modules dist .yarn/cache
-yarn install
-yarn build
-
-# Check for lint errors
-yarn lint
-```
-
-**Issue: "CDK Nag errors"**
-
-```
-Error: AwsSolutions-IAM5: The IAM entity contains wildcard permissions
-```
-
-**Solution:**
-```bash
-# Temporarily disable CDK Nag for testing
-ENABLE_CDK_NAG=false cdk deploy development-Networking
-
-# Or review and add suppressions in lib/cdk-nag/suppression-manager.ts
-```
-
-### Debug Commands
-
-```bash
-# Enable CDK debug output
-export CDK_DEBUG=true
-cdk deploy development-Networking
-
-# View CloudFormation events
-aws cloudformation describe-stack-events \
-  --stack-name development-Networking \
-  --query 'StackEvents[*].[Timestamp,LogicalResourceId,ResourceStatus]' \
-  --output table \
-  --max-items 20
-
-# Check for failed resources
-aws cloudformation describe-stack-events \
-  --stack-name development-Networking \
-  --query 'StackEvents[?ResourceStatus==`CREATE_FAILED`].[LogicalResourceId,ResourceStatusReason]' \
-  --output table
-
-# Validate CloudFormation template
-aws cloudformation validate-template \
-  --template-body file://cdk.out/development-Networking.template.json
-```
-
-## Dynamic Stack Integration
-
-### Adding New Stacks to `app.ts`
-
-To integrate new stacks into the automatic deployment flow, follow this pattern:
-
-#### Step 1: Create Stack Deployment Function
-
-Create a new file in `bin/stacks/` (e.g., `compute-stack.ts`):
-
-```typescript
-import * as cdk from "aws-cdk-lib";
-import { ComputeStack } from "../../lib/stacks/compute/compute-stack";
-import { NetworkingStack } from "../../lib/stacks/foundation/networking-stack";
-import { EnvironmentConfig } from "../../config/environments";
-
-export function deployComputeStacks(
-  app: cdk.App,
-  config: EnvironmentConfig,
-  stackProps: cdk.StackProps,
-  networkingStack: NetworkingStack
-) {
-  const computeStack = new ComputeStack(
-    app,
-    `${config.envName}-Compute`,
-    {
-      ...stackProps,
-      envName: config.envName,
-      vpc: networkingStack.vpc,
-      // ... other props
-    }
-  );
-
-  computeStack.addDependency(networkingStack);
-
-  return {
-    computeStack,
-  };
-}
-```
-
-#### Step 2: Integrate into `app.ts`
-
-Add the stack deployment after foundation stacks:
-
-```typescript
-// In bin/app.ts
-
-// After foundation stacks
-const { networkingStack } = deployFoundationStacks(app, config, stackProps);
-
-// Add new stack deployment
-const { computeStack } = deployComputeStacks(
-  app,
-  config,
-  stackProps,
-  networkingStack
-);
-void computeStack; // Mark as used for future dependencies
-```
-
-#### Step 3: Update Stack Naming Documentation
-
-Add the new stack to the [Stack Naming Convention](#stack-naming-convention) table in this README.
-
-### Stack Deployment Pattern
-
-All stack deployment functions follow this pattern:
-
-```typescript
-export function deploy{StackType}Stacks(
-  app: cdk.App,                    // CDK app instance
-  config: EnvironmentConfig,      // Environment configuration
-  stackProps: cdk.StackProps,      // Base stack properties
-  ...dependencies                   // Required stack dependencies
-) {
-  const stack = new {StackType}Stack(
-    app,
-    `${config.envName}-{StackType}`,  // Consistent naming
-    {
-      ...stackProps,
-      envName: config.envName,
-      // ... stack-specific props
-    }
-  );
-
-  // Add dependencies
-  stack.addDependency(dependencyStack);
-
-  return {
-    stack,  // Return for future dependencies
-  };
-}
-```
-
-### Integrating Monitoring Stacks into `app.ts`
-
-To automatically deploy monitoring stacks alongside foundation stacks, update `bin/app.ts`:
-
-```typescript
-// In bin/app.ts, after foundation stacks
-
-import { deployMonitoringStacks } from "./stacks/monitoring-stack";
-
-// ... existing code ...
-
-// ============================================================================
-// 1. FOUNDATION: NETWORKING
-// ============================================================================
-const { networkingStack } = deployFoundationStacks(app, config, stackProps);
-
-// ============================================================================
-// 2. MONITORING: EFS STORAGE
-// ============================================================================
-// Deploy monitoring stacks if enabled
-if (process.env.DEPLOY_MONITORING !== "false") {
-  const { efsStack } = deployMonitoringStacks(
-    app,
-    config,
-    stackProps,
-    networkingStack,
-    certificateConfig.certificateArn
-  );
-  void efsStack; // Will be used for future infrastructure stacks
-}
-
-// ... rest of app.ts ...
-```
-
-**Environment Variable Control**:
-
-```bash
-# Deploy with monitoring stacks
-export DEPLOY_MONITORING=true
-cdk deploy --all
-
-# Skip monitoring stacks
-export DEPLOY_MONITORING=false
-cdk deploy development-Networking
-```
-
-### Future Stack Examples
-
-**MonitoringInfraStack** (Infrastructure Layer):
-- Depends on: `NetworkingStack`, `MonitoringEfsStack`
-- Provides: ECS cluster, Auto Scaling Group, Load Balancer
-- Stack name: `${envName}-MonitoringInfra`
-- Integration: Add to `deployMonitoringStacks()` function
-
-**MonitoringServiceStack** (Services Layer):
-- Depends on: `MonitoringInfraStack`
-- Provides: Prometheus service, Grafana service
-- Stack name: `${envName}-MonitoringService`
-- Integration: Add to `deployMonitoringStacks()` function
-
-**ComputeStack** (Application Layer):
-- Depends on: `NetworkingStack`
-- Provides: ECS services, task definitions
-- Stack name: `${envName}-Compute`
-- Integration: Create `bin/stacks/compute-stack.ts` and add to `app.ts`
-
-## Next Steps
-
-After successfully deploying the NetworkingStack:
-
-### 1. Deploy Monitoring EFS Stack
-
-The MonitoringEfsStack provides persistent storage for monitoring services:
-
-```bash
-# Ensure NetworkingStack is deployed first
-cdk deploy development-Networking
-
-# Deploy MonitoringEfsStack
-cdk deploy development-MonitoringEfs
-
-# Verify EFS is ready
-aws efs describe-file-systems \
-  --query 'FileSystems[?Tags[?Key==`Environment` && Value==`development`]]'
-```
-
-### 2. Deploy Future Dependent Stacks
-
-As new stacks are added, deploy them in dependency order:
-
-```bash
-# Example deployment sequence
-cdk deploy development-Networking          # Foundation
-cdk deploy development-MonitoringEfs      # Storage
-# cdk deploy development-MonitoringInfra  # Infrastructure (future)
-# cdk deploy development-MonitoringService # Services (future)
-```
-
-### 2. Set Up VPC Peering (Optional)
-
-For cross-account monitoring, configure VPC peering:
-
-```bash
-# TODO: Implement VPC peering helper
-# See bin/helpers/vpc-peering-helper.ts
-```
-
-### 3. Configure Monitoring
-
-The VPC Flow Logs are automatically enabled. Monitor them:
-
-```bash
-# View flow logs
-aws logs tail /aws/vpc/flowlogs/development --follow
-```
-
-### 4. Review Stack Outputs
-
-```bash
-# Get VPC ID
-aws cloudformation describe-stacks \
-  --stack-name development-Networking \
-  --query 'Stacks[0].Outputs[?OutputKey==`VpcId`].OutputValue' \
-  --output text
-
-# Get SSM parameter
-aws ssm get-parameter \
-  --name "/networking/development/vpc-id" \
-  --query 'Parameter.Value' \
-  --output text
-```
-
-### 5. Cost Optimisation
-
-Review and adjust NAT Gateway configuration:
-
-```bash
-# Development: 0 NAT gateways (no internet from private subnets)
-# Staging/Production: 1-2 NAT gateways (based on HA requirements)
-
-# Update config/environments.ts
-natGateways: 1  # Single NAT gateway for cost-optimised HA
-```
-
-## Key Points Summary
-
-### Stack Naming
-
-- **Stack Name Pattern**: `${envName}-{StackType}`
-- **Current Stack Examples**:
-  - `development-Networking` (when `ENVIRONMENT=development`)
-  - `development-MonitoringEfs` (when `ENVIRONMENT=development`)
-  - `pipeline-MonitoringEfs` (when `ENVIRONMENT=pipeline`)
-- **Stack Name Sources**:
-  - NetworkingStack: `bin/stacks/foundation-stack.ts:19`
-  - MonitoringEfsStack: `bin/stacks/monitoring-stack.ts:28`
-- **Important**: The `ENVIRONMENT` variable must match one of the keys in `config/environments.ts` (`development`, `staging`, `production`, or `pipeline`)
-
-### Stack Dependencies
-
-- **NetworkingStack**: No dependencies (foundation)
-- **MonitoringEfsStack**: Depends on `NetworkingStack` (requires VPC)
-- **Future Stacks**: Will follow the same dependency pattern
-
-### Package Manager
-
-- **This project uses Yarn (v4+), not npm**
-- Use `yarn install` instead of `npm install`
-- Use `yarn build` instead of `npm run build`
-- Use `yarn lint` instead of `npm run lint`
-- CDK CLI can be installed globally with either `yarn global add aws-cdk` or `npm install -g aws-cdk`
-
-### Application Flow
-
-1. `app.ts` reads `ENVIRONMENT` variable (defaults to `"development"`)
-2. Loads configuration from `config/environments.ts`
-3. Calls `deployFoundationStacks()` which creates `NetworkingStack`
-4. Stack is named `${envName}-Networking`
-5. Monitoring stacks are **not** automatically deployed (must be deployed manually)
-6. CDK Nag validation is applied (unless disabled)
-7. CloudFormation templates are synthesized
-
-**To integrate monitoring stacks automatically**, see [Dynamic Stack Integration](#dynamic-stack-integration) section.
-
-### Deployment Commands
-
-**Foundation Stack (Networking)**:
-
-```bash
-# Always set ENVIRONMENT first
-export ENVIRONMENT=development
-
-# Deploy NetworkingStack
-cdk deploy development-Networking
-
-# List all stacks to verify naming
-cdk list
-```
-
-**Monitoring EFS Stack**:
-
-```bash
-# Ensure NetworkingStack is deployed first
-cdk deploy development-Networking
-
-# Deploy MonitoringEfsStack
-cdk deploy development-MonitoringEfs
-
-# With cross-account targets (optional)
-cdk deploy development-MonitoringEfs \
-  --context crossAccountTargets='[{"envName":"staging","targetType":"node-exporter","port":9100,"accountId":"123456789012","roleArn":"arn:aws:iam::123456789012:role/prometheus-scraper"}]'
-```
-
-**Deploy All Stacks in Order**:
-
-```bash
-# Set environment
-export ENVIRONMENT=development
-
-# Deploy in dependency order
-cdk deploy development-Networking
-cdk deploy development-MonitoringEfs
-
-# Or deploy all at once (CDK handles dependencies)
-cdk deploy --all
-```
-
-## Manual Deployment Commands Reference
-
-### NetworkingStack
-
-```bash
-# Synthesise
-cdk synth development-Networking
-
-# Preview changes
-cdk diff development-Networking
-
-# Deploy
-cdk deploy development-Networking
-
-# Destroy (use with caution)
-cdk destroy development-Networking
-```
-
-### MonitoringEfsStack
-
-```bash
-# Prerequisite: NetworkingStack must be deployed
-cdk deploy development-Networking
-
-# Synthesise
-cdk synth development-MonitoringEfs
-
-# Preview changes
-cdk diff development-MonitoringEfs
-
-# Deploy
-cdk deploy development-MonitoringEfs
-
-# Deploy with cross-account targets
-cdk deploy development-MonitoringEfs \
-  --context crossAccountTargets='[{"envName":"staging","targetType":"node-exporter","port":9100,"accountId":"123456789012","roleArn":"arn:aws:iam::123456789012:role/prometheus-scraper"}]'
-
-# Destroy (use with caution - data will be lost if removalPolicy is DESTROY)
-cdk destroy development-MonitoringEfs
-```
-
-### Deploy All Stacks
-
-```bash
-# Deploy all stacks in dependency order
-cdk deploy --all
-
-# Or deploy specific stacks
-cdk deploy development-Networking development-MonitoringEfs
-```
-
-### List Available Stacks
-
-```bash
-# List all stacks
 cdk list
 
 # Expected output:
 # development-Networking
 # development-MonitoringEfs
+# development-MonitoringInfra
+# development-MonitoringService
 ```
 
-## Additional Resources
+Preview changes for each stack:
 
-- [NetworkingStack Deployment Guide](../lib/stacks/foundation/DEPLOYMENT.md) - Detailed architecture and deployment guide
-- [NetworkingStack README](../lib/stacks/README.md) - Stack documentation
-- [MonitoringEfsStack](../lib/stacks/monitoring/monitoring-efs-stack.ts) - EFS stack implementation
-- [AWS CDK Documentation](https://docs.aws.amazon.com/cdk/)
-- [VPC Flow Logs Documentation](https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs.html)
-- [EFS Documentation](https://docs.aws.amazon.com/efs/latest/ug/whatisefs.html)
-- [Yarn Documentation](https://yarnpkg.com/getting-started)
+```bash
+cdk diff development-Networking
+cdk diff development-MonitoringEfs
+cdk diff development-MonitoringInfra
+cdk diff development-MonitoringService
+```
 
-## Support
+#### Step 3: Deploy Foundation (NetworkingStack)
+
+Deploy the VPC and networking infrastructure first:
+
+```bash
+cdk deploy development-Networking
+
+# Or with explicit approval bypass (CI/CD)
+cdk deploy development-Networking --require-approval never
+```
+
+**What This Creates**:
+- VPC with public and private subnets across 2 availability zones.
+- Internet Gateway for public subnet internet access.
+- NAT Gateway (optional, based on environment configuration).
+- VPC Flow Logs for network traffic monitoring.
+- VPC Endpoints for S3 and DynamoDB (cost optimisation).
+- SSM parameters for VPC configuration discovery.
+
+**Deployment Time**: Approximately 3-5 minutes.
+
+#### Step 4: Deploy Layer 0 (MonitoringEfsStack)
+
+Deploy persistent storage for monitoring data:
+
+```bash
+cdk deploy development-MonitoringEfs
+```
+
+**What This Creates**:
+- EFS file system with encryption at rest.
+- EFS access point with POSIX user/group configuration.
+- Security group allowing NFS traffic from VPC.
+- Lambda function that initialises EFS directory structure.
+- SSM parameters with Prometheus configuration (prometheus.yml).
+- SSM parameters with Grafana datasource configuration.
+
+**Deployment Time**: Approximately 5-8 minutes (includes Lambda initialisation).
+
+**Verification**:
+
+```bash
+# Check EFS is ready
+aws efs describe-file-systems \
+  --query 'FileSystems[?Tags[?Key==`Environment` && Value==`development`]].[FileSystemId,LifeCycleState]' \
+  --output table
+
+# Verify directory structure was created
+aws ssm get-parameter \
+  --name "/monitoring/development/efs/discovery" \
+  --query 'Parameter.Value'
+```
+
+#### Step 5: Deploy Layer 1 (MonitoringInfraStack)
+
+Deploy compute infrastructure and load balancer:
+
+```bash
+cdk deploy development-MonitoringInfra
+```
+
+**What This Creates**:
+- ECS cluster with Container Insights enabled.
+- Auto Scaling Group with ECS-optimised instances.
+- Launch template with IMDSv2 enforcement and EFS mount permissions.
+- Application Load Balancer for routing traffic to services.
+- ALB listeners (HTTP, optionally HTTPS).
+- Security groups for ALB and ECS instances.
+- CloudWatch log groups for ECS task and event logs.
+- SSM State Manager associations for ECS agent configuration.
+- EventBridge rules for capturing ECS lifecycle events.
+
+**Deployment Time**: Approximately 8-12 minutes (includes Auto Scaling Group and ALB provisioning).
+
+**Verification**:
+
+```bash
+# Check ECS cluster is active
+aws ecs describe-clusters \
+  --clusters development-monitoring-cluster \
+  --query 'clusters[0].status'
+
+# Verify EC2 instances registered
+aws ecs list-container-instances \
+  --cluster development-monitoring-cluster
+
+# Check ALB DNS name
+aws cloudformation describe-stacks \
+  --stack-name development-MonitoringInfra \
+  --query 'Stacks[0].Outputs[?OutputKey==`LoadBalancerDns`].OutputValue' \
+  --output text
+```
+
+#### Step 6: Deploy Layer 2 (MonitoringServiceStack)
+
+Deploy monitoring application services:
+
+```bash
+cdk deploy development-MonitoringService
+```
+
+**What This Creates**:
+- Prometheus ECS service with time-series database.
+- Grafana ECS service with dashboards and visualisation.
+- Node Exporter ECS service for host metrics collection.
+- ALB target groups with health checks for each service.
+- ALB listener rules for path-based routing (/prometheus, /grafana).
+- Security group connections between ALB and services.
+- SSM parameters for service discovery and monitoring.
+
+**Deployment Time**: Approximately 5-8 minutes (includes service startup and health checks).
+
+**Verification**:
+
+```bash
+# Check services are running
+aws ecs list-services \
+  --cluster development-monitoring-cluster \
+  --query 'serviceArns'
+
+# Get service URLs
+ALB_DNS=$(aws cloudformation describe-stacks \
+  --stack-name development-MonitoringInfra \
+  --query 'Stacks[0].Outputs[?OutputKey==`LoadBalancerDns`].OutputValue' \
+  --output text)
+
+echo "Prometheus: http://$ALB_DNS/prometheus"
+echo "Grafana: http://$ALB_DNS/grafana"
+
+# Verify services are healthy
+aws elbv2 describe-target-health \
+  --target-group-arn <prometheus-target-group-arn>
+```
+
+#### Step 7: Access Monitoring Dashboards
+
+After all layers are deployed:
+
+```bash
+# Get ALB DNS from infrastructure stack
+ALB_DNS=$(aws cloudformation describe-stacks \
+  --stack-name development-MonitoringInfra \
+  --query 'Stacks[0].Outputs[?OutputKey==`LoadBalancerDns`].OutputValue' \
+  --output text)
+
+# Access monitoring services
+echo "Prometheus UI: http://$ALB_DNS/prometheus"
+echo "Grafana UI: http://$ALB_DNS/grafana (credentials: admin/admin)"
+```
+
+### Deploy All Layers at Once
+
+For initial setup, you can deploy all layers sequentially:
+
+```bash
+# CDK automatically resolves dependencies
+cdk deploy --all
+
+# Or deploy specific stacks in order
+cdk deploy development-Networking \
+           development-MonitoringEfs \
+           development-MonitoringInfra \
+           development-MonitoringService
+```
+
+## Individual Stack Deployment
+
+The layered architecture allows deploying, updating, or rolling back each layer independently.
+
+### Layer 0: Storage Stack (MonitoringEfsStack)
+
+**When to Deploy**:
+- Initial setup.
+- EFS lifecycle policy changes.
+- Storage capacity adjustments.
+- Cross-account target configuration changes.
+- Security group rule modifications for NFS.
+
+**Deploy Command**:
+
+```bash
+cdk deploy development-MonitoringEfs
+```
+
+**What Changes**:
+- EFS file system configuration.
+- Access point POSIX permissions.
+- Lambda initialisation function.
+- SSM parameters (Prometheus config, Grafana datasource).
+- Security group rules for NFS access.
+
+**What Doesn't Change**:
+- Running ECS services continue operating.
+- Load balancer configuration unchanged.
+- No downtime for monitoring dashboards.
+
+**Rollback**:
+
+```bash
+# If deployment fails, CloudFormation automatically rolls back
+# Manual rollback to previous version:
+aws cloudformation cancel-update-stack --stack-name development-MonitoringEfs
+```
+
+**Cost Impact**: Minimal. EFS storage costs are based on usage, not provisioning.
+
+### Layer 1: Infrastructure Stack (MonitoringInfraStack)
+
+**When to Deploy**:
+- Initial setup.
+- Scaling ECS cluster capacity (min/max/desired).
+- Instance type changes.
+- ALB configuration changes (idle timeout, deletion protection).
+- Security group rule updates.
+- SSM State Manager association changes.
+
+**Deploy Command**:
+
+```bash
+cdk deploy development-MonitoringInfra
+```
+
+**What Changes**:
+- Auto Scaling Group configuration (capacity, instance type).
+- ECS cluster settings (Container Insights, execute command).
+- ALB configuration (idle timeout, access logs).
+- Security group rules between ALB and ECS.
+- Launch template (user data, IAM permissions).
+- CloudWatch log group retention.
+
+**What Doesn't Change**:
+- EFS file system remains untouched.
+- Service definitions (container images, task definitions) unchanged.
+- Existing data in EFS persists.
+
+**Impact on Services**:
+- Services may be restarted if ASG is updated (rolling update).
+- Brief downtime possible during instance replacement.
+- Use `desiredCapacity >= 2` for zero-downtime updates.
+
+**Rollback**:
+
+```bash
+# CloudFormation automatic rollback on failure
+# Manual rollback:
+aws cloudformation cancel-update-stack --stack-name development-MonitoringInfra
+```
+
+**Cost Impact**: High. EC2 instances and ALB are primary cost drivers.
+
+### Layer 2: Services Stack (MonitoringServiceStack)
+
+**When to Deploy**:
+- Initial setup.
+- Container image updates (Prometheus, Grafana, Node Exporter).
+- Service configuration changes (CPU, memory, environment variables).
+- Health check adjustments.
+- Target group modifications.
+- Path-based routing rule changes.
+
+**Deploy Command**:
+
+```bash
+cdk deploy development-MonitoringService
+```
+
+**What Changes**:
+- ECS task definitions (container images, resource limits).
+- ECS services (desired count, deployment configuration).
+- ALB target groups (health check settings).
+- ALB listener rules (path patterns, priorities).
+- Service-to-service security group connections.
+
+**What Doesn't Change**:
+- EFS file system untouched (data persists).
+- ECS cluster configuration unchanged.
+- ALB itself unchanged (only target groups and rules).
+- Auto Scaling Group untouched.
+
+**Impact on Services**:
+- ECS performs rolling update of tasks.
+- Old tasks drain and new tasks start.
+- Health checks ensure new tasks are healthy before old tasks terminate.
+- Zero-downtime deployment with `desiredCount >= 2`.
+
+**Rollback**:
+
+```bash
+# Automatic rollback on health check failures
+# Manual rollback to previous image:
+cdk deploy development-MonitoringService
+# (with previous image tags in construct configuration)
+```
+
+**Cost Impact**: Low. Minimal cost difference for running containers.
+
+### Selective Deployment Examples
+
+#### Example 1: Update Only Grafana Image
+
+Problem: New Grafana version available, need to update without touching Prometheus or infrastructure.
+
+Solution:
+
+1. Update Grafana image tag in `lib/constructs/services/monitoring/grafana/grafana-construct.ts`.
+2. Deploy only Layer 2.
+
+```bash
+cdk deploy development-MonitoringService
+```
+
+Result:
+- Only Grafana service is updated.
+- Prometheus continues running on old version.
+- Infrastructure and storage unchanged.
+- Deployment completes in 3-5 minutes.
+
+#### Example 2: Scale ECS Cluster for Increased Load
+
+Problem: Prometheus is running out of memory, need to scale cluster without updating services.
+
+Solution:
+
+1. Update `minCapacity`, `maxCapacity`, or `instanceType` in `bin/stacks/monitoring-stack.ts`.
+2. Deploy only Layer 1.
+
+```bash
+cdk deploy development-MonitoringInfra
+```
+
+Result:
+- Auto Scaling Group scales to new capacity.
+- ECS redistributes tasks across new instances.
+- Service definitions unchanged (no image pulls).
+- Storage unchanged.
+
+#### Example 3: Adjust EFS Lifecycle Policy
+
+Problem: EFS costs too high, need to transition data to Infrequent Access storage class sooner.
+
+Solution:
+
+1. Update `lifecyclePolicy` in `bin/stacks/monitoring-stack.ts`.
+2. Deploy only Layer 0.
+
+```bash
+cdk deploy development-MonitoringEfs
+```
+
+Result:
+- EFS lifecycle policy updated.
+- Existing data transitions according to new policy.
+- No service restarts required.
+- Infrastructure unchanged.
+
+## Troubleshooting
+
+### Common Deployment Issues
+
+#### Issue: Stack Dependencies Not Met
+
+```
+Error: development-MonitoringInfra depends on development-MonitoringEfs
+```
+
+**Cause**: Attempting to deploy a higher layer before lower layers exist.
+
+**Solution**: Deploy stacks in order:
+
+```bash
+cdk deploy development-Networking      # Foundation first
+cdk deploy development-MonitoringEfs   # Then Layer 0
+cdk deploy development-MonitoringInfra # Then Layer 1
+```
+
+#### Issue: Services Not Healthy After Deployment
+
+```
+Error: Service tasks failing health checks
+```
+
+**Cause**: EFS not mounted, misconfigured volumes, or incorrect ALB routing.
+
+**Diagnosis**:
+
+```bash
+# Check ECS service events
+aws ecs describe-services \
+  --cluster development-monitoring-cluster \
+  --services development-monitoring-prometheus \
+  --query 'services[0].events[0:5]'
+
+# Check task logs
+aws logs tail /ecs/development-MonitoringInfra/tasks --follow
+
+# Verify EFS mount targets are available
+aws efs describe-mount-targets \
+  --file-system-id <efs-id> \
+  --query 'MountTargets[*].[AvailabilityZoneName,LifeCycleState]'
+```
+
+**Solution**: Ensure Layer 0 (EFS) completed successfully and initialisation Lambda ran.
+
+#### Issue: Lambda Initialisation Timeout
+
+```
+Error: Custom resource initialization timed out
+```
+
+**Cause**: EFS mount taking longer than expected or network connectivity issues.
+
+**Diagnosis**:
+
+```bash
+# Check Lambda logs
+aws logs tail /aws/lambda/development-monitoring-efs-init --follow
+
+# Verify mount targets are ready
+aws efs describe-mount-targets \
+  --file-system-id <efs-id>
+```
+
+**Solution**: Redeploy MonitoringEfsStack. Lambda will retry initialisation.
+
+#### Issue: ALB Health Checks Failing
+
+```
+Warning: Target group has no healthy targets
+```
+
+**Cause**: Incorrect health check path, services not started, or security group blocking traffic.
+
+**Diagnosis**:
+
+```bash
+# Check target health
+aws elbv2 describe-target-health \
+  --target-group-arn <target-group-arn>
+
+# Verify security group allows ALB to ECS
+aws ec2 describe-security-group-rules \
+  --filters "Name=group-id,Values=<ecs-sg-id>" \
+  --query 'SecurityGroupRules[?IsEgress==`false`]'
+```
+
+**Solution**: Verify security group rules in Layer 1 allow ALB-to-ECS traffic on correct ports.
+
+### Rollback Strategies
+
+#### Rollback Entire Deployment
+
+If issues arise across multiple layers:
+
+```bash
+# Destroy in reverse order
+cdk destroy development-MonitoringService  # Layer 2 first
+cdk destroy development-MonitoringInfra    # Then Layer 1
+cdk destroy development-MonitoringEfs      # Then Layer 0
+cdk destroy development-Networking         # Finally foundation
+```
+
+#### Rollback Single Layer
+
+If only one layer has issues:
+
+```bash
+# Roll back service layer only
+cdk destroy development-MonitoringService
+
+# Infrastructure and storage remain intact
+# Redeploy with fixes:
+cdk deploy development-MonitoringService
+```
+
+### Debugging Commands
+
+```bash
+# View CloudFormation events in real-time
+aws cloudformation describe-stack-events \
+  --stack-name development-MonitoringService \
+  --query 'StackEvents[0:10].[Timestamp,ResourceStatus,LogicalResourceId,ResourceStatusReason]' \
+  --output table
+
+# Check for failed resources
+aws cloudformation describe-stack-resources \
+  --stack-name development-MonitoringService \
+  --query 'StackResources[?ResourceStatus!=`CREATE_COMPLETE` && ResourceStatus!=`UPDATE_COMPLETE`]'
+
+# List all stack outputs
+aws cloudformation describe-stacks \
+  --stack-name development-MonitoringService \
+  --query 'Stacks[0].Outputs[*].[OutputKey,OutputValue]' \
+  --output table
+```
+
+## Advanced Topics
+
+### Environment-Specific Configuration
+
+Different environments have different requirements. The architecture supports environment-aware defaults:
+
+**Development**:
+- Single ECS instance (minCapacity: 1).
+- EFS lifecycle: transition to IA after 7 days.
+- Removal policy: DESTROY (allows cleanup).
+- Container Insights: Enabled for debugging.
+
+**Production**:
+- Multiple ECS instances (minCapacity: 2, desiredCapacity: 2).
+- EFS lifecycle: transition to IA after 30 days.
+- Removal policy: RETAIN (protects data).
+- ALB deletion protection: Enabled.
+- Access logs: Enabled for audit trail.
+
+Configuration is defined in `config/environments.ts`:
+
+```typescript
+development: {
+  account: "123456789012",
+  region: "eu-west-1",
+  vpcCidr: "10.1.0.0/16",
+  natGateways: 0,
+  isProduction: false,
+  envName: "development",
+}
+
+production: {
+  account: "987654321098",
+  region: "eu-west-1",
+  vpcCidr: "10.2.0.0/16",
+  natGateways: 1,
+  isProduction: true,
+  envName: "production",
+}
+```
+
+The layered architecture automatically adjusts each layer based on `isProduction` flag.
+
+### Multi-Environment Deployment
+
+Deploy to multiple environments sequentially:
+
+```bash
+# Development first
+cdk deploy --context environment=development --all
+
+# Then staging
+cdk deploy --context environment=staging --all
+
+# Finally production
+cdk deploy --context environment=production --all
+```
+
+Each environment has isolated stacks with no cross-contamination.
+
+### Stack Update Strategies
+
+#### Zero-Downtime Service Updates
+
+For production environments:
+
+1. Ensure `desiredCapacity >= 2` in Layer 1.
+2. Update service configuration in Layer 2.
+3. Deploy Layer 2 only.
+
+ECS performs rolling update:
+- Starts new tasks with updated configuration.
+- Waits for new tasks to pass health checks.
+- Drains and stops old tasks.
+- No service interruption.
+
+#### Infrastructure Scaling Without Downtime
+
+For scaling ECS cluster:
+
+1. Increase `maxCapacity` in Layer 1.
+2. Deploy Layer 1 only.
+3. Auto Scaling Group adds new instances.
+4. ECS redistributes tasks across instances.
+5. Services continue running throughout.
+
+### Cost Optimisation Through Layers
+
+The layered architecture makes cost optimisation transparent:
+
+**Layer 0 Costs** (Storage):
+- EFS storage: Pay per GB-month.
+- EFS Infrequent Access: Lower cost for older data.
+- Lambda executions: One-time initialisation, negligible cost.
+
+**Cost Control**: Adjust lifecycle policy to transition data to IA storage sooner.
+
+```bash
+# Change from 30 days to 7 days
+cdk deploy development-MonitoringEfs
+```
+
+**Layer 1 Costs** (Infrastructure):
+- EC2 instances: Primary cost driver.
+- Application Load Balancer: Fixed cost regardless of traffic.
+- NAT Gateway: Per-hour and per-GB charges.
+
+**Cost Control**: Scale down capacity in non-production environments.
+
+```bash
+# Reduce to single instance for dev
+cdk deploy development-MonitoringInfra
+```
+
+**Layer 2 Costs** (Services):
+- CloudWatch Logs: Pay per GB ingested and stored.
+- Container registry pulls: Minimal for private ECR.
+- Data transfer: Between ECS and EFS (free in same AZ).
+
+**Cost Control**: Reduce log retention or adjust log verbosity.
+
+### Disaster Recovery
+
+The layered architecture simplifies disaster recovery:
+
+#### Scenario: Complete Region Failure
+
+1. **Foundation**: Deploy NetworkingStack to new region.
+2. **Layer 0**: Deploy MonitoringEfsStack (restore from backup or start fresh).
+3. **Layer 1**: Deploy MonitoringInfraStack (provisions new compute).
+4. **Layer 2**: Deploy MonitoringServiceStack (starts services with existing data).
+
+Each layer can be recreated independently, speeding recovery.
+
+#### Scenario: Corrupted EFS Data
+
+1. Destroy Layer 2 (services).
+2. Destroy Layer 0 (EFS).
+3. Redeploy Layer 0 (fresh EFS).
+4. Redeploy Layer 2 (services reconnect to new EFS).
+5. Layer 1 (infrastructure) remains untouched.
+
+### Cross-Account Monitoring
+
+For centralised monitoring across multiple AWS accounts:
+
+1. Deploy NetworkingStack in monitoring account (pipeline).
+2. Deploy MonitoringEfsStack in monitoring account.
+3. Deploy MonitoringInfraStack in monitoring account.
+4. Deploy MonitoringServiceStack with cross-account targets.
+
+Prometheus in the monitoring account scrapes metrics from other accounts using IAM role assumption.
+
+## Summary
+
+### Key Takeaways
+
+1. **Three Independent Layers**: Storage, Infrastructure, Services deployed separately.
+2. **Minimised Blast Radius**: Only deploy what changes, reducing risk and deployment time.
+3. **Clear Dependencies**: Explicit stack dependencies prevent out-of-order deployments.
+4. **Faster Iteration**: Service updates take 3-5 minutes instead of 15-20 minutes.
+5. **Cost Transparency**: Each layer's costs are clearly attributed and optimisable.
+6. **Safer Production Deployments**: Reduced scope of changes per deployment.
+
+### Deployment Order Reference
+
+```
+1. development-Networking         (Foundation - VPC)
+2. development-MonitoringEfs      (Layer 0 - Storage)
+3. development-MonitoringInfra    (Layer 1 - Infrastructure)
+4. development-MonitoringService  (Layer 2 - Services)
+```
+
+### Quick Reference
+
+| Task | Command | Duration | Affects |
+|------|---------|----------|---------|
+| Update Grafana image | `cdk deploy development-MonitoringService` | 3-5 min | Services only |
+| Scale ECS cluster | `cdk deploy development-MonitoringInfra` | 8-12 min | Infrastructure only |
+| Adjust EFS policy | `cdk deploy development-MonitoringEfs` | 2-4 min | Storage only |
+| Full deployment | `cdk deploy --all` | 20-30 min | All layers |
+
+### Support
 
 For issues or questions:
 
-1. Check CloudFormation events in AWS Console
-2. Review CloudWatch Logs for VPC Flow Logs
-3. Verify environment configuration in `config/environments.ts`
-4. Check CDK Nag suppressions in `lib/cdk-nag/suppression-manager.ts`
-5. Verify stack name matches `${ENVIRONMENT}-Networking` pattern
-6. Ensure yarn is used for all package management commands
+1. Check CloudFormation stack events in AWS Console.
+2. Review ECS service events for task failures.
+3. Examine CloudWatch Logs for service logs.
+4. Verify SSM parameters are created correctly.
+5. Ensure stack dependencies are met (deploy in order).
+6. Check security group rules allow required traffic.
