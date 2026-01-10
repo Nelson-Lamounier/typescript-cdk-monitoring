@@ -5,7 +5,7 @@ import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as efs from "aws-cdk-lib/aws-efs";
 import { Template, Match } from "aws-cdk-lib/assertions";
 
-import { MonitoringEfsStack } from "../../../../lib/stacks/monitoring/monitoring-efs-stack";
+import { MonitoringEfsStack } from "../../../../lib/stacks/monitoring/efs-stack";
 import { MonitoringEfsStackProps } from "../../../../lib/shared/types";
 
 // ============================================================================
