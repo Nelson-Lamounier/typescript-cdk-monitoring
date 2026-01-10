@@ -2,106 +2,59 @@
 /** @format */
 
 import "source-map-support/register";
-import "dotenv/config";
 import * as cdk from "aws-cdk-lib";
-import { Aspects } from "aws-cdk-lib";
-import { AwsSolutionsChecks } from "cdk-nag";
 
 import { environments } from "../config/environments";
 
-import {
-  resolveCertificate,
-  resolveDomainConfig,
-} from "./helpers/certificate-helper";
 import { deployFoundationStacks } from "./stacks/foundation-stack";
-import { deployMonitoringStacks } from "./stacks/monitoring-stack";
+import { createMonitoringStacks } from "./stacks/monitoring-stack";
 
-// ============================================================================
-// INITIALIZE CDK APP
-// ============================================================================
 const app = new cdk.App();
 
-// ============================================================================
-// ENVIRONMENT CONFIGURATION
-// ============================================================================
-const envName = process.env.ENVIRONMENT || "development";
-const config = environments[envName];
+// Get environment from context or use default
+const envName = app.node.tryGetContext("environment") || "development";
+const envConfig = environments[envName];
 
-if (!config) {
+if (!envConfig) {
   throw new Error(
-    `Unknown environment: ${envName}. ` +
-      `Valid options: ${Object.keys(environments).join(", ")}`
+    `Environment '${envName}' not found in configuration.\n\n` +
+      `Available environments: ${Object.keys(environments).join(", ")}\n` +
+      `Usage: cdk deploy --context environment=development`
   );
 }
 
-if (!config.account) {
-  throw new Error(
-    `Account ID not configured for ${envName}. ` +
-      `Set AWS_PIPELINE_ACCOUNT_ID environment variable.`
-  );
-}
+console.log(`Deploying to environment: ${envName}`);
+console.log(`Region: ${envConfig.region}`);
+console.log(`Account: ${envConfig.account}`);
 
+// Stack props
 const stackProps: cdk.StackProps = {
   env: {
-    account: config.account,
-    region: config.region,
+    account: envConfig.account,
+    region: envConfig.region,
   },
 };
 
 // ============================================================================
-// RESOLVE CERTIFICATE (for HTTPS)
+// FOUNDATION STACKS
 // ============================================================================
-const { rootDomainName, hostedZoneId } = resolveDomainConfig(app);
-// Certificate config will be used when HTTPS services are added
-const certificateConfig = resolveCertificate(
-  app,
-  config.envName,
-  stackProps,
-  rootDomainName,
-  hostedZoneId
-);
-void certificateConfig; // Will be used for ALB HTTPS listeners
+
+const { networkingStack } = deployFoundationStacks(app, envConfig, stackProps);
 
 // ============================================================================
-// 1. FOUNDATION: NETWORKING
+// MONITORING STACKS
 // ============================================================================
-// networkingStack will be used for cross-stack dependencies (VPC peering, etc.)
-const { networkingStack } = deployFoundationStacks(app, config, stackProps);
+
+createMonitoringStacks(app, envName, envConfig, networkingStack);
 
 // ============================================================================
-// 2. MONITORING: EFS STORAGE
+// STACK TAGGING
 // ============================================================================
-// Deploy monitoring stacks if enabled (default: enabled)
-// Set DEPLOY_MONITORING=false to skip monitoring stack deployment
-if (process.env.DEPLOY_MONITORING !== "false") {
-  const { efsStack } = deployMonitoringStacks(
-    app,
-    config,
-    stackProps,
-    networkingStack,
-    certificateConfig.certificateArn
-  );
-  void efsStack; // Will be used for future infrastructure stacks
-}
 
-// ============================================================================
-// 3. VPC PEERING (for cross-account monitoring)
-// ============================================================================
-// TODO: Implement VPC peering helper and stack deployment
+cdk.Tags.of(app).add("Environment", envName);
+cdk.Tags.of(app).add("ManagedBy", "CDK");
+cdk.Tags.of(app).add("Repository", "monitoring-iac");
 
-// ============================================================================
-// CDK NAG INTEGRATION
-// ============================================================================
-if (process.env.ENABLE_CDK_NAG !== "false") {
-  Aspects.of(app).add(
-    new AwsSolutionsChecks({
-      verbose: true,
-      logIgnores: !config.isProduction,
-    })
-  );
-}
+console.log(`All stacks initialised for ${envName}`);
 
-// ============================================================================
-// SYNTHESIZE
-// ============================================================================
 app.synth();

@@ -77,35 +77,31 @@ export function createMonitoringStacks(
   // ============================================================================
   console.log(`Creating ${stackNamePrefix}Infra stack...`);
 
-  const infraStack = new MonitoringInfraStack(
-    app,
-    `${stackNamePrefix}Infra`,
-    {
-      ...stackProps,
-      envName,
-      projectName,
+  const infraStack = new MonitoringInfraStack(app, `${stackNamePrefix}Infra`, {
+    ...stackProps,
+    envName,
+    projectName,
 
-      // Network Configuration
-      vpc: networkingStack.vpc,
+    // Network Configuration
+    vpc: networkingStack.vpc,
 
-      // EFS Configuration (from EFS stack)
-      fileSystem: efsStack.fileSystem,
-      efsAccessPoint: efsStack.accessPoint,
-      efsSecurityGroup: efsStack.mountTargetSecurityGroup,
-      efsAvailabilityZone: efsStack.efsAvailabilityZone,
-      efsInitializationComplete: efsStack.efsInitializationComplete,
-      efsStackName: efsStack.stackName,
+    // EFS Configuration (from EFS stack)
+    fileSystem: efsStack.fileSystem,
+    efsAccessPoint: efsStack.accessPoint,
+    efsSecurityGroup: efsStack.mountTargetSecurityGroup,
+    efsAvailabilityZone: efsStack.efsAvailabilityZone,
+    efsInitializationComplete: efsStack.efsInitializationComplete,
+    efsStackName: efsStack.stackName,
 
-      // EC2 Configuration
-      minCapacity: envConfig.isProduction ? 2 : 1,
-      maxCapacity: envConfig.isProduction ? 3 : 1,
-      desiredCapacity: envConfig.isProduction ? 2 : 1,
+    // EC2 Configuration
+    minCapacity: envConfig.isProduction ? 2 : 1,
+    maxCapacity: envConfig.isProduction ? 3 : 1,
+    desiredCapacity: envConfig.isProduction ? 2 : 1,
 
-      // Container Insights
-      enableContainerInsights: true,
-      enableExecuteCommand: true,
-    }
-  );
+    // Container Insights
+    enableContainerInsights: true,
+    enableExecuteCommand: true,
+  });
 
   // Add dependencies
   infraStack.addDependency(networkingStack);
