@@ -250,8 +250,8 @@ export class MonitoringEfsStack extends cdk.Stack {
     const efsInitLambda = new LambdaFunctionConstruct(this, "EfsInitLambda", {
       envName: props.envName,
       functionName: props.projectName
-        ? `${props.envName}-${props.projectName}-efs-init`
-        : `${props.envName}-efs-initialization`,
+        ? `${props.projectName}-efs-init`
+        : "efs-initialization",
       entry: "lambda/handlers/efs-initialisation.ts",
       handler: "handler",
       timeout: initializationTimeout,
