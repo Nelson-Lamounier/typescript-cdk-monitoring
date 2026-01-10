@@ -373,7 +373,7 @@ export class MonitoringEfsStack extends cdk.Stack {
     // Warn about DESTROY removal policy
     if (removalPolicy === cdk.RemovalPolicy.DESTROY) {
       cdk.Annotations.of(this).addWarning(
-        "⚠️ PRODUCTION: EFS removal policy set to DESTROY. " +
+        "PRODUCTION: EFS removal policy set to DESTROY. " +
           "All monitoring data (Prometheus metrics, Grafana dashboards) will be permanently deleted when stack is destroyed. " +
           "Set removalPolicy to RETAIN for production to prevent data loss."
       );
@@ -382,7 +382,7 @@ export class MonitoringEfsStack extends cdk.Stack {
     // Warn about encryption
     if (!enableEncryption) {
       cdk.Annotations.of(this).addWarning(
-        "⚠️ PRODUCTION: EFS encryption disabled. " +
+        "PRODUCTION: EFS encryption disabled. " +
           "Monitoring data will be stored unencrypted at rest. " +
           "Enable encryption for compliance (PCI-DSS, HIPAA) and security best practices."
       );
@@ -391,7 +391,7 @@ export class MonitoringEfsStack extends cdk.Stack {
     // Warn about lifecycle policy
     if (props.lifecyclePolicy === efs.LifecyclePolicy.AFTER_7_DAYS) {
       cdk.Annotations.of(this).addInfo(
-        "ℹ️ PRODUCTION: EFS lifecycle policy set to 7 days. " +
+        "PRODUCTION: EFS lifecycle policy set to 7 days. " +
           "Frequently accessed monitoring data will be moved to IA storage quickly. " +
           "Consider AFTER_30_DAYS for better performance with active metrics."
       );
@@ -411,7 +411,7 @@ export class MonitoringEfsStack extends cdk.Stack {
 
       if (targetsWithoutRole.length > 0) {
         cdk.Annotations.of(this).addWarning(
-          `⚠️ PRODUCTION: ${targetsWithoutRole.length} cross-account target(s) missing roleArn. ` +
+          `PRODUCTION: ${targetsWithoutRole.length} cross-account target(s) missing roleArn. ` +
             "EC2 service discovery requires IAM role for cross-account access. " +
             "These targets will fall back to static IP configuration."
         );
@@ -424,7 +424,7 @@ export class MonitoringEfsStack extends cdk.Stack {
       props.initializationTimeout.toMinutes() < 5
     ) {
       cdk.Annotations.of(this).addWarning(
-        `⚠️ PRODUCTION: EFS initialization timeout set to ${props.initializationTimeout.toMinutes()} minutes. ` +
+        `PRODUCTION: EFS initialization timeout set to ${props.initializationTimeout.toMinutes()} minutes. ` +
           "Lambda may timeout if EFS mount takes longer than expected. " +
           "Consider increasing to 5+ minutes for production."
       );

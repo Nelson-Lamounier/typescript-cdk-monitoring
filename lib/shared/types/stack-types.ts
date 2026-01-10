@@ -4,6 +4,7 @@ import * as cdk from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as efs from "aws-cdk-lib/aws-efs";
 import * as logs from "aws-cdk-lib/aws-logs";
+import * as kms from "aws-cdk-lib/aws-kms";
 
 import { SubnetConfiguration } from "./networking-types";
 import { CrossAccountTarget } from "./monitoring-types";
@@ -34,6 +35,8 @@ export interface NetworkingStackProps extends BaseStackProps {
   createSsmParameters?: boolean;
   createOutputs?: boolean;
   enableExports?: boolean;
+  flowLogRemovalPolicy?: cdk.RemovalPolicy;
+  flowLogEncryptionKey?: kms.IKey;
 }
 // ... existing types
 

@@ -88,24 +88,9 @@ import {
  * ```
  */
 export class NetworkingStack extends cdk.Stack {
-  /**
-   * VPC (IVpc interface for cross-stack references)
-   */
   public readonly vpc: ec2.IVpc;
-
-  /**
-   * VPC construct (for accessing subnets)
-   */
   public readonly vpcConstruct: VpcConstruct;
-
-  /**
-   * VPC flow logs construct (if enabled)
-   */
   public readonly flowLogs?: VpcFlowLogsConstruct;
-
-  /**
-   * SSM Parameters construct (if enabled)
-   */
   public readonly ssmParameters?: SsmParametersConstruct;
 
   constructor(scope: Construct, id: string, props: NetworkingStackProps) {
@@ -200,11 +185,18 @@ export class NetworkingStack extends cdk.Stack {
     // 2. VPC FLOW LOGS (Security & Compliance)
     // ========================================================================
     if (props.enableVpcFlowLogs !== false) {
+      // Environment-aware removal policy
+      const flowLogRemovalPolicy =
+        props.flowLogRemovalPolicy ??
+        (isProduction ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY);
+
       this.flowLogs = new VpcFlowLogsConstruct(this, "FlowLogs", {
         vpc: this.vpc,
         envName: props.envName,
+        projectName: props.projectName,
         trafficType: flowLogTrafficType,
         retentionDays: flowLogRetention,
+        removalPolicy: flowLogRemovalPolicy,
       });
     }
 
