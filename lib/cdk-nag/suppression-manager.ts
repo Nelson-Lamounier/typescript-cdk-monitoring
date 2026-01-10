@@ -405,6 +405,19 @@ export class SuppressionManager {
         reason:
           "VPC Flow Logs are disabled to reduce costs in development environments. For production, enable VPC Flow Logs to CloudWatch Logs or S3 for network troubleshooting and security analysis.",
       },
+      {
+        id: "AwsSolutions-IAM5",
+        reason:
+          "VPC Flow Logs IAM role requires wildcard permissions for log streams within the flow logs log group. The wildcard (logGroupArn:*) is necessary because VPC Flow Logs creates log streams dynamically with AWS-generated names. This is scoped to the specific log group ARN and is a standard pattern for CloudWatch Logs integration as documented in AWS VPC Flow Logs documentation: https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs-cwl.html",
+        appliesTo: [
+          {
+            regex: "/^Resource::arn:aws:logs:.*:.*:log-group:/aws/vpc/flowlogs/.*:\\*$/",
+          },
+          {
+            regex: "/^Resource::<.*FlowLogs.*LogGroup.*\\.Arn>:\\*$/",
+          },
+        ],
+      },
     ];
   }
 
