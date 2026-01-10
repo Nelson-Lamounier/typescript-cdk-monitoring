@@ -2,96 +2,148 @@
 
 import * as cdk from "aws-cdk-lib";
 
-import { MonitoringEfsStack } from "../../lib/stacks/monitoring/efs-stack";
 import { NetworkingStack } from "../../lib/stacks/foundation/networking-stack";
-import { CrossAccountTarget } from "../../lib/shared/types/monitoring-types";
+import { MonitoringEfsStack } from "../../lib/stacks/monitoring/efs-stack";
+import { MonitoringInfraStack } from "../../lib/stacks/monitoring/infra-stack";
+import { MonitoringServiceStack } from "../../lib/stacks/monitoring/service-stack";
 import { EnvironmentConfig } from "../../config/environments";
 
 /**
- * Deploy monitoring infrastructure (Prometheus + Grafana)
- * Can be deployed in any environment (pipeline, dev, staging, production)
+ * Create all monitoring stacks for a single environment
+ *
+ * Architecture:
+ * 1. MonitoringEfsStack - Storage layer (EFS file system)
+ * 2. MonitoringInfraStack - Compute layer (EC2, ECS cluster, ALB)
+ * 3. MonitoringServiceStack - Application layer (Prometheus, Grafana, Node Exporter)
+ *
+ * Dependencies:
+ * - Requires NetworkingStack (VPC, subnets, security groups)
+ * - Each monitoring stack depends on the previous one
+ *
+ * @param app CDK app
+ * @param envName Environment name (e.g., 'development', 'pipeline', 'production')
+ * @param envConfig Environment configuration
+ * @param networkingStack The networking stack (for VPC reference)
  */
-export function deployMonitoringStacks(
+export function createMonitoringStacks(
   app: cdk.App,
-  config: EnvironmentConfig,
-  stackProps: cdk.StackProps,
-  networkingStack: NetworkingStack,
-  _certificateArn?: string
-) {
-  // Get cross-account targets from CDK context (set by pipeline)
-  const crossAccountTargets: CrossAccountTarget[] =
-    app.node.tryGetContext("crossAccountTargets") || [];
+  envName: string,
+  envConfig: EnvironmentConfig,
+  networkingStack: NetworkingStack
+): {
+  efsStack: MonitoringEfsStack;
+  infraStack: MonitoringInfraStack;
+  serviceStack: MonitoringServiceStack;
+} {
+  const stackNamePrefix = `${envName}-Monitoring`;
+  const projectName = "monitoring";
 
-  // Layer 0: EFS Storage
-  const efsStack = new MonitoringEfsStack(
+  // Stack props with environment configuration
+  const stackProps: cdk.StackProps = {
+    env: {
+      account: envConfig.account,
+      region: envConfig.region,
+    },
+  };
+
+  // ============================================================================
+  // 1. MONITORING EFS STACK (Storage Layer)
+  // ============================================================================
+  console.log(`Creating ${stackNamePrefix}Efs stack...`);
+
+  const efsStack = new MonitoringEfsStack(app, `${stackNamePrefix}Efs`, {
+    ...stackProps,
+    envName,
+    projectName,
+
+    // VPC Configuration
+    vpc: networkingStack.vpc,
+
+    // EFS Configuration
+    enableEncryption: true,
+    lifecyclePolicy: envConfig.isProduction
+      ? cdk.aws_efs.LifecyclePolicy.AFTER_30_DAYS
+      : cdk.aws_efs.LifecyclePolicy.AFTER_7_DAYS,
+    removalPolicy: envConfig.isProduction
+      ? cdk.RemovalPolicy.RETAIN
+      : cdk.RemovalPolicy.DESTROY,
+  });
+
+  // Add dependency on networking
+  efsStack.addDependency(networkingStack);
+
+  // ============================================================================
+  // 2. MONITORING INFRASTRUCTURE STACK (Compute Layer)
+  // ============================================================================
+  console.log(`Creating ${stackNamePrefix}Infra stack...`);
+
+  const infraStack = new MonitoringInfraStack(
     app,
-    `${config.envName}-MonitoringEfs`,
+    `${stackNamePrefix}Infra`,
     {
       ...stackProps,
-      envName: config.envName,
-      projectName: "monitoring",
+      envName,
+      projectName,
+
+      // Network Configuration
       vpc: networkingStack.vpc,
-      crossAccountTargets,
-      enableEncryption: true,
-      lifecyclePolicy: config.isProduction
-        ? cdk.aws_efs.LifecyclePolicy.AFTER_30_DAYS
-        : cdk.aws_efs.LifecyclePolicy.AFTER_7_DAYS,
-      removalPolicy: config.isProduction
-        ? cdk.RemovalPolicy.RETAIN
-        : cdk.RemovalPolicy.DESTROY,
+
+      // EFS Configuration (from EFS stack)
+      fileSystem: efsStack.fileSystem,
+      efsAccessPoint: efsStack.accessPoint,
+      efsSecurityGroup: efsStack.mountTargetSecurityGroup,
+      efsAvailabilityZone: efsStack.efsAvailabilityZone,
+      efsInitializationComplete: efsStack.efsInitializationComplete,
+      efsStackName: efsStack.stackName,
+
+      // EC2 Configuration
+      minCapacity: envConfig.isProduction ? 2 : 1,
+      maxCapacity: envConfig.isProduction ? 3 : 1,
+      desiredCapacity: envConfig.isProduction ? 2 : 1,
+
+      // Container Insights
+      enableContainerInsights: true,
+      enableExecuteCommand: true,
     }
   );
 
-  efsStack.addDependency(networkingStack);
+  // Add dependencies
+  infraStack.addDependency(networkingStack);
+  infraStack.addDependency(efsStack);
 
-  //   // Layer 1: Infrastructure
-  //   const infraStack = new MonitoringInfraStack(
-  //     app,
-  //     `${config.envName}-MonitoringInfra`,
-  //     {
-  //       ...stackProps,
-  //       envName: config.envName,
-  //       projectName: "monitoring",
-  //       vpc: networkingStack.vpc,
-  //       efsStackName: efsStack.stackName,
-  //       fileSystem: efsStack.fileSystem,
-  //       efsAccessPoint: efsStack.accessPoint,
-  //       efsAvailabilityZone: efsStack.efsAvailabilityZone,
-  //       efsSecurityGroup: efsStack.mountTargetSecurityGroup,
-  //       efsInitializationComplete: efsStack.efsInitializationComplete,
-  //       enableHttps: !!certificateArn,
-  //       certificateArn,
-  //       allowedIpRanges: ["0.0.0.0/0"], // TODO: Restrict in production
-  //       enableAccessLogs: config.isProduction,
-  //       minCapacity: config.isProduction ? 2 : 1,
-  //       maxCapacity: config.isProduction ? 3 : 1,
-  //       desiredCapacity: config.isProduction ? 2 : 1,
-  //       enableDeletionProtection: config.isProduction,
-  //     }
-  //   );
+  // ============================================================================
+  // 3. MONITORING SERVICE STACK (Application Layer)
+  // ============================================================================
+  console.log(`Creating ${stackNamePrefix}Service stack...`);
 
-  //   infraStack.addDependency(efsStack);
+  const serviceStack = new MonitoringServiceStack(
+    app,
+    `${stackNamePrefix}Service`,
+    {
+      ...stackProps,
+      envName,
+      projectName,
 
-  //   // Layer 2: Services
-  //   const serviceStack = new MonitoringServiceStack(
-  //     app,
-  //     `${config.envName}-MonitoringService`,
-  //     {
-  //       ...stackProps,
-  //       envName: config.envName,
-  //       projectName: "monitoring",
-  //       cluster: infraStack.cluster,
-  //       autoScalingGroup: infraStack.autoScalingGroup,
-  //       loadBalancer: infraStack.loadBalancer,
-  //       listener: infraStack.listener,
-  //     }
-  //   );
+      // Infrastructure References (from Infra stack)
+      cluster: infraStack.cluster,
+      loadBalancer: infraStack.loadBalancer,
+      listener: infraStack.listener,
 
-  //   serviceStack.addDependency(infraStack);
+      // Service Configuration
+      enableExecuteCommand: true,
+    }
+  );
+
+  // Add dependencies
+  serviceStack.addDependency(networkingStack);
+  serviceStack.addDependency(efsStack);
+  serviceStack.addDependency(infraStack);
+
+  console.log(`✅ All monitoring stacks created for ${envName}`);
 
   return {
     efsStack,
-    // infraStack,
-    // serviceStack,
+    infraStack,
+    serviceStack,
   };
 }
