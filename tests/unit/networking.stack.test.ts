@@ -5,7 +5,7 @@ import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as iam from "aws-cdk-lib/aws-iam";
 import { Template, Match, Capture } from "aws-cdk-lib/assertions";
 
-import { NetworkingStack } from "../../lib/stacks/networking-stack";
+import { NetworkingStack } from "../../lib/stacks/networking-stack-deprecated";
 import { VpcConstruct } from "../../lib/constructs/networking/vpc/vpc-construct";
 import { SubnetConfigurationHelper } from "../../lib/shared/helpers";
 
