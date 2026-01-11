@@ -493,7 +493,7 @@ echo "EFS setup completed successfully"
     fileSystemId: string,
     accessPointId: string
   ): ssm.CfnAssociation {
-    return new ssm.CfnAssociation(this, "AutomationExecution", {
+    const association = new ssm.CfnAssociation(this, "AutomationExecution", {
       name: this.documentName,
       parameters: {
         FileSystemId: [fileSystemId],
@@ -504,5 +504,11 @@ echo "EFS setup completed successfully"
       // Run once on demand
       applyOnlyAtCronInterval: false,
     });
+
+    // CRITICAL: Ensure the association waits for the document to be created
+    // Without this, CloudFormation will try to create the association before the document exists
+    association.addDependency(this.document);
+
+    return association;
   }
 }
