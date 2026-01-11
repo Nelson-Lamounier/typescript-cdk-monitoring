@@ -282,13 +282,13 @@ echo "Creating configuration files from SSM parameters..."
 echo "NOTE: HOST_IP_PLACEHOLDER in Grafana datasource config will be replaced at runtime on EC2 instance"
 
 # Download Prometheus config
-aws ssm get-parameter --region {region} --name "/monitoring/{environment}/prometheus-config-yaml" --query "Parameter.Value" --output text > /mnt/efs/config/prometheus/prometheus.yml
+aws ssm get-parameter --region ''' + region + ''' --name "/monitoring/''' + environment + '''/prometheus-config-yaml" --query "Parameter.Value" --output text > /mnt/efs/config/prometheus/prometheus.yml
 
 # Download Grafana datasource config (HOST_IP_PLACEHOLDER will be replaced by application-setup script on EC2)
-aws ssm get-parameter --region {region} --name "/monitoring/{environment}/grafana-datasource-config-yaml" --query "Parameter.Value" --output text > /mnt/efs/config/grafana/provisioning/datasources/prometheus.yml
+aws ssm get-parameter --region ''' + region + ''' --name "/monitoring/''' + environment + '''/grafana-datasource-config-yaml" --query "Parameter.Value" --output text > /mnt/efs/config/grafana/provisioning/datasources/prometheus.yml
 
 # Download Grafana dashboard config
-aws ssm get-parameter --region {region} --name "/monitoring/{environment}/grafana-dashboard-config-yaml" --query "Parameter.Value" --output text > /mnt/efs/config/grafana/provisioning/dashboards/dashboards.yml
+aws ssm get-parameter --region ''' + region + ''' --name "/monitoring/''' + environment + '''/grafana-dashboard-config-yaml" --query "Parameter.Value" --output text > /mnt/efs/config/grafana/provisioning/dashboards/dashboards.yml
 
 # Set proper ownership for config files
 chown 65534:65534 /mnt/efs/config/prometheus/prometheus.yml

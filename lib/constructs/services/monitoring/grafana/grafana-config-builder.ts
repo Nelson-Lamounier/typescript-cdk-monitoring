@@ -26,10 +26,12 @@ export function buildGrafanaEnvironment(
     GF_SERVER_ROOT_URL: props.rootUrl ?? DEFAULT_GRAFANA_ROOT_URL,
     GF_SERVER_SERVE_FROM_SUB_PATH: "true",
     GF_USERS_ALLOW_SIGN_UP: "false",
-    GF_PATHS_PROVISIONING: "/etc/grafana/provisioning",
-    GF_PATHS_DATA: "/var/lib/grafana",
-    GF_PATHS_PLUGINS: "/var/lib/grafana/plugins",
-    GF_PATHS_LOGS: "/var/log/grafana",
+    // CRITICAL: Point Grafana to EFS mounts, not default container paths
+    // This ensures data persists and permissions match EFS setup (UID 472, GID 0)
+    GF_PATHS_PROVISIONING: "/mnt/efs/config/grafana/provisioning",
+    GF_PATHS_DATA: "/mnt/efs/grafana-data",
+    GF_PATHS_PLUGINS: "/mnt/efs/grafana-data/plugins",
+    GF_PATHS_LOGS: "/mnt/efs/grafana-data/logs",
     GF_LOG_MODE: "console",
     GF_LOG_LEVEL: "info",
     GF_INSTALL_PLUGINS: props.installPlugins ?? DEFAULT_GRAFANA_PLUGINS,
