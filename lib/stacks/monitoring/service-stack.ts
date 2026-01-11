@@ -4,6 +4,7 @@ import * as cdk from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
+import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import { Construct } from "constructs";
 
 import { GrafanaServiceConstruct } from "../../constructs/services/monitoring/grafana/grafana-construct";
@@ -30,6 +31,7 @@ import { isProductionEnvironment } from "../../shared/utils/environment";
  * It depends on MonitoringInfraStack (Layer 1) for infrastructure.
  *
  * Components:
+ * - Grafana admin password secret (auto-generated in Secrets Manager)
  * - Prometheus ECS service with EC2 service discovery
  * - Grafana ECS service with CloudWatch integration
  * - Node Exporter ECS service for host metrics
@@ -40,6 +42,7 @@ import { isProductionEnvironment } from "../../shared/utils/environment";
  * - MonitoringInfraStack (for cluster, ASG, ALB, listener)
  *
  * Features:
+ * - Auto-generated Grafana admin password (retrievable from Secrets Manager)
  * - Path-based routing (/grafana, /prometheus)
  * - Health checks with redirect support (200, 301, 302)
  * - Bridge networking with dynamic port support
@@ -193,14 +196,41 @@ export class MonitoringServiceStack extends cdk.Stack {
     this.prometheusService = prometheusConstruct.service as ecs.Ec2Service;
 
     // ========================================================================
-    // 2. CREATE GRAFANA SERVICE
+    // 2. CREATE GRAFANA ADMIN PASSWORD SECRET
     // ========================================================================
-    // Grafana admin password secret name
-    // The secret must exist in AWS Secrets Manager before deployment
-    // Create it with: aws secretsmanager create-secret --name grafana-admin-password --secret-string "your-password"
-    const grafanaSecretName =
-      process.env.GRAFANA_ADMIN_PASSWORD_SECRET_NAME ||
-      "grafana-admin-password";
+    // Create Grafana admin password secret if it doesn't already exist
+    // Uses a generated password for security (can be rotated via Secrets Manager)
+    const grafanaAdminSecret = new secretsmanager.Secret(
+      this,
+      "GrafanaAdminPassword",
+      {
+        secretName: `${props.envName}-grafana-admin-password`,
+        description: `Grafana admin password for ${props.envName} monitoring stack`,
+        generateSecretString: {
+          secretStringTemplate: JSON.stringify({ username: "admin" }),
+          generateStringKey: "password",
+          excludePunctuation: true,
+          passwordLength: 32,
+        },
+        removalPolicy:
+          props.envName === "production"
+            ? cdk.RemovalPolicy.RETAIN
+            : cdk.RemovalPolicy.DESTROY,
+      }
+    );
+
+    // Output secret ARN for manual password retrieval if needed
+    new cdk.CfnOutput(this, "GrafanaAdminSecretArn", {
+      value: grafanaAdminSecret.secretArn,
+      description: "Grafana admin password secret ARN (retrieve via AWS Console or CLI)",
+      exportName: props.enableExports
+        ? `${props.envName}-grafana-admin-secret-arn`
+        : undefined,
+    });
+
+    // ========================================================================
+    // 3. CREATE GRAFANA SERVICE
+    // ========================================================================
 
     const grafanaConstruct = new GrafanaServiceConstruct(this, "Grafana", {
       cluster: props.cluster as ecs.Cluster,
@@ -214,7 +244,7 @@ export class MonitoringServiceStack extends cdk.Stack {
       dashboardsVolume: {
         hostPath: grafanaDashboardsPath,
       },
-      adminPasswordSecretArn: grafanaSecretName,
+      adminPasswordSecretArn: grafanaAdminSecret.secretName,
       rootUrl: grafanaRootUrl,
       enableExecuteCommand,
       logRetention,
@@ -233,8 +263,11 @@ export class MonitoringServiceStack extends cdk.Stack {
 
     this.grafanaService = grafanaConstruct.service as ecs.Ec2Service;
 
+    // Grant the Grafana task execution role permission to read the secret
+    grafanaAdminSecret.grantRead(grafanaConstruct.taskDefinition.executionRole!);
+
     // ========================================================================
-    // 3. CREATE NODE EXPORTER SERVICE
+    // 4. CREATE NODE EXPORTER SERVICE
     // ========================================================================
     const nodeExporterConstruct = new NodeExporterConstruct(
       this,
@@ -252,12 +285,12 @@ export class MonitoringServiceStack extends cdk.Stack {
     this.nodeExporterService = nodeExporterConstruct.service;
 
     // ========================================================================
-    // 4. CONFIGURE LOAD BALANCER ROUTING
+    // 5. CONFIGURE LOAD BALANCER ROUTING
     // ========================================================================
     this.configureLoadBalancerRouting(props);
 
     // ========================================================================
-    // 5. SSM PARAMETERS (for service discovery)
+    // 6. SSM PARAMETERS (for service discovery)
     // ========================================================================
     if (props.createSsmParameters !== false) {
       this.ssmParameters = new SsmParametersConstruct(this, "Parameters", {

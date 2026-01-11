@@ -11,17 +11,28 @@ export interface EcsTaskExecutionRoleProps {
   envName: string;
   enablePublicEcr?: boolean;
   logGroupArn?: string;
+  /**
+   * List of Secrets Manager secret ARNs that the task needs to access
+   * If not provided, grants access to all secrets in the account (less restrictive)
+   */
+  secretArns?: string[];
 }
 
 /**
- * Centralized ECS Task Execution Role Construct
+ * Centralised ECS Task Execution Role Construct
  *
  * Creates an IAM role for ECS tasks with:
- * - ECR image pull permissions
+ * - ECR image pull permissions (private or public)
  * - CloudWatch Logs permissions
+ * - Secrets Manager permissions (for container secrets)
  * - Optional public ECR access
  *
- * This role is used by ECS tasks to pull container images and write logs.
+ * This role is used by ECS tasks to:
+ * - Pull container images from ECR
+ * - Write logs to CloudWatch
+ * - Read secrets from Secrets Manager (for environment variables)
+ *
+ * @see https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task_execution_IAM_role.html
  */
 export class EcsTaskExecutionRole extends Construct {
   public readonly role: iam.Role;
@@ -29,7 +40,7 @@ export class EcsTaskExecutionRole extends Construct {
   constructor(scope: Construct, id: string, props: EcsTaskExecutionRoleProps) {
     super(scope, id);
 
-    const { envName, enablePublicEcr = false, logGroupArn } = props;
+    const { envName, enablePublicEcr = false, logGroupArn, secretArns } = props;
 
     // Create execution role
     this.role = new iam.Role(this, "ExecutionRole", {
@@ -99,6 +110,33 @@ export class EcsTaskExecutionRole extends Construct {
             `arn:aws:logs:${cdk.Stack.of(this).region}:${
               cdk.Stack.of(this).account
             }:log-group:/ecs/*:*`,
+          ],
+        })
+      );
+    }
+
+    // Grant Secrets Manager permissions
+    // Required for ECS to retrieve secrets and inject them as environment variables
+    if (secretArns && secretArns.length > 0) {
+      // Specific secrets
+      this.role.addToPrincipalPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["secretsmanager:GetSecretValue"],
+          resources: secretArns,
+        })
+      );
+    } else {
+      // All secrets in the account (less restrictive, but convenient for development)
+      // In production, consider passing specific secret ARNs
+      this.role.addToPrincipalPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["secretsmanager:GetSecretValue"],
+          resources: [
+            `arn:aws:secretsmanager:${cdk.Stack.of(this).region}:${
+              cdk.Stack.of(this).account
+            }:secret:*`,
           ],
         })
       );
