@@ -35,11 +35,8 @@ export interface EfsInitializationDocumentProps {
 /**
  * EFS Initialization SSM Automation Document Construct
  *
- * Creates an SSM Automation Document that initializes EFS configuration by:
- * - Reading JSON configurations from SSM Parameter Store
- * - Converting JSON to YAML format
- * - Storing YAML configurations back to SSM for EC2 instances
- * - Creating EFS setup scripts
+ * Creates an SSM Automation Document that initializes EFS by generating
+ * the directory setup script and storing it in SSM Parameter Store.
  *
  * Benefits over Lambda:
  * - No cold starts
@@ -49,11 +46,12 @@ export interface EfsInitializationDocumentProps {
  * - Can be invoked by CloudFormation or SSM State Manager
  *
  * Architecture:
- * This document executes Python scripts in automation steps to:
- * 1. Retrieve existing JSON configurations from SSM
- * 2. Convert JSON to YAML using PyYAML
- * 3. Store converted YAML configurations
- * 4. Generate and store EFS setup script
+ * This document executes a Python script in automation step to:
+ * 1. Generate EFS directory setup script
+ * 2. Store the script in SSM Parameter Store
+ *
+ * Note: YAML conversion is now done at CDK synthesis time, not runtime.
+ * This eliminates the need for PyYAML dependency in SSM Automation.
  *
  * Usage:
  * - Can be executed manually via SSM console
@@ -72,14 +70,11 @@ export interface EfsInitializationDocumentProps {
  *   }
  * );
  *
- * // Use in CloudFormation custom resource
- * new cdk.CustomResource(this, 'EfsInit', {
- *   serviceToken: efsInitDoc.documentArn,
- *   properties: {
- *     FileSystemId: fileSystem.fileSystemId,
- *     AccessPointId: accessPoint.accessPointId,
- *   },
- * });
+ * // Create execution via SSM Association
+ * const execution = efsInitDoc.createExecution(
+ *   fileSystem.fileSystemId,
+ *   accessPoint.accessPointId
+ * );
  * ```
  */
 export class EfsInitializationDocumentConstruct extends Construct {
@@ -199,55 +194,7 @@ export class EfsInitializationDocumentConstruct extends Construct {
         },
       },
       mainSteps: [
-        // Step 1: Convert Prometheus configuration
-        {
-          name: "ConvertPrometheusConfig",
-          action: "aws:executeScript",
-          description: "Convert Prometheus JSON config to YAML",
-          inputs: {
-            Runtime: "python3.11",
-            Handler: "convert_config",
-            Script: this.getPythonConversionScript(),
-            InputPayload: {
-              parameterName: `/monitoring/{{ Environment }}/prometheus-config`,
-              outputParameterName: `/monitoring/{{ Environment }}/prometheus-config-yaml`,
-              region,
-            },
-          },
-        },
-        // Step 2: Convert Grafana datasource configuration
-        {
-          name: "ConvertGrafanaDatasourceConfig",
-          action: "aws:executeScript",
-          description: "Convert Grafana datasource JSON config to YAML",
-          inputs: {
-            Runtime: "python3.11",
-            Handler: "convert_config",
-            Script: this.getPythonConversionScript(),
-            InputPayload: {
-              parameterName: `/monitoring/{{ Environment }}/grafana-datasource-config`,
-              outputParameterName: `/monitoring/{{ Environment }}/grafana-datasource-config-yaml`,
-              region,
-            },
-          },
-        },
-        // Step 3: Convert Grafana dashboard configuration
-        {
-          name: "ConvertGrafanaDashboardConfig",
-          action: "aws:executeScript",
-          description: "Convert Grafana dashboard JSON config to YAML",
-          inputs: {
-            Runtime: "python3.11",
-            Handler: "convert_config",
-            Script: this.getPythonConversionScript(),
-            InputPayload: {
-              parameterName: `/monitoring/{{ Environment }}/grafana-dashboard-config`,
-              outputParameterName: `/monitoring/{{ Environment }}/grafana-dashboard-config-yaml`,
-              region,
-            },
-          },
-        },
-        // Step 4: Create and store EFS setup script
+        // Create and store EFS setup script
         {
           name: "CreateEfsSetupScript",
           action: "aws:executeScript",
@@ -263,12 +210,7 @@ export class EfsInitializationDocumentConstruct extends Construct {
           },
         },
       ],
-      outputs: [
-        "ConvertPrometheusConfig.OutputPayload",
-        "ConvertGrafanaDatasourceConfig.OutputPayload",
-        "ConvertGrafanaDashboardConfig.OutputPayload",
-        "CreateEfsSetupScript.OutputPayload",
-      ],
+      outputs: ["CreateEfsSetupScript.OutputPayload"],
     };
 
     return new ssm.CfnDocument(this, "AutomationDocument", {
@@ -281,98 +223,8 @@ export class EfsInitializationDocumentConstruct extends Construct {
   }
 
   /**
-   * Python script for JSON to YAML conversion
-   * This runs in the SSM Automation execution environment
-   */
-  private getPythonConversionScript(): string {
-    return `
-import json
-import boto3
-import yaml
-
-def convert_config(events, context):
-    """
-    Convert JSON configuration from SSM to YAML and store back to SSM
-    
-    Args:
-        events: Input payload with parameterName, outputParameterName, region
-        context: Lambda context (unused)
-    
-    Returns:
-        dict: Status and output parameter name
-    """
-    ssm_client = boto3.client('ssm', region_name=events['region'])
-    
-    parameter_name = events['parameterName']
-    output_parameter_name = events['outputParameterName']
-    
-    try:
-        # Get JSON configuration from SSM
-        print(f"Retrieving parameter: {parameter_name}")
-        response = ssm_client.get_parameter(Name=parameter_name)
-        json_value = response['Parameter']['Value']
-        
-        if not json_value:
-            raise ValueError(f"Parameter {parameter_name} is empty")
-        
-        # Parse JSON
-        config_dict = json.loads(json_value)
-        
-        # Convert to YAML
-        yaml_value = yaml.dump(
-            config_dict,
-            default_flow_style=False,
-            sort_keys=False,
-            allow_unicode=True,
-            width=1000
-        )
-        
-        if not yaml_value or not yaml_value.strip():
-            raise ValueError("Generated YAML is empty")
-        
-        print(f"Generated YAML ({len(yaml_value)} characters)")
-        
-        # Store YAML configuration in SSM
-        print(f"Storing YAML in parameter: {output_parameter_name}")
-        ssm_client.put_parameter(
-            Name=output_parameter_name,
-            Value=yaml_value,
-            Type='String',
-            Overwrite=True,
-            Description=f'YAML configuration converted from {parameter_name}',
-            Tags=[
-                {'Key': 'GeneratedBy', 'Value': 'SSM-Automation'},
-                {'Key': 'Source', 'Value': parameter_name}
-            ]
-        )
-        
-        return {
-            'statusCode': 200,
-            'body': {
-                'message': 'Configuration converted successfully',
-                'sourceParameter': parameter_name,
-                'outputParameter': output_parameter_name,
-                'yamlSize': len(yaml_value)
-            }
-        }
-        
-    except ssm_client.exceptions.ParameterNotFound:
-        error_msg = f"Parameter {parameter_name} not found. Ensure it exists before running initialization."
-        print(f"ERROR: {error_msg}")
-        raise Exception(error_msg)
-    except json.JSONDecodeError as e:
-        error_msg = f"Failed to parse JSON from {parameter_name}: {str(e)}"
-        print(f"ERROR: {error_msg}")
-        raise Exception(error_msg)
-    except Exception as e:
-        error_msg = f"Failed to convert configuration: {str(e)}"
-        print(f"ERROR: {error_msg}")
-        raise Exception(error_msg)
-`.trim();
-  }
-
-  /**
    * Python script for generating EFS setup script
+   * This runs in the SSM Automation execution environment
    */
   private getSetupScriptGenerator(): string {
     return `
@@ -462,11 +314,7 @@ echo "EFS setup completed successfully"
             Value=setup_script,
             Type='String',
             Overwrite=True,
-            Description=f'EFS setup script for {environment} environment',
-            Tags=[
-                {'Key': 'GeneratedBy', 'Value': 'SSM-Automation'},
-                {'Key': 'Environment', 'Value': environment}
-            ]
+            Description=f'EFS setup script for {environment} environment'
         )
         
         return {

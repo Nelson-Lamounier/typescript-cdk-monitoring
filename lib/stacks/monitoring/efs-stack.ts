@@ -25,6 +25,7 @@ import {
 } from "../../shared/constants/monitoring-constants";
 import { validateEnvName } from "../../shared/utils/validation";
 import { isProductionEnvironment } from "../../shared/utils/environment";
+import { convertToYaml } from "../../shared/utils/yaml-converter";
 
 /**
  * MonitoringEfsStack - Layer 0: Persistent Storage for Monitoring
@@ -287,18 +288,10 @@ export class MonitoringEfsStack extends cdk.Stack {
     const monitoringConfigParams = this.createMonitoringConfigs(props);
 
     // Ensure initialization waits for SSM parameters to be created
-    // Access the underlying CFN resources for dependency management
-    this.efsInitializationExecution.node.addDependency(
-      monitoringConfigParams.prometheusConfig.node
-        .defaultChild as cdk.CfnResource
-    );
-    this.efsInitializationExecution.node.addDependency(
-      monitoringConfigParams.grafanaDatasourceConfig.node
-        .defaultChild as cdk.CfnResource
-    );
-    this.efsInitializationExecution.node.addDependency(
-      monitoringConfigParams.grafanaDashboardConfig.node
-        .defaultChild as cdk.CfnResource
+    monitoringConfigParams.forEach((param) =>
+      this.efsInitializationExecution.addDependency(
+        param.node.defaultChild as cdk.CfnResource
+      )
     );
 
     // ========================================================================
@@ -416,11 +409,7 @@ export class MonitoringEfsStack extends cdk.Stack {
    * Create monitoring configuration SSM parameters
    * Returns the created parameters for dependency management
    */
-  private createMonitoringConfigs(props: MonitoringEfsStackProps): {
-    prometheusConfig: ssm.StringParameter;
-    grafanaDatasourceConfig: ssm.StringParameter;
-    grafanaDashboardConfig: ssm.StringParameter;
-  } {
+  private createMonitoringConfigs(props: MonitoringEfsStackProps): ssm.StringParameter[] {
     const region = cdk.Stack.of(this).region;
 
     // ========================================================================
@@ -432,6 +421,7 @@ export class MonitoringEfsStack extends cdk.Stack {
       props.crossAccountTargets
     );
 
+    // Store both JSON and YAML formats
     const prometheusConfigParam = new ssm.StringParameter(
       this,
       "PrometheusConfig",
@@ -439,6 +429,17 @@ export class MonitoringEfsStack extends cdk.Stack {
         parameterName: `/monitoring/${props.envName}/prometheus-config`,
         stringValue: JSON.stringify(prometheusConfig, null, 2),
         description: `Prometheus configuration for ${props.envName} monitoring`,
+        tier: ssm.ParameterTier.STANDARD,
+      }
+    );
+
+    const prometheusConfigYamlParam = new ssm.StringParameter(
+      this,
+      "PrometheusConfigYaml",
+      {
+        parameterName: `/monitoring/${props.envName}/prometheus-config-yaml`,
+        stringValue: convertToYaml(prometheusConfig),
+        description: `Prometheus YAML configuration for ${props.envName} monitoring`,
         tier: ssm.ParameterTier.STANDARD,
       }
     );
@@ -461,6 +462,7 @@ export class MonitoringEfsStack extends cdk.Stack {
       ],
     };
 
+    // Store both JSON and YAML formats
     const grafanaDatasourceConfigParam = new ssm.StringParameter(
       this,
       "GrafanaDatasourceConfig",
@@ -468,6 +470,17 @@ export class MonitoringEfsStack extends cdk.Stack {
         parameterName: `/monitoring/${props.envName}/grafana-datasource-config`,
         stringValue: JSON.stringify(grafanaDatasourceConfig, null, 2),
         description: `Grafana datasource configuration for ${props.envName}`,
+        tier: ssm.ParameterTier.STANDARD,
+      }
+    );
+
+    const grafanaDatasourceConfigYamlParam = new ssm.StringParameter(
+      this,
+      "GrafanaDatasourceConfigYaml",
+      {
+        parameterName: `/monitoring/${props.envName}/grafana-datasource-config-yaml`,
+        stringValue: convertToYaml(grafanaDatasourceConfig),
+        description: `Grafana YAML datasource configuration for ${props.envName}`,
         tier: ssm.ParameterTier.STANDARD,
       }
     );
@@ -504,11 +517,25 @@ export class MonitoringEfsStack extends cdk.Stack {
       }
     );
 
-    return {
-      prometheusConfig: prometheusConfigParam,
-      grafanaDatasourceConfig: grafanaDatasourceConfigParam,
-      grafanaDashboardConfig: grafanaDashboardConfigParam,
-    };
+    const grafanaDashboardConfigYamlParam = new ssm.StringParameter(
+      this,
+      "GrafanaDashboardConfigYaml",
+      {
+        parameterName: `/monitoring/${props.envName}/grafana-dashboard-config-yaml`,
+        stringValue: convertToYaml(grafanaDashboardConfig),
+        description: `Grafana YAML dashboard provider configuration for ${props.envName}`,
+        tier: ssm.ParameterTier.STANDARD,
+      }
+    );
+
+    return [
+      prometheusConfigParam,
+      prometheusConfigYamlParam,
+      grafanaDatasourceConfigParam,
+      grafanaDatasourceConfigYamlParam,
+      grafanaDashboardConfigParam,
+      grafanaDashboardConfigYamlParam,
+    ];
   }
 
   /**
