@@ -90,7 +90,7 @@ export function createMonitoringStacks(
     efsAccessPoint: efsStack.accessPoint,
     efsSecurityGroup: efsStack.mountTargetSecurityGroup,
     efsAvailabilityZone: efsStack.efsAvailabilityZone,
-    efsInitializationComplete: efsStack.efsInitializationComplete,
+    efsInitializationComplete: efsStack.efsInitializationExecution,
     efsStackName: efsStack.stackName,
 
     // EC2 Configuration

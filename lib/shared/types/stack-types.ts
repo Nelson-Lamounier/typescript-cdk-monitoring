@@ -75,7 +75,11 @@ export interface MonitoringInfraStackProps extends BaseStackProps {
   efsAccessPoint: efs.IAccessPoint;
   efsAvailabilityZone: string;
   efsSecurityGroup: ec2.ISecurityGroup;
-  efsInitializationComplete: cdk.CustomResource;
+  /**
+   * EFS initialization complete resource
+   * This is the SSM Association execution that runs the automation document
+   */
+  efsInitializationComplete: ssm.CfnAssociation;
   allowedIpRanges?: string[];
   enableHttps?: boolean;
   certificateArn?: string;

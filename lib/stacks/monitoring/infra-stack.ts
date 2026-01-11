@@ -584,10 +584,12 @@ export class MonitoringInfraStack extends cdk.Stack {
       "Allow ALB to reach Prometheus on port 9090"
     );
 
-    // CRITICAL: Allow ECS instances to access EFS
+    // CRITICAL: Allow ECS instances to connect to EFS
     // Without this rule, EFS mounting will fail!
-    props.efsSecurityGroup.addIngressRule(
-      ltConstruct.securityGroup,
+    // We add an egress rule from ECS to EFS instead of ingress on EFS
+    // to avoid circular dependency (EFS stack cannot reference InfraStack resources)
+    ltConstruct.securityGroup.addEgressRule(
+      props.efsSecurityGroup,
       ec2.Port.tcp(2049),
       "Allow ECS instances to mount EFS via NFS"
     );
