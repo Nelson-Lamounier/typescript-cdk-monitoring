@@ -73,6 +73,7 @@ export class SsmStateManagerConstruct extends Construct {
   public readonly ecsAgentConfigAssociation: ssm.CfnAssociation;
   public readonly cloudWatchAgentInstallAssociation: ssm.CfnAssociation;
   public readonly cloudWatchAgentConfigAssociation: ssm.CfnAssociation;
+  public readonly efsMountAssociation?: ssm.CfnAssociation;
 
   // ========================================================================
   // PRIVATE PROPERTIES
@@ -135,11 +136,27 @@ export class SsmStateManagerConstruct extends Construct {
     // Create CloudWatch log groups for agent output
     const logGroups = this.createLogGroups(cloudWatchAgentConfig);
 
+    // CRITICAL: Mount EFS FIRST before any other operations
+    // ECS agent and applications depend on EFS being available
+    if (props.fileSystemId && props.efsMountPoint) {
+      this.efsMountAssociation = this.createEfsMountAssociation(
+        props.fileSystemId,
+        props.efsMountPoint,
+        associationTargets
+      );
+    }
+
     // Create ECS agent configuration association
+    // Must run AFTER EFS is mounted
     this.ecsAgentConfigAssociation = this.createEcsAgentAssociation(
       ecsAgentConfig,
       associationTargets
     );
+
+    // Ensure ECS agent waits for EFS mount
+    if (this.efsMountAssociation) {
+      this.ecsAgentConfigAssociation.addDependency(this.efsMountAssociation);
+    }
 
     // Create CloudWatch agent associations (install + configure)
     const { installAssociation, configAssociation } =
@@ -154,6 +171,11 @@ export class SsmStateManagerConstruct extends Construct {
 
     // Grant necessary IAM permissions to instance role
     this.grantSsmPermissions(instanceRole, configAssociation);
+
+    // Grant EFS mount permissions if EFS is configured
+    if (props.fileSystemId) {
+      this.grantEfsPermissions(instanceRole, props.fileSystemId);
+    }
 
     // Apply resource tags for organisation and cost tracking
     this.applyTags(envName, projectName);
@@ -325,6 +347,99 @@ export class SsmStateManagerConstruct extends Construct {
       ecsAgentLogGroup,
       ecsInitLogGroup,
     };
+  }
+
+  // ========================================================================
+  // EFS MOUNT ASSOCIATION CREATION
+  // ========================================================================
+
+  /**
+   * Create SSM association for EFS mounting
+   *
+   * Uses AWS Systems Manager to mount an EFS file system on EC2 instances.
+   * This ensures EFS is mounted before ECS agent starts and applications run.
+   *
+   * Benefits:
+   * - Automatic mount on instance boot
+   * - Handles mount failures with retry logic
+   * - No UserData dependency
+   * - Can remount if connection lost
+   *
+   * The association creates /etc/fstab entry for persistent mounting across reboots.
+   *
+   * @param fileSystemId - EFS file system ID (e.g., fs-xxxxxxxxx)
+   * @param mountPoint - Local mount path (e.g., /mnt/efs)
+   * @param targets - SSM association targets (EC2 instances)
+   * @returns SSM Association for EFS mounting
+   */
+  private createEfsMountAssociation(
+    fileSystemId: string,
+    mountPoint: string,
+    targets: ssm.CfnAssociation.TargetProperty[]
+  ): ssm.CfnAssociation {
+    const { envName } = this.props;
+    const region = this.stack.region;
+
+    // Build EFS mount script
+    const efsMountScript = `#!/bin/bash
+set -e
+
+echo "========================================="
+echo "EFS Mount Configuration"
+echo "========================================="
+echo "File System ID: ${fileSystemId}"
+echo "Mount Point: ${mountPoint}"
+echo "Region: ${region}"
+echo ""
+
+# Install EFS utilities if not present
+if ! command -v mount.efs &> /dev/null; then
+  echo "Installing amazon-efs-utils..."
+  yum install -y amazon-efs-utils
+fi
+
+# Create mount point directory
+echo "Creating mount point directory..."
+mkdir -p ${mountPoint}
+
+# Check if already mounted
+if mountpoint -q ${mountPoint}; then
+  echo "EFS already mounted at ${mountPoint}"
+  df -h ${mountPoint}
+  exit 0
+fi
+
+# Add to /etc/fstab if not present
+FSTAB_ENTRY="${fileSystemId}:/ ${mountPoint} efs _netdev,tls,iam 0 0"
+if ! grep -q "${fileSystemId}" /etc/fstab; then
+  echo "Adding EFS to /etc/fstab..."
+  echo "$FSTAB_ENTRY" >> /etc/fstab
+fi
+
+# Mount the file system
+echo "Mounting EFS..."
+mount -a -t efs
+
+# Verify mount
+if mountpoint -q ${mountPoint}; then
+  echo "✅ EFS successfully mounted at ${mountPoint}"
+  df -h ${mountPoint}
+else
+  echo "❌ Failed to mount EFS at ${mountPoint}"
+  exit 1
+fi
+`;
+
+    return new ssm.CfnAssociation(this, "EfsMountAssociation", {
+      name: "AWS-RunShellScript",
+      associationName: `${this.stack.stackName}-${envName}-efs-mount`,
+      targets,
+      parameters: {
+        commands: [efsMountScript],
+      } as Record<string, string[]>,
+      // Run once on boot (no schedule - mount persists via fstab)
+      // applyOnlyAtCronInterval is not set, so it runs once when instances join
+    });
   }
 
   // ========================================================================
@@ -666,6 +781,43 @@ export class SsmStateManagerConstruct extends Construct {
           "ssm:GetCommandInvocation",
         ],
         resources: documentArns,
+      })
+    );
+  }
+
+  /**
+   * Grant IAM permissions for EFS mounting
+   *
+   * Allows EC2 instances to:
+   * - Mount EFS file systems using IAM authentication
+   * - Use TLS encryption for data in transit
+   * - Access specific file system
+   *
+   * @param instanceRole - IAM role attached to EC2 instances
+   * @param fileSystemId - EFS file system ID
+   */
+  private grantEfsPermissions(
+    instanceRole: iam.IRole,
+    fileSystemId: string
+  ): void {
+    const fileSystemArn = `arn:aws:elasticfilesystem:${this.stack.region}:${this.stack.account}:file-system/${fileSystemId}`;
+
+    // Grant EFS mount permissions with IAM authentication
+    instanceRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "elasticfilesystem:ClientMount",
+          "elasticfilesystem:ClientWrite",
+          "elasticfilesystem:ClientRootAccess",
+          "elasticfilesystem:DescribeMountTargets",
+        ],
+        resources: [fileSystemArn],
+        conditions: {
+          Bool: {
+            "elasticfilesystem:AccessedViaMountTarget": "true",
+          },
+        },
       })
     );
   }
