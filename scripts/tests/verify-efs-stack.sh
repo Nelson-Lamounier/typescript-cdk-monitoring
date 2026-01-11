@@ -400,10 +400,10 @@ done
 echo ""
 echo "EFS Discovery Parameters (created by EFS Stack):"
 DISCOVERY_PARAMS=(
-  "/monitoring/${ENVIRONMENT}/efs/file-system-id"
-  "/monitoring/${ENVIRONMENT}/efs/access-point-id"
-  "/monitoring/${ENVIRONMENT}/efs/security-group-id"
-  "/monitoring/${ENVIRONMENT}/efs/availability-zone"
+  "/monitoring/${ENVIRONMENT}/efs/config/file-system-id"
+  "/monitoring/${ENVIRONMENT}/efs/config/access-point-id"
+  "/monitoring/${ENVIRONMENT}/efs/config/security-group-id"
+  "/monitoring/${ENVIRONMENT}/efs/config/availability-zone"
 )
 
 MISSING_DISCOVERY_PARAMS=0
@@ -431,43 +431,6 @@ for PARAM in "${DISCOVERY_PARAMS[@]}"; do
 done
 
 MISSING_PARAMS=$((MISSING_JSON_PARAMS + MISSING_YAML_PARAMS + MISSING_DISCOVERY_PARAMS))
-
-MISSING_PARAMS=0
-
-for PARAM in "${EXPECTED_PARAMS[@]}"; do
-  PARAM_EXISTS=$(aws ssm get-parameter \
-    --name "${PARAM}" \
-    --profile ${AWS_PROFILE} \
-    --region ${REGION} \
-    --query 'Parameter.Name' \
-    --output text 2>/dev/null || echo "NOT_FOUND")
-  
-  if [ "$PARAM_EXISTS" != "NOT_FOUND" ]; then
-    # Get parameter tier and size
-    PARAM_INFO=$(aws ssm describe-parameters \
-      --filters "Key=Name,Values=${PARAM}" \
-      --profile ${AWS_PROFILE} \
-      --region ${REGION} \
-      --query 'Parameters[0].[Tier,to_string(length(Name))]' \
-      --output text)
-    
-    TIER=$(echo $PARAM_INFO | awk '{print $1}')
-    
-    # Get value size
-    VALUE_SIZE=$(aws ssm get-parameter \
-      --name "${PARAM}" \
-      --profile ${AWS_PROFILE} \
-      --region ${REGION} \
-      --query 'length(Parameter.Value)' \
-      --output text)
-    
-    echo -e "${GREEN}✅${NC} ${PARAM}"
-    echo "   Tier: ${TIER}, Size: ${VALUE_SIZE} chars"
-  else
-    echo -e "${RED}❌${NC} ${PARAM}"
-    ((MISSING_PARAMS++))
-  fi
-done
 
 echo ""
 echo "Summary:"

@@ -197,19 +197,7 @@ describe("MonitoringEfsStack", () => {
       );
       const template = Template.fromStack(stack);
 
-      // Normalize dynamic values (timestamp) for snapshot comparison
-      const templateJson = template.toJSON();
-      const customResources = templateJson.Resources || {};
-      Object.values(customResources).forEach((resource: any) => {
-        if (
-          resource.Type === "AWS::CloudFormation::CustomResource" &&
-          resource.Properties?.Timestamp
-        ) {
-          resource.Properties.Timestamp = "<TIMESTAMP>";
-        }
-      });
-
-      expect(templateJson).toMatchSnapshot();
+      expect(template.toJSON()).toMatchSnapshot();
     });
   });
 
@@ -395,19 +383,19 @@ describe("MonitoringEfsStack", () => {
   });
 
   // ============================================================================
-  // Lambda Function Configuration
+  // SSM Automation Document Configuration
   // ============================================================================
 
-  describe("Lambda Function Configuration", () => {
-    test("creates Lambda function for EFS initialization", () => {
+  describe("SSM Automation Document Configuration", () => {
+    test("creates SSM Automation Document for EFS initialization", () => {
       const { vpc } = createVpcStack(app, "Test");
       const stack = createTestStack(app, "TestStack", { vpc });
       const template = Template.fromStack(stack);
 
-      template.resourceCountIs("AWS::Lambda::Function", 1);
+      template.resourceCountIs("AWS::SSM::Document", 1);
     });
 
-    test("Lambda function has correct environment variables", () => {
+    test("creates SSM Document with correct type and format", () => {
       const { vpc } = createVpcStack(app, "Test");
       const stack = createTestStack(app, "TestStack", {
         vpc,
@@ -415,59 +403,69 @@ describe("MonitoringEfsStack", () => {
       });
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties("AWS::Lambda::Function", {
-        Environment: {
-          Variables: {
-            ENVIRONMENT: "development",
-            EFS_FILE_SYSTEM_ID: Match.anyValue(),
-            EFS_ACCESS_POINT_ID: Match.anyValue(),
-          },
+      template.hasResourceProperties("AWS::SSM::Document", {
+        DocumentType: "Automation",
+        DocumentFormat: "YAML",
+      });
+    });
+
+    test("creates IAM role for automation execution", () => {
+      const { vpc } = createVpcStack(app, "Test");
+      const stack = createTestStack(app, "TestStack", { vpc });
+      const template = Template.fromStack(stack);
+
+      // Should have at least one IAM role for the automation
+      const roles = template.findResources("AWS::IAM::Role");
+      const automationRole = Object.values(roles).find((role: any) =>
+        role.Properties.AssumeRolePolicyDocument?.Statement?.some((stmt: any) =>
+          stmt.Principal?.Service?.includes("ssm.amazonaws.com")
+        )
+      );
+      expect(automationRole).toBeDefined();
+    });
+
+    test("creates SSM Association to execute automation", () => {
+      const { vpc } = createVpcStack(app, "Test");
+      const stack = createTestStack(app, "TestStack", { vpc });
+      const template = Template.fromStack(stack);
+
+      template.resourceCountIs("AWS::SSM::Association", 1);
+    });
+
+    test("SSM Association has correct parameters", () => {
+      const { vpc } = createVpcStack(app, "Test");
+      const stack = createTestStack(app, "TestStack", {
+        vpc,
+        envName: "development",
+      });
+      const template = Template.fromStack(stack);
+
+      template.hasResourceProperties("AWS::SSM::Association", {
+        Parameters: {
+          FileSystemId: Match.anyValue(),
+          AccessPointId: Match.anyValue(),
+          Environment: ["development"],
+          AutomationAssumeRole: Match.anyValue(),
         },
       });
     });
 
-    test("Lambda function has EFS permissions", () => {
+    test("no Lambda function is created", () => {
       const { vpc } = createVpcStack(app, "Test");
       const stack = createTestStack(app, "TestStack", { vpc });
       const template = Template.fromStack(stack);
 
-      const functions = template.findResources("AWS::Lambda::Function");
-      const functionResource = Object.values(functions)[0] as any;
-
-      expect(functionResource).toBeDefined();
-      // Verify Lambda has IAM role with EFS permissions
-      const roleArn = functionResource.Properties.Role["Fn::GetAtt"][0];
-      expect(roleArn).toBeDefined();
+      // Lambda-based initialization has been replaced by SSM Automation
+      template.resourceCountIs("AWS::Lambda::Function", 0);
     });
-  });
 
-  // ============================================================================
-  // Custom Resource Configuration
-  // ============================================================================
-
-  describe("Custom Resource Configuration", () => {
-    test("creates custom resource for EFS initialization", () => {
+    test("no custom resource is created", () => {
       const { vpc } = createVpcStack(app, "Test");
       const stack = createTestStack(app, "TestStack", { vpc });
       const template = Template.fromStack(stack);
 
-      template.resourceCountIs("AWS::CloudFormation::CustomResource", 1);
-    });
-
-    test("custom resource has correct properties", () => {
-      const { vpc } = createVpcStack(app, "Test");
-      const stack = createTestStack(app, "TestStack", {
-        vpc,
-        envName: "development",
-      });
-      const template = Template.fromStack(stack);
-
-      template.hasResourceProperties("AWS::CloudFormation::CustomResource", {
-        Environment: "development",
-        Region: TEST_CONFIG.region,
-        FileSystemId: Match.anyValue(),
-        AccessPointId: Match.anyValue(),
-      });
+      // Custom resource has been replaced by SSM Association
+      template.resourceCountIs("AWS::CloudFormation::CustomResource", 0);
     });
   });
 
@@ -485,7 +483,7 @@ describe("MonitoringEfsStack", () => {
       expect(Object.keys(parameters).length).toBeGreaterThan(0);
     });
 
-    test("creates Prometheus configuration SSM parameter", () => {
+    test("creates Prometheus JSON configuration SSM parameter", () => {
       const { vpc } = createVpcStack(app, "Test");
       const stack = createTestStack(app, "TestStack", {
         vpc,
@@ -500,7 +498,22 @@ describe("MonitoringEfsStack", () => {
       });
     });
 
-    test("creates Grafana datasource configuration SSM parameter", () => {
+    test("creates Prometheus YAML configuration SSM parameter", () => {
+      const { vpc } = createVpcStack(app, "Test");
+      const stack = createTestStack(app, "TestStack", {
+        vpc,
+        envName: "development",
+      });
+      const template = Template.fromStack(stack);
+
+      template.hasResourceProperties("AWS::SSM::Parameter", {
+        Name: "/monitoring/development/prometheus-config-yaml",
+        Type: "String",
+        Tier: "Standard",
+      });
+    });
+
+    test("creates Grafana datasource JSON configuration SSM parameter", () => {
       const { vpc } = createVpcStack(app, "Test");
       const stack = createTestStack(app, "TestStack", {
         vpc,
@@ -515,7 +528,22 @@ describe("MonitoringEfsStack", () => {
       });
     });
 
-    test("creates Grafana dashboard configuration SSM parameter", () => {
+    test("creates Grafana datasource YAML configuration SSM parameter", () => {
+      const { vpc } = createVpcStack(app, "Test");
+      const stack = createTestStack(app, "TestStack", {
+        vpc,
+        envName: "development",
+      });
+      const template = Template.fromStack(stack);
+
+      template.hasResourceProperties("AWS::SSM::Parameter", {
+        Name: "/monitoring/development/grafana-datasource-config-yaml",
+        Type: "String",
+        Tier: "Standard",
+      });
+    });
+
+    test("creates Grafana dashboard JSON configuration SSM parameter", () => {
       const { vpc } = createVpcStack(app, "Test");
       const stack = createTestStack(app, "TestStack", {
         vpc,
@@ -528,6 +556,56 @@ describe("MonitoringEfsStack", () => {
         Type: "String",
         Tier: "Standard",
       });
+    });
+
+    test("creates Grafana dashboard YAML configuration SSM parameter", () => {
+      const { vpc } = createVpcStack(app, "Test");
+      const stack = createTestStack(app, "TestStack", {
+        vpc,
+        envName: "development",
+      });
+      const template = Template.fromStack(stack);
+
+      template.hasResourceProperties("AWS::SSM::Parameter", {
+        Name: "/monitoring/development/grafana-dashboard-config-yaml",
+        Type: "String",
+        Tier: "Standard",
+      });
+    });
+
+    test("creates both JSON and YAML versions of each config", () => {
+      const { vpc } = createVpcStack(app, "Test");
+      const stack = createTestStack(app, "TestStack", {
+        vpc,
+        envName: "development",
+      });
+      const template = Template.fromStack(stack);
+
+      // Verify we have both JSON and YAML for each config type
+      const parameters = template.findResources("AWS::SSM::Parameter");
+      const paramNames = Object.values(parameters).map(
+        (param: any) => param.Properties.Name
+      );
+
+      // Check JSON versions exist
+      expect(paramNames).toContain("/monitoring/development/prometheus-config");
+      expect(paramNames).toContain(
+        "/monitoring/development/grafana-datasource-config"
+      );
+      expect(paramNames).toContain(
+        "/monitoring/development/grafana-dashboard-config"
+      );
+
+      // Check YAML versions exist
+      expect(paramNames).toContain(
+        "/monitoring/development/prometheus-config-yaml"
+      );
+      expect(paramNames).toContain(
+        "/monitoring/development/grafana-datasource-config-yaml"
+      );
+      expect(paramNames).toContain(
+        "/monitoring/development/grafana-dashboard-config-yaml"
+      );
     });
 
     test("creates EFS discovery SSM parameters when enabled", () => {
@@ -820,7 +898,7 @@ describe("MonitoringEfsStack", () => {
       { property: "accessPoint", expectedType: "object" },
       { property: "mountTargetSecurityGroup", expectedType: "object" },
       { property: "efsAvailabilityZone", expectedType: "string" },
-      { property: "efsInitializationComplete", expectedType: "object" },
+      { property: "efsInitializationExecution", expectedType: "object" },
     ])("exposes $property property", ({ property, expectedType }) => {
       const { vpc } = createVpcStack(app, "Test");
       const stack = createTestStack(app, "TestStack", { vpc });
