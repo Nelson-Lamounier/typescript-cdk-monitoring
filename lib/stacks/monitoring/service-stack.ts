@@ -177,6 +177,17 @@ export class MonitoringServiceStack extends cdk.Stack {
       },
       enableExecuteCommand,
       logRetention,
+      // Apply memory/CPU overrides if provided
+      ...(props.prometheusProps?.cpu && { cpu: props.prometheusProps.cpu }),
+      ...(props.prometheusProps?.memoryMiB && {
+        memoryMiB: props.prometheusProps.memoryMiB,
+      }),
+      ...(props.prometheusProps?.containerPort && {
+        containerPort: props.prometheusProps.containerPort,
+      }),
+      ...(props.prometheusProps?.logRetention && {
+        logRetention: props.prometheusProps.logRetention,
+      }),
     });
 
     this.prometheusService = prometheusConstruct.service as ecs.Ec2Service;
@@ -207,6 +218,17 @@ export class MonitoringServiceStack extends cdk.Stack {
       rootUrl: grafanaRootUrl,
       enableExecuteCommand,
       logRetention,
+      // Apply memory/CPU overrides if provided
+      ...(props.grafanaProps?.cpu && { cpu: props.grafanaProps.cpu }),
+      ...(props.grafanaProps?.memoryMiB && {
+        memoryMiB: props.grafanaProps.memoryMiB,
+      }),
+      ...(props.grafanaProps?.containerPort && {
+        containerPort: props.grafanaProps.containerPort,
+      }),
+      ...(props.grafanaProps?.logRetention && {
+        logRetention: props.grafanaProps.logRetention,
+      }),
     });
 
     this.grafanaService = grafanaConstruct.service as ecs.Ec2Service;

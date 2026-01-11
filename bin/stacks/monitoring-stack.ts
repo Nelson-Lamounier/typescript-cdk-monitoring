@@ -127,6 +127,17 @@ export function createMonitoringStacks(
 
       // Service Configuration
       enableExecuteCommand: true,
+
+      // Memory allocation optimised for t3.micro (916 MiB available)
+      // Default is 1024 MiB per service, which exceeds instance capacity
+      // Development: Reduce to 384 MiB each (768 MiB total + 148 MiB buffer)
+      // Production: Use t3.small or larger with default allocations
+      prometheusProps: envConfig.isProduction
+        ? undefined // Use defaults (1024 MiB) for production
+        : { memoryMiB: 384 }, // Optimised for t3.micro in dev
+      grafanaProps: envConfig.isProduction
+        ? undefined // Use defaults (1024 MiB) for production
+        : { memoryMiB: 384 }, // Optimised for t3.micro in dev
     }
   );
 

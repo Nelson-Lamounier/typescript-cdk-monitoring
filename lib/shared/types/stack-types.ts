@@ -233,4 +233,42 @@ export interface MonitoringServiceStackProps extends BaseStackProps {
   createSsmParameters?: boolean;
   createOutputs?: boolean;
   enableExports?: boolean;
+
+  /**
+   * Prometheus service configuration overrides
+   * Used to customise CPU, memory, and other Prometheus-specific settings
+   *
+   * @example
+   * ```typescript
+   * prometheusProps: {
+   *   memoryMiB: 384,  // Reduce from default 1024 for t3.micro
+   *   cpu: 256,
+   * }
+   * ```
+   */
+  prometheusProps?: {
+    cpu?: number;
+    memoryMiB?: number;
+    containerPort?: number;
+    logRetention?: logs.RetentionDays;
+  };
+
+  /**
+   * Grafana service configuration overrides
+   * Used to customise CPU, memory, and other Grafana-specific settings
+   *
+   * @example
+   * ```typescript
+   * grafanaProps: {
+   *   memoryMiB: 384,  // Reduce from default 1024 for t3.micro
+   *   cpu: 256,
+   * }
+   * ```
+   */
+  grafanaProps?: {
+    cpu?: number;
+    memoryMiB?: number;
+    containerPort?: number;
+    logRetention?: logs.RetentionDays;
+  };
 }
