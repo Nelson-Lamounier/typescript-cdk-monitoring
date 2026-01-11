@@ -9,9 +9,11 @@ import * as s3 from "aws-cdk-lib/aws-s3";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as autoscaling from "aws-cdk-lib/aws-autoscaling";
 import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
+import * as ssm from "aws-cdk-lib/aws-ssm";
 
 import { SubnetConfiguration } from "./networking-types";
 import { CrossAccountTarget } from "./monitoring-types";
+import { EcsAgentSsmConfig, CloudWatchAgentSsmConfig } from "./compute-types";
 
 export interface BaseStackProps extends cdk.StackProps {
   envName: string;
@@ -95,6 +97,114 @@ export interface MonitoringInfraStackProps extends BaseStackProps {
   createSsmParameters?: boolean;
   createOutputs?: boolean;
   enableExports?: boolean;
+
+  // ========================================================================
+  // ENHANCED USERDATA CONFIGURATION
+  // ========================================================================
+
+  /**
+   * Enable system package updates during instance bootstrap
+   *
+   * When true:
+   * - Updates all system packages to latest versions during boot
+   * - Increases boot time by 1-3 minutes
+   * - Ensures latest security patches are applied
+   *
+   * When false:
+   * - Faster boot time
+   * - Relies on AMI being up-to-date
+   *
+   * @default true for production, false for non-production
+   */
+  enableSystemUpdates?: boolean;
+
+  /**
+   * Enable bootstrap metadata tracking in SSM Parameter Store
+   *
+   * Stores bootstrap information for auditing and troubleshooting:
+   * - Bootstrap version and timestamp
+   * - Environment and cluster configuration
+   * - Instance metadata (ID, type, AMI, AZ)
+   * - SSM agent version
+   *
+   * Metadata stored at: /bootstrap/{envName}/instances/{instanceId}
+   *
+   * @default true
+   */
+  enableMetadataTracking?: boolean;
+
+  /**
+   * Custom SSM parameter path prefix for bootstrap metadata
+   *
+   * Full path will be: /{prefix}/{envName}/instances/{instanceId}
+   *
+   * @default /bootstrap
+   */
+  metadataParameterPrefix?: string;
+
+  /**
+   * Custom bootstrap version identifier
+   *
+   * Used to track configuration changes across deployments.
+   * Stored in metadata for version tracking and auditing.
+   *
+   * @default Generated ISO timestamp
+   */
+  bootstrapVersion?: string;
+
+  // ========================================================================
+  // SSM STATE MANAGER CONFIGURATION
+  // ========================================================================
+
+  /**
+   * ECS agent SSM State Manager configuration
+   *
+   * Configures the schedule and behaviour for ECS agent installation
+   * and configuration via SSM State Manager.
+   *
+   * Defaults:
+   * - Production: Every 7 days, CRITICAL compliance severity
+   * - Non-production: Every 30 days, HIGH compliance severity
+   */
+  ssmEcsAgentConfig?: EcsAgentSsmConfig;
+
+  /**
+   * CloudWatch Agent SSM State Manager configuration
+   *
+   * Configures the schedule and behaviour for CloudWatch agent installation
+   * and log collection setup via SSM State Manager.
+   *
+   * Defaults:
+   * - Production: Every 7 days, CRITICAL compliance severity
+   * - Non-production: Every 30 days, HIGH compliance severity
+   */
+  ssmCloudWatchAgentConfig?: CloudWatchAgentSsmConfig;
+
+  /**
+   * Custom SSM association targets
+   *
+   * Specifies which EC2 instances the SSM associations will apply to.
+   * If not provided, targets all instances with matching Environment tag.
+   *
+   * @default [{ key: "tag:Environment", values: [envName] }]
+   *
+   * @example
+   * ```typescript
+   * // Target specific instance IDs
+   * ssmTargets: [
+   *   { key: "InstanceIds", values: ["i-1234567890abcdef0"] }
+   * ]
+   *
+   * // Target by multiple tags
+   * ssmTargets: [
+   *   {
+   *     key: "tag:Project",
+   *     values: ["monitoring"]
+   *   }
+   * ]
+   * ```
+   */
+  ssmTargets?: ssm.CfnAssociation.TargetProperty[];
 }
 
 /**

@@ -73,6 +73,7 @@ export class EcsClusterConstruct extends Construct {
       spotOptions,
       detailedMonitoring = false,
       launchTemplateRole,
+      availabilityZones,
     } = props;
 
     validateEnvName(envName);
@@ -284,6 +285,7 @@ export class EcsClusterConstruct extends Construct {
         subnetType: usePublicSubnets
           ? ec2.SubnetType.PUBLIC
           : ec2.SubnetType.PRIVATE_WITH_EGRESS,
+        availabilityZones,
       },
       healthChecks: autoscaling.HealthChecks.ec2({
         gracePeriod: cdk.Duration.seconds(

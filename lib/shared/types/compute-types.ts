@@ -52,6 +52,11 @@ export interface EcsClusterConstructProps {
   spotOptions?: EcsSpotOptions;
   detailedMonitoring?: boolean;
   launchTemplateRole?: iam.IRole;
+  /**
+   * Availability zones to deploy instances in
+   * Useful for aligning with EFS mount targets for optimal performance
+   */
+  availabilityZones?: string[];
 }
 
 export interface AutoScalingGroupConstructProps {
@@ -106,6 +111,96 @@ export interface LaunchTemplateConstructProps {
   enableDetailedMonitoring?: boolean;
   associatePublicIpAddress?: boolean;
   customTags?: Record<string, string>;
+}
+
+/**
+ * Configuration options for UserData construct
+ */
+export interface UserDataConstructProps {
+  /**
+   * Environment name (e.g., development, production)
+   * Used for tagging and logging context
+   */
+  envName: string;
+
+  /**
+   * ECS cluster name that instances will join
+   * Stored in bootstrap metadata for tracking
+   */
+  clusterName: string;
+
+  /**
+   * CloudFormation stack name for signalling completion
+   * If provided, UserData will signal CloudFormation on success/failure
+   * This ensures the stack doesn't show CREATE_COMPLETE until bootstrap succeeds
+   */
+  stackName?: string;
+
+  /**
+   * CloudFormation logical resource ID for signalling
+   * Required if stackName is provided
+   * Typically the Auto Scaling Group or Launch Template logical ID
+   */
+  logicalResourceId?: string;
+
+  /**
+   * AWS region for CloudFormation signalling
+   * Required if stackName is provided
+   */
+  region?: string;
+
+  /**
+   * Enable system package updates during bootstrap
+   *
+   * When true:
+   * - Updates all system packages to latest versions
+   * - Increases boot time by 1-3 minutes
+   * - Ensures latest security patches are applied
+   *
+   * When false:
+   * - Relies on AMI being up-to-date
+   * - Faster boot time
+   * - Recommended for non-production or when using fresh AMIs
+   *
+   * @default false for non-production, true for production
+   */
+  enableSystemUpdates?: boolean;
+
+  /**
+   * Enable storage of bootstrap metadata in SSM Parameter Store
+   *
+   * Metadata includes:
+   * - Bootstrap timestamp
+   * - Environment name
+   * - Cluster name
+   * - Instance ID
+   * - AMI ID
+   * - Instance type
+   *
+   * Useful for:
+   * - Tracking which instances have been bootstrapped
+   * - Auditing bootstrap configurations
+   * - Debugging bootstrap issues
+   *
+   * @default true
+   */
+  enableMetadataTracking?: boolean;
+
+  /**
+   * SSM parameter path prefix for metadata storage
+   * Full path will be: /{prefix}/{envName}/instances/{instanceId}
+   *
+   * @default /bootstrap
+   */
+  metadataParameterPrefix?: string;
+
+  /**
+   * Custom bootstrap version identifier
+   * Stored in metadata for tracking configuration changes
+   *
+   * @default Generated from current timestamp
+   */
+  bootstrapVersion?: string;
 }
 
 export type EcsLaunchType = "EC2" | "FARGATE";
@@ -283,4 +378,14 @@ export interface SsmStateManagerConstructProps {
   targets?: ssm.CfnAssociation.TargetProperty[];
   ecsAgent?: EcsAgentSsmConfig;
   cloudWatchAgent?: CloudWatchAgentSsmConfig;
+  /**
+   * EFS file system ID for mounting
+   * Required for ECS instances to access EFS storage
+   */
+  fileSystemId?: string;
+  /**
+   * EFS mount point on EC2 instances
+   * @default /mnt/efs
+   */
+  efsMountPoint?: string;
 }

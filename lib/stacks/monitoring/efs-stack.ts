@@ -3,24 +3,22 @@
 import * as cdk from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as efs from "aws-cdk-lib/aws-efs";
-import * as iam from "aws-cdk-lib/aws-iam";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 import { Construct } from "constructs";
 
 import { SuppressionManager } from "../../cdk-nag";
-import { LambdaFunctionConstruct } from "../../constructs/compute/lambda";
 import {
   EfsFileSystemConstruct,
   EfsAccessPointConstruct,
 } from "../../constructs/storage/efs";
 import { EfsSecurityGroupConstruct } from "../storage/efs-file-system-stack";
+import { EfsInitializationDocumentConstruct } from "../../constructs/ssm/efs-initialization-document";
 import { SsmParametersConstruct } from "../../constructs/config";
 import { applyStackTags } from "../../shared/helpers/stack-tagging-helper";
 import { buildPrometheusConfig } from "../../shared/helpers/prometheus-config-builder";
 import { MonitoringEfsStackProps } from "../../shared/types/stack-types";
 import {
   MONITORING_EFS_LIFECYCLE_POLICY,
-  MONITORING_EFS_INIT_TIMEOUT,
   MONITORING_EFS_POSIX_USER,
   MONITORING_EFS_CREATION_ACL,
   GRAFANA_HOST_IP_PLACEHOLDER,
@@ -38,10 +36,10 @@ import { isProductionEnvironment } from "../../shared/utils/environment";
  * - EFS FileSystem with encryption at rest
  * - EFS Access Point with POSIX permissions
  * - EFS Security Group allowing VPC CIDR access
- * - Lambda function for one-time EFS initialization
+ * - SSM Automation Document for one-time EFS initialization
  * - SSM Parameters for Prometheus and Grafana configuration
  *
- * EFS Directory Structure (created by Lambda):
+ * EFS Directory Structure (created by SSM Automation):
  * ```
  * /monitoring/
  * ├── prometheus-data/      # Prometheus time-series database
@@ -55,10 +53,19 @@ import { isProductionEnvironment } from "../../shared/utils/environment";
  * - NetworkingStack (for VPC)
  *
  * Configuration Strategy:
- * - Prometheus config stored in SSM Parameter Store
- * - Grafana datasource/dashboard configs stored in SSM Parameter Store
- * - Lambda function creates directory structure on EFS
+ * - Prometheus config stored in SSM Parameter Store as JSON
+ * - Grafana datasource/dashboard configs stored in SSM as JSON
+ * - SSM Automation Document converts JSON to YAML
+ * - SSM Automation creates EFS directory structure setup script
  * - Services mount EFS and read configs from SSM at startup
+ *
+ * Benefits of SSM Automation over Lambda:
+ * - No cold starts or Lambda execution delays
+ * - Direct SSM integration without custom resource provider
+ * - No VPC dependencies for initialization
+ * - Better integration with SSM State Manager
+ * - Native CloudFormation integration
+ * - No Lambda function packaging or deployment
  *
  * Cross-Account Scraping:
  * - Supports EC2 service discovery with IAM role assumption
@@ -67,7 +74,7 @@ import { isProductionEnvironment } from "../../shared/utils/environment";
  *
  * Production Recommendations:
  * - enableEncryption: true (PCI/HIPAA compliance)
- * - lifecyclePolicy: AFTER_30_DAYS (cost optimization)
+ * - lifecyclePolicy: AFTER_30_DAYS (cost optimisation)
  * - removalPolicy: RETAIN (prevent data loss)
  * - Backup EFS with AWS Backup service
  *
@@ -121,9 +128,14 @@ export class MonitoringEfsStack extends cdk.Stack {
   public readonly efsAvailabilityZone: string;
 
   /**
-   * EFS initialization complete custom resource
+   * EFS initialization SSM Automation Document
    */
-  public readonly efsInitializationComplete: cdk.CustomResource;
+  public readonly efsInitializationDocument: EfsInitializationDocumentConstruct;
+
+  /**
+   * EFS initialization automation execution
+   */
+  public readonly efsInitializationExecution: ssm.CfnAssociation;
 
   /**
    * SSM Parameters construct (if enabled)
@@ -158,10 +170,6 @@ export class MonitoringEfsStack extends cdk.Stack {
     const removalPolicy =
       props.removalPolicy ??
       (isProduction ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY);
-    const initializationTimeout =
-      props.initializationTimeout ?? MONITORING_EFS_INIT_TIMEOUT;
-    const posixUser = props.posixUser ?? MONITORING_EFS_POSIX_USER;
-    const creationAcl = props.creationAcl ?? MONITORING_EFS_CREATION_ACL;
     const usePublicSubnets = props.usePublicSubnets ?? true;
 
     // ========================================================================
@@ -230,6 +238,9 @@ export class MonitoringEfsStack extends cdk.Stack {
     // ========================================================================
     // 4. EFS ACCESS POINT
     // ========================================================================
+    const posixUser = props.posixUser ?? MONITORING_EFS_POSIX_USER;
+    const creationAcl = props.creationAcl ?? MONITORING_EFS_CREATION_ACL;
+
     const efsAccessPointConstruct = new EfsAccessPointConstruct(
       this,
       "EfsAccessPoint",
@@ -245,69 +256,50 @@ export class MonitoringEfsStack extends cdk.Stack {
     this.accessPoint = efsAccessPointConstruct.accessPoint;
 
     // ========================================================================
-    // 5. EFS INITIALIZATION LAMBDA
+    // 5. EFS INITIALIZATION SSM AUTOMATION DOCUMENT
     // ========================================================================
-    const efsInitLambda = new LambdaFunctionConstruct(this, "EfsInitLambda", {
-      envName: props.envName,
-      functionName: props.projectName
-        ? `${props.projectName}-efs-init`
-        : "efs-initialization",
-      entry: "lambda/handlers/efs-initialisation.ts",
-      handler: "handler",
-      timeout: initializationTimeout,
-      environment: {
-        EFS_FILE_SYSTEM_ID: this.fileSystem.fileSystemId,
-        EFS_ACCESS_POINT_ID: this.accessPoint.accessPointId,
-        ENVIRONMENT: props.envName,
-      },
-    });
-
-    // Grant EFS permissions
-    this.fileSystem.grant(
-      efsInitLambda.function,
-      "elasticfilesystem:ClientWrite"
-    );
-
-    efsInitLambda.function.addToRolePolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: [
-          "elasticfilesystem:ClientMount",
-          "elasticfilesystem:ClientWrite",
-          "elasticfilesystem:AccessedViaMountTarget",
-          "ssm:GetParameter",
-          "ssm:PutParameter",
-        ],
-        resources: [
-          this.fileSystem.fileSystemArn,
-          this.accessPoint.accessPointArn,
-          `arn:aws:ssm:${this.region}:${this.account}:parameter/monitoring/${props.envName}/*`,
-        ],
-      })
-    );
-
-    // ========================================================================
-    // 6. EFS INITIALIZATION CUSTOM RESOURCE
-    // ========================================================================
-    this.efsInitializationComplete = new cdk.CustomResource(
+    // Create SSM Automation Document for EFS initialization
+    // This replaces the Lambda-based approach with native SSM automation
+    this.efsInitializationDocument = new EfsInitializationDocumentConstruct(
       this,
-      "EfsInitialization",
+      "EfsInitDocument",
       {
-        serviceToken: efsInitLambda.function.functionArn,
-        properties: {
-          FileSystemId: this.fileSystem.fileSystemId,
-          AccessPointId: this.accessPoint.accessPointId,
-          Environment: props.envName,
-          Region: this.region,
-          Timestamp: Date.now().toString(),
-        },
+        envName: props.envName,
+        projectName: props.projectName,
+        region: this.region,
       }
     );
 
     // ========================================================================
+    // 6. EXECUTE EFS INITIALIZATION
+    // ========================================================================
+    // Execute the automation document to initialize EFS
+    // This creates the directory structure and converts JSON configs to YAML
+    this.efsInitializationExecution =
+      this.efsInitializationDocument.createExecution(
+        this.fileSystem.fileSystemId,
+        this.accessPoint.accessPointId
+      );
+
+    // ========================================================================
     // 7. SSM PARAMETERS - MONITORING CONFIGS
     // ========================================================================
-    this.createMonitoringConfigs(props);
+    const monitoringConfigParams = this.createMonitoringConfigs(props);
+
+    // Ensure initialization waits for SSM parameters to be created
+    // Access the underlying CFN resources for dependency management
+    this.efsInitializationExecution.node.addDependency(
+      monitoringConfigParams.prometheusConfig.node
+        .defaultChild as cdk.CfnResource
+    );
+    this.efsInitializationExecution.node.addDependency(
+      monitoringConfigParams.grafanaDatasourceConfig.node
+        .defaultChild as cdk.CfnResource
+    );
+    this.efsInitializationExecution.node.addDependency(
+      monitoringConfigParams.grafanaDashboardConfig.node
+        .defaultChild as cdk.CfnResource
+    );
 
     // ========================================================================
     // 8. SSM PARAMETERS - EFS DISCOVERY
@@ -418,24 +410,17 @@ export class MonitoringEfsStack extends cdk.Stack {
         );
       }
     }
-
-    // Warn about Lambda timeout
-    if (
-      props.initializationTimeout &&
-      props.initializationTimeout.toMinutes() < 5
-    ) {
-      cdk.Annotations.of(this).addWarning(
-        `PRODUCTION: EFS initialization timeout set to ${props.initializationTimeout.toMinutes()} minutes. ` +
-          "Lambda may timeout if EFS mount takes longer than expected. " +
-          "Consider increasing to 5+ minutes for production."
-      );
-    }
   }
 
   /**
    * Create monitoring configuration SSM parameters
+   * Returns the created parameters for dependency management
    */
-  private createMonitoringConfigs(props: MonitoringEfsStackProps): void {
+  private createMonitoringConfigs(props: MonitoringEfsStackProps): {
+    prometheusConfig: ssm.StringParameter;
+    grafanaDatasourceConfig: ssm.StringParameter;
+    grafanaDashboardConfig: ssm.StringParameter;
+  } {
     const region = cdk.Stack.of(this).region;
 
     // ========================================================================
@@ -447,12 +432,16 @@ export class MonitoringEfsStack extends cdk.Stack {
       props.crossAccountTargets
     );
 
-    new ssm.StringParameter(this, "PrometheusConfig", {
-      parameterName: `/monitoring/${props.envName}/prometheus-config`,
-      stringValue: JSON.stringify(prometheusConfig, null, 2),
-      description: `Prometheus configuration for ${props.envName} monitoring`,
-      tier: ssm.ParameterTier.STANDARD,
-    });
+    const prometheusConfigParam = new ssm.StringParameter(
+      this,
+      "PrometheusConfig",
+      {
+        parameterName: `/monitoring/${props.envName}/prometheus-config`,
+        stringValue: JSON.stringify(prometheusConfig, null, 2),
+        description: `Prometheus configuration for ${props.envName} monitoring`,
+        tier: ssm.ParameterTier.STANDARD,
+      }
+    );
 
     // ========================================================================
     // GRAFANA DATASOURCE CONFIGURATION
@@ -472,12 +461,16 @@ export class MonitoringEfsStack extends cdk.Stack {
       ],
     };
 
-    new ssm.StringParameter(this, "GrafanaDatasourceConfig", {
-      parameterName: `/monitoring/${props.envName}/grafana-datasource-config`,
-      stringValue: JSON.stringify(grafanaDatasourceConfig, null, 2),
-      description: `Grafana datasource configuration for ${props.envName}`,
-      tier: ssm.ParameterTier.STANDARD,
-    });
+    const grafanaDatasourceConfigParam = new ssm.StringParameter(
+      this,
+      "GrafanaDatasourceConfig",
+      {
+        parameterName: `/monitoring/${props.envName}/grafana-datasource-config`,
+        stringValue: JSON.stringify(grafanaDatasourceConfig, null, 2),
+        description: `Grafana datasource configuration for ${props.envName}`,
+        tier: ssm.ParameterTier.STANDARD,
+      }
+    );
 
     // ========================================================================
     // GRAFANA DASHBOARD CONFIGURATION
@@ -500,12 +493,22 @@ export class MonitoringEfsStack extends cdk.Stack {
       ],
     };
 
-    new ssm.StringParameter(this, "GrafanaDashboardConfig", {
-      parameterName: `/monitoring/${props.envName}/grafana-dashboard-config`,
-      stringValue: JSON.stringify(grafanaDashboardConfig, null, 2),
-      description: `Grafana dashboard provider configuration for ${props.envName}`,
-      tier: ssm.ParameterTier.STANDARD,
-    });
+    const grafanaDashboardConfigParam = new ssm.StringParameter(
+      this,
+      "GrafanaDashboardConfig",
+      {
+        parameterName: `/monitoring/${props.envName}/grafana-dashboard-config`,
+        stringValue: JSON.stringify(grafanaDashboardConfig, null, 2),
+        description: `Grafana dashboard provider configuration for ${props.envName}`,
+        tier: ssm.ParameterTier.STANDARD,
+      }
+    );
+
+    return {
+      prometheusConfig: prometheusConfigParam,
+      grafanaDatasourceConfig: grafanaDatasourceConfigParam,
+      grafanaDashboardConfig: grafanaDashboardConfigParam,
+    };
   }
 
   /**

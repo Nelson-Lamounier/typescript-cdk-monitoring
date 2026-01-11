@@ -48,7 +48,7 @@ import { isProductionEnvironment } from "../../shared/utils/environment";
  *
  * Components:
  * - ECS Cluster with Container Insights
- * - EC2 Auto Scaling Group with ECS-optimized Amazon Linux 2023 AMI
+ * - EC2 Auto Scaling Group with ECS-optimised Amazon Linux 2023 AMI
  * - Launch Template with IMDSv2 enforcement
  * - Application Load Balancer with HTTP/HTTPS listeners
  * - Security Groups for ALB and ECS instances
@@ -62,10 +62,17 @@ import { isProductionEnvironment } from "../../shared/utils/environment";
  * - MonitoringEfsStack (for persistent storage)
  *
  * Architecture Pattern:
- * - Minimal User Data: Fast instance startup (~2-3KB)
- * - SSM State Manager: Application setup after instance registers
+ * - Enhanced User Data: SSM agent bootstrap with CloudFormation signalling (~30-180s)
+ * - SSM State Manager: Application setup after instance registers with retry logic
+ * - Bootstrap Metadata: Tracked in SSM Parameter Store for auditing
  * - EFS: Persistent storage for Prometheus/Grafana data
  * - ALB: Path-based routing to Grafana (/grafana) and Prometheus (/prometheus)
+ *
+ * Bootstrap Process:
+ * 1. User Data: Install SSM agent, collect metadata, optional system updates
+ * 2. CloudFormation Signal: Instance reports readiness to CloudFormation
+ * 3. SSM State Manager: Configure ECS agent, CloudWatch agent, log collection
+ * 4. ECS Registration: Instance joins cluster and becomes available for tasks
  *
  * SSM Parameters Created:
  * - `/monitoring/${envName}/infra/cluster-name` - ECS cluster name
@@ -73,6 +80,7 @@ import { isProductionEnvironment } from "../../shared/utils/environment";
  * - `/monitoring/${envName}/infra/alb-dns` - Load balancer DNS
  * - `/monitoring/${envName}/infra/listener-arn` - ALB listener ARN
  * - `/monitoring/${envName}/infra/asg-name` - Auto Scaling Group name
+ * - `/bootstrap/${envName}/instances/{instanceId}` - Bootstrap metadata (if enabled)
  *
  * Production Recommendations:
  * - enableHttps: true (with valid ACM certificate)
@@ -81,6 +89,8 @@ import { isProductionEnvironment } from "../../shared/utils/environment";
  * - minCapacity: 2+ (high availability)
  * - desiredCapacity: 2+ (zero-downtime deployments)
  * - enableDeletionProtection: true (prevent accidental ALB deletion)
+ * - enableSystemUpdates: true (apply security patches during boot)
+ * - enableMetadataTracking: true (audit trail and troubleshooting)
  *
  * @example
  * ```typescript
@@ -94,6 +104,8 @@ import { isProductionEnvironment } from "../../shared/utils/environment";
  *   efsSecurityGroup: efsStack.securityGroup,
  *   efsInitializationComplete: efsStack.initializationComplete,
  *   efsStackName: efsStack.stackName,
+ *   // Optional: Disable system updates for faster boots in dev
+ *   enableSystemUpdates: false,
  * });
  *
  * // Production
@@ -115,6 +127,14 @@ import { isProductionEnvironment } from "../../shared/utils/environment";
  *   maxCapacity: 3,
  *   desiredCapacity: 2,
  *   enableDeletionProtection: true,
+ *   // Production: Enable system updates and metadata tracking
+ *   enableSystemUpdates: true,
+ *   enableMetadataTracking: true,
+ *   // Optional: Custom SSM State Manager schedules
+ *   ssmEcsAgentConfig: {
+ *     scheduleExpression: 'rate(3 days)',
+ *     complianceSeverity: 'CRITICAL',
+ *   },
  * });
  * ```
  */
@@ -265,7 +285,7 @@ export class MonitoringInfraStack extends cdk.Stack {
     });
 
     // ========================================================================
-    // 2. MINIMAL USER DATA
+    // 2. ENHANCED USER DATA WITH CLOUDFORMATION SIGNALLING
     // ========================================================================
     const clusterName =
       props.clusterName ||
@@ -273,9 +293,26 @@ export class MonitoringInfraStack extends cdk.Stack {
         ? `${props.envName}-${props.projectName}-monitoring-cluster`
         : `${props.envName}-monitoring-cluster`);
 
+    // Enhanced UserData with CloudFormation signalling, metadata tracking, and optional system updates
+    // This ensures the Auto Scaling Group doesn't report CREATE_COMPLETE until instances are actually ready
     const userDataConstruct = new UserDataConstruct(this, "UserData", {
       envName: props.envName,
       clusterName,
+      // CloudFormation signalling configuration
+      // Signals are sent after SSM agent is verified and running
+      stackName: this.stackName,
+      logicalResourceId: "EcsAutoScalingGroup", // Will be set as ASG logical ID
+      region: this.region,
+      // Enable system updates in production for security patches
+      // Adds 1-3 minutes to boot time but ensures latest patches
+      enableSystemUpdates: props.enableSystemUpdates ?? isProduction,
+      // Enable bootstrap metadata tracking in SSM Parameter Store
+      // Stores bootstrap version, timestamp, instance details for auditing
+      enableMetadataTracking: props.enableMetadataTracking !== false,
+      // Optional: Custom metadata parameter prefix
+      metadataParameterPrefix: props.metadataParameterPrefix,
+      // Optional: Custom bootstrap version for tracking configuration changes
+      bootstrapVersion: props.bootstrapVersion,
     });
 
     // ========================================================================
@@ -334,6 +371,21 @@ export class MonitoringInfraStack extends cdk.Stack {
       })
     );
 
+    // Add SSM Parameter Store write permissions for bootstrap metadata
+    // Allows instances to store bootstrap information for auditing and troubleshooting
+    if (props.enableMetadataTracking !== false) {
+      const metadataPrefix = props.metadataParameterPrefix ?? "/bootstrap";
+      ltConstruct.role.addToPrincipalPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["ssm:PutParameter", "ssm:AddTagsToResource"],
+          resources: [
+            `arn:aws:ssm:${this.region}:${this.account}:parameter${metadataPrefix}/${props.envName}/instances/*`,
+          ],
+        })
+      );
+    }
+
     // Add CloudWatch Logs permissions
     ltConstruct.role.addToPrincipalPolicy(
       new iam.PolicyStatement({
@@ -367,13 +419,18 @@ export class MonitoringInfraStack extends cdk.Stack {
         {
           id: "AwsSolutions-IAM5",
           reason:
-            "SSM parameter access and CloudWatch Logs wildcard permissions required for runtime operations.",
+            "SSM parameter access, CloudWatch Logs, and bootstrap metadata wildcard permissions required for runtime operations.",
           appliesTo: [
             "Action::ssm:GetParameter",
             "Action::ssm:GetParameters",
             "Action::ssm:GetParametersByPath",
+            "Action::ssm:PutParameter",
+            "Action::ssm:AddTagsToResource",
             `Resource::arn:aws:logs:${this.region}:${this.account}:log-group:/ecs/*:*`,
             `Resource::arn:aws:logs:${this.region}:${this.account}:log-group:/aws/ecs/*:*`,
+            `Resource::arn:aws:ssm:${this.region}:${this.account}:parameter${
+              props.metadataParameterPrefix ?? "/bootstrap"
+            }/${props.envName}/instances/*`,
           ],
         },
       ],
@@ -395,6 +452,10 @@ export class MonitoringInfraStack extends cdk.Stack {
       maxCapacity,
       desiredCapacity,
       usePublicSubnets: props.usePublicSubnets ?? true,
+      // Align with EFS availability zone for optimal performance
+      availabilityZones: props.efsAvailabilityZone
+        ? [props.efsAvailabilityZone]
+        : undefined,
     });
 
     this.cluster = ecsClusterConstruct.cluster;
@@ -403,21 +464,52 @@ export class MonitoringInfraStack extends cdk.Stack {
     // ========================================================================
     // 5. VPC ENDPOINT FOR CLOUDWATCH LOGS
     // ========================================================================
-    props.vpc.addInterfaceEndpoint("CloudWatchLogsEndpoint", {
-      service: ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS,
-      subnets: {
-        subnetType: ec2.SubnetType.PUBLIC,
-      },
-      privateDnsEnabled: true,
-    });
+    // Only create VPC endpoint if using private subnets
+    // Public subnets use Internet Gateway (no additional cost)
+    if (props.usePublicSubnets === false) {
+      props.vpc.addInterfaceEndpoint("CloudWatchLogsEndpoint", {
+        service: ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS,
+        subnets: {
+          subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+        },
+        privateDnsEnabled: true,
+      });
+
+      cdk.Annotations.of(this).addInfo(
+        "Created CloudWatch Logs VPC endpoint for private subnet access (~£7/month)"
+      );
+    } else {
+      cdk.Annotations.of(this).addInfo(
+        "Skipping CloudWatch Logs VPC endpoint (instances in public subnets use Internet Gateway)"
+      );
+    }
 
     // ========================================================================
     // 6. SSM STATE MANAGER ASSOCIATIONS
     // ========================================================================
+    // CRITICAL: SSM State Manager handles all post-boot configuration on EVERY EC2 instance:
+    // - EFS mounting at /mnt/efs using the file system ID
+    // - Executes EFS setup script (generated by SSM Automation Document during EFS stack deployment)
+    // - ECS agent installation and configuration with retry logic
+    // - CloudWatch Agent installation for log collection
+    // - Log group configuration for containers, ECS agent, and init logs
+    //
+    // Configuration is applied on a schedule to correct drift automatically
+    // Production: Every 7 days, Non-production: Every 30 days
     new SsmStateManagerConstruct(this, "SsmStateManager", {
       envName: props.envName,
+      projectName: props.projectName,
       clusterName,
       instanceRole: ltConstruct.role,
+      // CRITICAL: EFS mounting configuration
+      // Without this, EC2 instances CANNOT access EFS!
+      fileSystemId: props.fileSystem.fileSystemId,
+      efsMountPoint: "/mnt/efs",
+      // Optional: Override SSM association schedules
+      ecsAgent: props.ssmEcsAgentConfig,
+      cloudWatchAgent: props.ssmCloudWatchAgentConfig,
+      // Optional: Custom SSM targets (defaults to Environment tag)
+      targets: props.ssmTargets,
     });
 
     // ========================================
@@ -471,7 +563,7 @@ export class MonitoringInfraStack extends cdk.Stack {
     this.listener = listenerConstruct.listener;
 
     // ========================================
-    // 9. SECURITY GROUP RULES - ECS TO ALB
+    // 9. SECURITY GROUP RULES - ECS TO ALB AND EFS
     // ========================================
     // Note: ALB security group rules for allowed IPs configured above
 
@@ -490,6 +582,14 @@ export class MonitoringInfraStack extends cdk.Stack {
       albSecurityGroup,
       ec2.Port.tcp(MONITORING_PORTS.PROMETHEUS),
       "Allow ALB to reach Prometheus on port 9090"
+    );
+
+    // CRITICAL: Allow ECS instances to access EFS
+    // Without this rule, EFS mounting will fail!
+    props.efsSecurityGroup.addIngressRule(
+      ltConstruct.securityGroup,
+      ec2.Port.tcp(2049),
+      "Allow ECS instances to mount EFS via NFS"
     );
 
     // ========================================================================
