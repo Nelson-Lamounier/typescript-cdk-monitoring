@@ -36,20 +36,14 @@ export function buildPrometheusConfig(
     staticScrapes || "  # add scrape jobs",
   ].join("\n");
 
+  // Fixed: Properly format command for ECS
+  // ECS expects an array where each element is a separate argument
   const command = [
-    "/bin/sh",
-    "-c",
-    [
-      "cat <<'EOF' >/etc/prometheus/prometheus.yml",
-      config,
-      "EOF",
-      "exec /bin/prometheus \\",
-      "  --config.file=/etc/prometheus/prometheus.yml \\",
-      "  --storage.tsdb.path=/prometheus \\",
-      `  --storage.tsdb.retention.time=${retention} \\`,
-      "  --web.console.libraries=/usr/share/prometheus/console_libraries \\",
-      "  --web.console.templates=/usr/share/prometheus/consoles",
-    ].join("\n"),
+    "--config.file=/mnt/efs/config/prometheus/prometheus.yml",
+    "--storage.tsdb.path=/mnt/efs/prometheus-data",
+    `--storage.tsdb.retention.time=${retention}`,
+    "--web.console.libraries=/usr/share/prometheus/console_libraries",
+    "--web.console.templates=/usr/share/prometheus/consoles",
   ];
 
   return { command, configContent: config };

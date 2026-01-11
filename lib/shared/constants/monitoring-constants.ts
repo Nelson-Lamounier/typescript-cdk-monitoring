@@ -81,11 +81,11 @@ export const MONITORING_CAPACITY_DEFAULTS = {
  */
 
 export const MONITORING_MOUNT_PATHS = {
-  PROMETHEUS_DATA: "/mnt/prometheus-data",
-  PROMETHEUS_CONFIG: "/mnt/prometheus-config",
-  GRAFANA_DATA: "/mnt/grafana-data",
-  GRAFANA_PROVISIONING: "/mnt/grafana-provisioning",
-  GRAFANA_DASHBOARDS: "/mnt/grafana-dashboards",
+  PROMETHEUS_DATA: "/mnt/efs/prometheus-data",
+  PROMETHEUS_CONFIG: "/mnt/efs/config/prometheus",
+  GRAFANA_DATA: "/mnt/efs/grafana-data",
+  GRAFANA_PROVISIONING: "/mnt/efs/config/grafana/provisioning",
+  GRAFANA_DASHBOARDS: "/mnt/efs/grafana-dashboards",
 } as const;
 
 /**
