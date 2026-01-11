@@ -5,8 +5,14 @@ set -euo pipefail
 # EFS Stack Verification Script
 # ============================================================================
 # This script verifies the MonitoringEfsStack deployment after it has been
-# deployed via CDK. It checks CloudFormation stack status, SSM parameters,
-# EFS resources, and provides a comprehensive verification report.
+# deployed via CDK. It checks CloudFormation stack status, SSM Automation
+# Document, SSM parameters, EFS resources, and provides a comprehensive
+# verification report.
+#
+# Architecture:
+#   - EFS Stack creates EFS resources and JSON config parameters
+#   - SSM Automation Document converts JSON to YAML and creates setup scripts
+#   - SSM State Manager (in InfraStack) executes setup scripts on EC2 instances
 #
 # Usage:
 #   ./scripts/tests/verify-efs-stack.sh [OPTIONS]
@@ -53,10 +59,17 @@ EFS Stack Verification Script
 
 Verifies the MonitoringEfsStack deployment by checking:
   - CloudFormation stack status
-  - SSM parameters (including initialization status)
+  - SSM Automation Document existence and status
+  - SSM parameters (JSON configs, YAML configs, setup scripts)
+  - SSM Automation executions (initialization status)
   - EFS file system and mount targets
   - EFS access point
   - Security group configuration
+
+Architecture Verified:
+  1. EFS Stack creates EFS resources and JSON configuration parameters
+  2. SSM Automation Document converts JSON to YAML (runs once during deployment)
+  3. SSM State Manager (InfraStack) mounts EFS on EC2 instances
 
 Usage:
   $0 [OPTIONS]
@@ -241,26 +254,183 @@ echo "  Access Point ID: ${ACCESS_POINT_ID}"
 echo "  Security Group ID: ${SECURITY_GROUP_ID}"
 
 # ============================================================================
-# 2. VERIFY SSM PARAMETERS
+# 2. VERIFY SSM AUTOMATION DOCUMENT
+# ============================================================================
+echo ""
+echo -e "${BLUE}2. SSM Automation Document${NC}"
+echo "--------------------------------------------------------------"
+
+# Document name pattern: {StackName}-{envName}-efs-init
+DOCUMENT_NAME="${STACK_NAME}-${ENVIRONMENT}-efs-init"
+
+DOCUMENT_STATUS=$(aws ssm describe-document \
+  --name "${DOCUMENT_NAME}" \
+  --profile ${AWS_PROFILE} \
+  --region ${REGION} \
+  --query 'Document.Status' \
+  --output text 2>/dev/null || echo "NOT_FOUND")
+
+if [ "$DOCUMENT_STATUS" = "Active" ]; then
+  echo -e "${GREEN}✅ SSM Automation Document: ${DOCUMENT_STATUS}${NC}"
+  echo "   Document Name: ${DOCUMENT_NAME}"
+  
+  # Get document details
+  DOCUMENT_VERSION=$(aws ssm describe-document \
+    --name "${DOCUMENT_NAME}" \
+    --profile ${AWS_PROFILE} \
+    --region ${REGION} \
+    --query 'Document.DocumentVersion' \
+    --output text 2>/dev/null)
+  
+  DOCUMENT_TYPE=$(aws ssm describe-document \
+    --name "${DOCUMENT_NAME}" \
+    --profile ${AWS_PROFILE} \
+    --region ${REGION} \
+    --query 'Document.DocumentType' \
+    --output text 2>/dev/null)
+  
+  echo "   Document Type: ${DOCUMENT_TYPE}"
+  echo "   Document Version: ${DOCUMENT_VERSION}"
+else
+  echo -e "${RED}❌ SSM Automation Document: ${DOCUMENT_STATUS}${NC}"
+  echo "   Expected: ${DOCUMENT_NAME}"
+fi
+
+# Check for SSM Association execution (document invocation)
+echo ""
+echo "SSM Automation Executions:"
+echo "--------------------------------------------------------------"
+
+EXECUTIONS=$(aws ssm describe-automation-executions \
+  --filters "Key=DocumentNamePrefix,Values=${DOCUMENT_NAME}" \
+  --max-results 5 \
+  --profile ${AWS_PROFILE} \
+  --region ${REGION} \
+  --query 'AutomationExecutionMetadataList[*].[ExecutionId,AutomationExecutionStatus,ExecutionStartTime]' \
+  --output text 2>/dev/null || echo "")
+
+if [ -n "$EXECUTIONS" ]; then
+  echo "$EXECUTIONS" | while IFS=$'\t' read -r exec_id status start_time; do
+    if [ "$status" = "Success" ]; then
+      echo -e "${GREEN}✅${NC} Execution: ${exec_id}"
+    elif [ "$status" = "Failed" ]; then
+      echo -e "${RED}❌${NC} Execution: ${exec_id}"
+    else
+      echo -e "${YELLOW}⏳${NC} Execution: ${exec_id}"
+    fi
+    echo "   Status: ${status}"
+    echo "   Started: ${start_time}"
+  done
+else
+  echo -e "${YELLOW}⚠️  No automation executions found${NC}"
+  echo "Note: Document may not have been executed yet, or executions have expired."
+fi
+
+# ============================================================================
+# 3. VERIFY SSM PARAMETERS
 # ============================================================================
 echo ""
 echo -e "${BLUE}3. SSM Parameters${NC}"
 echo "--------------------------------------------------------------"
 
-EXPECTED_PARAMS=(
+echo "JSON Configuration Parameters (created by EFS Stack):"
+JSON_PARAMS=(
   "/monitoring/${ENVIRONMENT}/prometheus-config"
-  "/monitoring/${ENVIRONMENT}/prometheus-config-yaml"
   "/monitoring/${ENVIRONMENT}/grafana-datasource-config"
-  "/monitoring/${ENVIRONMENT}/grafana-datasource-config-yaml"
   "/monitoring/${ENVIRONMENT}/grafana-dashboard-config"
+)
+
+MISSING_JSON_PARAMS=0
+for PARAM in "${JSON_PARAMS[@]}"; do
+  PARAM_EXISTS=$(aws ssm get-parameter \
+    --name "${PARAM}" \
+    --profile ${AWS_PROFILE} \
+    --region ${REGION} \
+    --query 'Parameter.Name' \
+    --output text 2>/dev/null || echo "NOT_FOUND")
+  
+  if [ "$PARAM_EXISTS" != "NOT_FOUND" ]; then
+    VALUE_SIZE=$(aws ssm get-parameter \
+      --name "${PARAM}" \
+      --profile ${AWS_PROFILE} \
+      --region ${REGION} \
+      --query 'length(Parameter.Value)' \
+      --output text)
+    
+    echo -e "${GREEN}✅${NC} ${PARAM} (${VALUE_SIZE} chars)"
+  else
+    echo -e "${RED}❌${NC} ${PARAM}"
+    ((MISSING_JSON_PARAMS++))
+  fi
+done
+
+echo ""
+echo "YAML Configuration Parameters (created by SSM Automation Document):"
+YAML_PARAMS=(
+  "/monitoring/${ENVIRONMENT}/prometheus-config-yaml"
+  "/monitoring/${ENVIRONMENT}/grafana-datasource-config-yaml"
   "/monitoring/${ENVIRONMENT}/grafana-dashboard-config-yaml"
   "/monitoring/${ENVIRONMENT}/efs-setup-script"
-  "/monitoring/${ENVIRONMENT}/efs-initialization-status"
-  "/monitoring/${ENVIRONMENT}/efs/config/file-system-id"
-  "/monitoring/${ENVIRONMENT}/efs/config/access-point-id"
-  "/monitoring/${ENVIRONMENT}/efs/config/security-group-id"
-  "/monitoring/${ENVIRONMENT}/efs/config/availability-zone"
 )
+
+MISSING_YAML_PARAMS=0
+for PARAM in "${YAML_PARAMS[@]}"; do
+  PARAM_EXISTS=$(aws ssm get-parameter \
+    --name "${PARAM}" \
+    --profile ${AWS_PROFILE} \
+    --region ${REGION} \
+    --query 'Parameter.Name' \
+    --output text 2>/dev/null || echo "NOT_FOUND")
+  
+  if [ "$PARAM_EXISTS" != "NOT_FOUND" ]; then
+    VALUE_SIZE=$(aws ssm get-parameter \
+      --name "${PARAM}" \
+      --profile ${AWS_PROFILE} \
+      --region ${REGION} \
+      --query 'length(Parameter.Value)' \
+      --output text)
+    
+    echo -e "${GREEN}✅${NC} ${PARAM} (${VALUE_SIZE} chars)"
+  else
+    echo -e "${RED}❌${NC} ${PARAM}"
+    ((MISSING_YAML_PARAMS++))
+  fi
+done
+
+echo ""
+echo "EFS Discovery Parameters (created by EFS Stack):"
+DISCOVERY_PARAMS=(
+  "/monitoring/${ENVIRONMENT}/efs/file-system-id"
+  "/monitoring/${ENVIRONMENT}/efs/access-point-id"
+  "/monitoring/${ENVIRONMENT}/efs/security-group-id"
+  "/monitoring/${ENVIRONMENT}/efs/availability-zone"
+)
+
+MISSING_DISCOVERY_PARAMS=0
+for PARAM in "${DISCOVERY_PARAMS[@]}"; do
+  PARAM_EXISTS=$(aws ssm get-parameter \
+    --name "${PARAM}" \
+    --profile ${AWS_PROFILE} \
+    --region ${REGION} \
+    --query 'Parameter.Name' \
+    --output text 2>/dev/null || echo "NOT_FOUND")
+  
+  if [ "$PARAM_EXISTS" != "NOT_FOUND" ]; then
+    PARAM_VALUE=$(aws ssm get-parameter \
+      --name "${PARAM}" \
+      --profile ${AWS_PROFILE} \
+      --region ${REGION} \
+      --query 'Parameter.Value' \
+      --output text)
+    
+    echo -e "${GREEN}✅${NC} ${PARAM}: ${PARAM_VALUE}"
+  else
+    echo -e "${RED}❌${NC} ${PARAM}"
+    ((MISSING_DISCOVERY_PARAMS++))
+  fi
+done
+
+MISSING_PARAMS=$((MISSING_JSON_PARAMS + MISSING_YAML_PARAMS + MISSING_DISCOVERY_PARAMS))
 
 MISSING_PARAMS=0
 
@@ -300,41 +470,22 @@ for PARAM in "${EXPECTED_PARAMS[@]}"; do
 done
 
 echo ""
+echo "Summary:"
+echo "  JSON Parameters: $((${#JSON_PARAMS[@]} - MISSING_JSON_PARAMS))/${#JSON_PARAMS[@]}"
+echo "  YAML Parameters: $((${#YAML_PARAMS[@]} - MISSING_YAML_PARAMS))/${#YAML_PARAMS[@]}"
+echo "  Discovery Parameters: $((${#DISCOVERY_PARAMS[@]} - MISSING_DISCOVERY_PARAMS))/${#DISCOVERY_PARAMS[@]}"
+
 if [ $MISSING_PARAMS -eq 0 ]; then
   echo -e "${GREEN}✅ All SSM parameters created successfully${NC}"
 else
   echo -e "${YELLOW}⚠️  ${MISSING_PARAMS} parameters missing${NC}"
-fi
-
-# Check initialization status parameter (if it exists)
-echo ""
-INIT_STATUS_PARAM="/monitoring/${ENVIRONMENT}/efs-initialization-status"
-INIT_STATUS_EXISTS=$(aws ssm get-parameter \
-  --name "${INIT_STATUS_PARAM}" \
-  --profile ${AWS_PROFILE} \
-  --region ${REGION} \
-  --query 'Parameter.Name' \
-  --output text 2>/dev/null || echo "NOT_FOUND")
-
-if [ "$INIT_STATUS_EXISTS" != "NOT_FOUND" ]; then
-  echo "EFS Initialization Status:"
-  echo "--------------------------------------------------------------"
-  INIT_STATUS=$(aws ssm get-parameter \
-    --name "${INIT_STATUS_PARAM}" \
-    --profile ${AWS_PROFILE} \
-    --region ${REGION} \
-    --query 'Parameter.Value' \
-    --output text 2>/dev/null)
   
-  if [ -n "$INIT_STATUS" ]; then
-    echo -e "${GREEN}✅ Initialization completed successfully${NC}"
-    echo "$INIT_STATUS" | jq '.' 2>/dev/null || echo "$INIT_STATUS"
-  else
-    echo -e "${YELLOW}⚠️  Initialization status parameter exists but is empty${NC}"
+  if [ $MISSING_YAML_PARAMS -gt 0 ]; then
+    echo ""
+    echo -e "${YELLOW}Note: YAML parameters are created by SSM Automation Document.${NC}"
+    echo "      If they're missing, the automation may not have executed yet."
+    echo "      Check SSM Automation executions above."
   fi
-else
-  echo -e "${YELLOW}⚠️  Initialization status parameter not found${NC}"
-  echo "Note: This may be normal if initialization is still in progress."
 fi
 
 # ============================================================================
@@ -501,10 +652,11 @@ echo -e "${BLUE}VERIFICATION SUMMARY${NC}"
 echo "================================================================"
 
 CHECKS_PASSED=0
-TOTAL_CHECKS=6
+TOTAL_CHECKS=7
 
 # Check results
 [ "$STACK_STATUS" = "CREATE_COMPLETE" ] || [ "$STACK_STATUS" = "UPDATE_COMPLETE" ] && ((CHECKS_PASSED++))
+[ "$DOCUMENT_STATUS" = "Active" ] && ((CHECKS_PASSED++))
 [ $MISSING_PARAMS -eq 0 ] && ((CHECKS_PASSED++))
 [ ! -z "$FILE_SYSTEM_ID" ] && ((CHECKS_PASSED++))
 [ "$MOUNT_COUNT" -gt 0 ] && ((CHECKS_PASSED++))
@@ -517,9 +669,17 @@ echo ""
 if [ $CHECKS_PASSED -eq $TOTAL_CHECKS ]; then
   echo -e "${GREEN}✅ All checks passed! EFS stack is ready.${NC}"
   echo ""
+  echo "Architecture Verification:"
+  echo "  ✅ EFS resources created"
+  echo "  ✅ SSM Automation Document deployed"
+  echo "  ✅ JSON configurations stored in SSM"
+  echo "  ✅ YAML configurations generated"
+  echo "  ✅ EFS setup script created"
+  echo ""
   echo "Next steps:"
-  echo "  1. Deploy MonitoringInfraStack (EC2 instances + ALB)"
-  echo "  2. SSH to EC2 instance to verify EFS mount"
+  echo "  1. Deploy MonitoringInfraStack (EC2 instances + ALB + SSM State Manager)"
+  echo "     → SSM State Manager will mount EFS on each EC2 instance"
+  echo "  2. SSH to EC2 instance to verify EFS mount at /mnt/efs"
   echo "  3. Deploy MonitoringServiceStack (Prometheus, Grafana)"
   echo ""
   echo "Useful commands:"
@@ -531,13 +691,26 @@ if [ $CHECKS_PASSED -eq $TOTAL_CHECKS ]; then
   echo "    --query 'Stacks[0].Outputs[?OutputKey==\`FileSystemId\`].OutputValue' \\"
   echo "    --output text"
   echo ""
-  echo "  # View EFS initialization status"
+  echo "  # View SSM Automation Document"
+  echo "  aws ssm describe-document \\"
+  echo "    --name \"${DOCUMENT_NAME}\" \\"
+  echo "    --profile ${AWS_PROFILE} \\"
+  echo "    --region ${REGION}"
+  echo ""
+  echo "  # View latest automation execution"
+  echo "  aws ssm describe-automation-executions \\"
+  echo "    --filters \"Key=DocumentNamePrefix,Values=${DOCUMENT_NAME}\" \\"
+  echo "    --max-results 1 \\"
+  echo "    --profile ${AWS_PROFILE} \\"
+  echo "    --region ${REGION}"
+  echo ""
+  echo "  # View EFS setup script"
   echo "  aws ssm get-parameter \\"
-  echo "    --name \"/monitoring/${ENVIRONMENT}/efs-initialization-status\" \\"
+  echo "    --name \"/monitoring/${ENVIRONMENT}/efs-setup-script\" \\"
   echo "    --profile ${AWS_PROFILE} \\"
   echo "    --region ${REGION} \\"
   echo "    --query 'Parameter.Value' \\"
-  echo "    --output text | jq '.'"
+  echo "    --output text"
   exit 0
 else
   echo -e "${YELLOW}⚠️  Some checks failed. Review the output above.${NC}"
@@ -550,15 +723,27 @@ else
   echo "       --region ${REGION} \\"
   echo "       --max-items 20"
   echo ""
-  echo "  2. Check EFS initialization status:"
-  echo "     aws ssm get-parameter \\"
-  echo "       --name \"/monitoring/${ENVIRONMENT}/efs-initialization-status\" \\"
+  echo "  2. Check SSM Automation Document status:"
+  echo "     aws ssm describe-document \\"
+  echo "       --name \"${DOCUMENT_NAME}\" \\"
   echo "       --profile ${AWS_PROFILE} \\"
-  echo "       --region ${REGION} \\"
-  echo "       --query 'Parameter.Value' \\"
-  echo "       --output text | jq '.'"
+  echo "       --region ${REGION}"
   echo ""
-  echo "  3. Verify stack is fully deployed:"
+  echo "  3. Check SSM Automation execution logs:"
+  echo "     aws ssm describe-automation-executions \\"
+  echo "       --filters \"Key=DocumentNamePrefix,Values=${DOCUMENT_NAME}\" \\"
+  echo "       --max-results 5 \\"
+  echo "       --profile ${AWS_PROFILE} \\"
+  echo "       --region ${REGION}"
+  echo ""
+  echo "  4. If YAML parameters are missing, manually execute automation:"
+  echo "     aws ssm start-automation-execution \\"
+  echo "       --document-name \"${DOCUMENT_NAME}\" \\"
+  echo "       --parameters \"FileSystemId=${FILE_SYSTEM_ID},AccessPointId=${ACCESS_POINT_ID},Environment=${ENVIRONMENT}\" \\"
+  echo "       --profile ${AWS_PROFILE} \\"
+  echo "       --region ${REGION}"
+  echo ""
+  echo "  5. Verify stack is fully deployed:"
   echo "     aws cloudformation describe-stacks \\"
   echo "       --stack-name ${ENVIRONMENT}-MonitoringEfs \\"
   echo "       --profile ${AWS_PROFILE} \\"
