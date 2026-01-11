@@ -222,7 +222,8 @@ export class MonitoringServiceStack extends cdk.Stack {
     // Output secret ARN for manual password retrieval if needed
     new cdk.CfnOutput(this, "GrafanaAdminSecretArn", {
       value: grafanaAdminSecret.secretArn,
-      description: "Grafana admin password secret ARN (retrieve via AWS Console or CLI)",
+      description:
+        "Grafana admin password secret ARN (retrieve via AWS Console or CLI)",
       exportName: props.enableExports
         ? `${props.envName}-grafana-admin-secret-arn`
         : undefined,
@@ -264,7 +265,9 @@ export class MonitoringServiceStack extends cdk.Stack {
     this.grafanaService = grafanaConstruct.service as ecs.Ec2Service;
 
     // Grant the Grafana task execution role permission to read the secret
-    grafanaAdminSecret.grantRead(grafanaConstruct.taskDefinition.executionRole!);
+    grafanaAdminSecret.grantRead(
+      grafanaConstruct.taskDefinition.executionRole!
+    );
 
     // ========================================================================
     // 4. CREATE NODE EXPORTER SERVICE
