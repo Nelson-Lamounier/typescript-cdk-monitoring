@@ -36,11 +36,13 @@ export function buildPrometheusConfig(
     staticScrapes || "  # add scrape jobs",
   ].join("\n");
 
-  // Fixed: Properly format command for ECS
-  // ECS expects an array where each element is a separate argument
+  // Prometheus command using CONTAINER paths (not host paths)
+  // These paths are where volumes are mounted INSIDE the container:
+  // - /etc/prometheus → maps to host: /mnt/efs/config/prometheus
+  // - /prometheus → maps to host: /mnt/efs/prometheus-data
   const command = [
-    "--config.file=/mnt/efs/config/prometheus/prometheus.yml",
-    "--storage.tsdb.path=/mnt/efs/prometheus-data",
+    "--config.file=/etc/prometheus/prometheus.yml",
+    "--storage.tsdb.path=/prometheus",
     `--storage.tsdb.retention.time=${retention}`,
     "--web.console.libraries=/usr/share/prometheus/console_libraries",
     "--web.console.templates=/usr/share/prometheus/consoles",
