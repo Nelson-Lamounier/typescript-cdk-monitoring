@@ -4,7 +4,9 @@ import * as cdk from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
+import * as iam from "aws-cdk-lib/aws-iam";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
+import { NagSuppressions } from "cdk-nag";
 import { Construct } from "constructs";
 
 import { GrafanaServiceConstruct } from "../../constructs/services/monitoring/grafana/grafana-construct";
@@ -194,6 +196,37 @@ export class MonitoringServiceStack extends cdk.Stack {
     });
 
     this.prometheusService = prometheusConstruct.service as ecs.Ec2Service;
+
+    // Grant EC2 service discovery permissions to Prometheus task role
+    // Required for EC2-based service discovery (scraping node exporters on EC2 instances)
+    if (prometheusConstruct.taskDefinition.taskRole) {
+      prometheusConstruct.taskDefinition.taskRole.addToPrincipalPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: [
+            "ec2:DescribeInstances",
+            "ec2:DescribeInstanceStatus",
+            "ec2:DescribeTags",
+          ],
+          resources: ["*"],
+        })
+      );
+
+      // CDK Nag suppression for EC2 wildcard (required for service discovery)
+      NagSuppressions.addResourceSuppressions(
+        prometheusConstruct.taskDefinition.taskRole,
+        [
+          {
+            id: "AwsSolutions-IAM5",
+            reason:
+              "EC2 service discovery requires wildcard permissions to describe instances across the account. " +
+              "This is a read-only operation and is required for Prometheus to discover and scrape targets dynamically.",
+            appliesTo: ["Resource::*"],
+          },
+        ],
+        true
+      );
+    }
 
     // ========================================================================
     // 2. CREATE GRAFANA ADMIN PASSWORD SECRET
