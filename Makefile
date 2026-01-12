@@ -333,3 +333,41 @@ quick-deploy: check-env deploy-all verify-all ## Quick deploy all stacks and ver
 quick-verify: verify-all get-alb-dns ## Quick verification of all stacks
 	@echo ""
 	@echo "$(GREEN)✓ Verification complete$(NC)"
+
+
+# ============================================================================
+# COMMANDS TO RUN IN THE TERMINAL
+# ============================================================================
+
+tree: check directory folder/files structure ## Quick deploy all stacks and verify
+	@echo "$(BLUE)Checking directory folder/files structure...$(NC)"
+	tree -I 'node_modules|cdk.out|dist|build|coverage|.git|.aws-sam' -L 4 --dirsfirst
+
+# ============================================================================
+# -I = Ignore patterns (node_modules, build artifacts, etc.)
+# -L 4 = Limit depth to 4 levels (prevents overwhelming output)
+# --dirsfirst = Show directories before files (easier to read)
+# ============================================================================
+
+tree-source-code: verify-all get-alb-dns ## Most comprehensive - shows everything important
+	@echo "$(BLUE)Checking source code structure...$(NC)"
+	tree -I 'node_modules|cdk.out|dist|build|coverage|.git' -P '*.ts|*.tsx' --prune
+
+tree-source-code: verify-all get-alb-dns ## Focus on source code structure
+	@echo "$(BLUE)Checking source code structure...$(NC)"
+	tree -I 'node_modules|cdk.out|dist|build|coverage|.git' -P '*.ts|*.tsx' --prune
+
+tree-org-no-files: verify-all get-alb-dns ## See folder organisation without files
+	@echo "$(BLUE)Checking folder organisation without files...$(NC)"
+	tree -I 'node_modules|cdk.out|dist|build|coverage|.git' -d -L 3
+# ============================================================================
+# -d = Directories only (no files)
+# -L 3 = Limit to 3 levels deep
+# ============================================================================
+
+tree-org-no-files: verify-all get-alb-dns ## Save to file for further analysis 
+	@echo "$(BLUE)Saving project structure to file...$(NC)"
+	tree -I 'node_modules|cdk.out|dist|build|coverage|.git|.aws-sam' \
+     -L 4 \
+     --dirsfirst \
+     > project-structure.txt
