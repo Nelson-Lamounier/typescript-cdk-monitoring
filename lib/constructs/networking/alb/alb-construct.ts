@@ -137,10 +137,7 @@ export class AlbConstruct extends Construct {
     }
 
     // Warn about access logs in production
-    if (
-      !accessLogEnabled &&
-      (envName === "production" || envName === "prod")
-    ) {
+    if (!accessLogEnabled && (envName === "production" || envName === "prod")) {
       cdk.Annotations.of(this).addWarning(
         "SECURITY WARNING: Access logs are disabled in production environment.\n" +
           "Access logs should be enabled in production for security auditing and troubleshooting.\n" +
@@ -310,7 +307,10 @@ export class AlbConstruct extends Construct {
     cdk.Tags.of(this.loadBalancer).add("Environment", envName);
     cdk.Tags.of(this.loadBalancer).add("ManagedBy", "CDK");
     cdk.Tags.of(this.loadBalancer).add("Name", loadBalancerName);
-    cdk.Tags.of(this.loadBalancer).add("ResourceType", "ApplicationLoadBalancer");
+    cdk.Tags.of(this.loadBalancer).add(
+      "ResourceType",
+      "ApplicationLoadBalancer"
+    );
 
     if (projectName) {
       cdk.Tags.of(this.loadBalancer).add("Project", projectName);
@@ -371,7 +371,9 @@ export class AlbConstruct extends Construct {
         this.securityGroup.connections.allowFrom(peer, port, description);
       } catch (error) {
         throw new Error(
-          `Failed to add ingress rule: ${error instanceof Error ? error.message : String(error)}. ` +
+          `Failed to add ingress rule: ${
+            error instanceof Error ? error.message : String(error)
+          }. ` +
             "Consider using a concrete SecurityGroup instead of ISecurityGroup for full rule support."
         );
       }

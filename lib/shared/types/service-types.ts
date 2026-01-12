@@ -144,4 +144,5 @@ export interface PrometheusServiceConstructProps {
   alertmanager?: PrometheusAlertmanagerConfig;
   loadBalancerTarget?: LoadBalancerTargetConfig;
   networkConfiguration?: { awsvpcConfiguration?: AwsvpcConfigurationLite };
+  externalUrl?: string;
 }

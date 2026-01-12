@@ -48,6 +48,11 @@ export function buildPrometheusConfig(
     "--web.console.templates=/usr/share/prometheus/consoles",
   ];
 
+  // Add external URL if provided (required for subpath serving behind ALB)
+  if (props.externalUrl) {
+    command.push(`--web.external-url=${props.externalUrl}`);
+  }
+
   return { command, configContent: config };
 }
 

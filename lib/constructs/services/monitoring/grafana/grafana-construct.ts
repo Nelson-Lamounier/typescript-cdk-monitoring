@@ -92,7 +92,12 @@ export class GrafanaServiceConstruct extends Construct {
           "AdminPasswordSecret",
           props.adminPasswordSecretArn
         );
-    const adminSecretForEcs = ecs.Secret.fromSecretsManager(adminSecret);
+    // CRITICAL: Extract the "password" field from JSON secret
+    // Secret format: {"username": "admin", "password": "..."}
+    const adminSecretForEcs = ecs.Secret.fromSecretsManager(
+      adminSecret,
+      "password"
+    );
 
     const smtpSecret = props.smtp?.passwordArn
       ? ecs.Secret.fromSecretsManager(
