@@ -206,6 +206,7 @@ export class PrometheusConstruct extends Construct {
         props.healthCheckGracePeriod ??
         cdk.Duration.seconds(DEFAULT_PROMETHEUS_HEALTH_GRACE_SECONDS),
       enableExecuteCommand: props.enableExecuteCommand,
+      enableCircuitBreaker: props.enableCircuitBreaker,
       loadBalancerTargets: props.loadBalancerTarget
         ? [props.loadBalancerTarget]
         : undefined,

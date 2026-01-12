@@ -22,6 +22,11 @@ import {
   MONITORING_LOG_RETENTION,
   BRIDGE_NETWORK_DYNAMIC_PORT_RANGE,
   MONITORING_HEALTH_CHECK,
+  MONITORING_CONTAINER_NAMES,
+  MONITORING_ALB_PRIORITIES,
+  MONITORING_TARGET_GROUP,
+  GRAFANA_ADMIN_SECRET,
+  NODE_EXPORTER,
 } from "../../shared/constants/monitoring-constants";
 import { validateEnvName } from "../../shared/utils/validation";
 import { isProductionEnvironment } from "../../shared/utils/environment";
@@ -50,6 +55,12 @@ import { isProductionEnvironment } from "../../shared/utils/environment";
  * - Bridge networking with dynamic port support
  * - ECS Exec for debugging
  * - SSM parameters for service discovery
+ * - Circuit breaker (automatically disabled for development environment)
+ *
+ * Circuit Breaker Behaviour:
+ * - Development: DISABLED (allows manual troubleshooting of failures)
+ * - Staging/Production: ENABLED (automatic rollback on failed deployments)
+ * - Can be overridden via enableCircuitBreaker prop
  *
  * Configuration Storage:
  * - Prometheus config (prometheus.yml) stored on EFS at /mnt/prometheus-config
@@ -67,6 +78,18 @@ import { isProductionEnvironment } from "../../shared/utils/environment";
  * ```typescript
  * const serviceStack = new MonitoringServiceStack(app, 'MonitoringService', {
  *   envName: 'production',
+ *   cluster: infraStack.cluster,
+ *   loadBalancer: infraStack.loadBalancer,
+ *   listener: infraStack.listener,
+ * });
+ * ```
+ *
+ * @example
+ * ```typescript
+ * // Disable circuit breaker for troubleshooting
+ * const serviceStack = new MonitoringServiceStack(app, 'MonitoringService', {
+ *   envName: 'staging',
+ *   enableCircuitBreaker: false, // Override default behaviour
  *   cluster: infraStack.cluster,
  *   loadBalancer: infraStack.loadBalancer,
  *   listener: infraStack.listener,
@@ -168,6 +191,11 @@ export class MonitoringServiceStack extends cdk.Stack {
     const logRetention = props.logRetention ?? MONITORING_LOG_RETENTION;
     const enableExecuteCommand = props.enableExecuteCommand ?? true;
 
+    // Circuit breaker configuration: Disable for development to allow manual troubleshooting
+    // In development, we want to see actual failures instead of automatic rollbacks
+    const enableCircuitBreaker =
+      props.envName === "development" ? false : props.enableCircuitBreaker;
+
     // ========================================================================
     // 1. CREATE PROMETHEUS SERVICE
     // ========================================================================
@@ -181,6 +209,7 @@ export class MonitoringServiceStack extends cdk.Stack {
         hostPath: prometheusConfigPath,
       },
       enableExecuteCommand,
+      enableCircuitBreaker,
       logRetention,
       // Apply memory/CPU overrides if provided
       ...(props.prometheusProps?.cpu && { cpu: props.prometheusProps.cpu }),
@@ -240,10 +269,12 @@ export class MonitoringServiceStack extends cdk.Stack {
         secretName: `${props.envName}-grafana-admin-password`,
         description: `Grafana admin password for ${props.envName} monitoring stack`,
         generateSecretString: {
-          secretStringTemplate: JSON.stringify({ username: "admin" }),
+          secretStringTemplate: JSON.stringify({
+            username: GRAFANA_ADMIN_SECRET.USERNAME,
+          }),
           generateStringKey: "password",
-          excludePunctuation: true,
-          passwordLength: 32,
+          excludePunctuation: GRAFANA_ADMIN_SECRET.EXCLUDE_PUNCTUATION,
+          passwordLength: GRAFANA_ADMIN_SECRET.PASSWORD_LENGTH,
         },
         removalPolicy:
           props.envName === "production"
@@ -281,6 +312,7 @@ export class MonitoringServiceStack extends cdk.Stack {
       adminPasswordSecretArn: grafanaAdminSecret.secretName,
       rootUrl: grafanaRootUrl,
       enableExecuteCommand,
+      enableCircuitBreaker,
       logRetention,
       // Apply memory/CPU overrides if provided
       ...(props.grafanaProps?.cpu && { cpu: props.grafanaProps.cpu }),
@@ -312,7 +344,7 @@ export class MonitoringServiceStack extends cdk.Stack {
         cluster: props.cluster as ecs.Cluster,
         envName: `${props.envName}-monitoring`,
         serviceName: `${props.envName}-monitoring-node-exporter`,
-        memoryReservationMiB: 64,
+        memoryReservationMiB: NODE_EXPORTER.MEMORY_RESERVATION_MIB,
         logRetention,
         enableExecuteCommand,
       }
@@ -426,8 +458,8 @@ export class MonitoringServiceStack extends cdk.Stack {
           ? `${props.envName}-${props.projectName}-grafana`
           : `${props.envName}-grafana`,
         healthCheck: {
-          path: "/", // Root path - Grafana redirects to /login
-          port: "traffic-port", // Use the port the target is registered on (dynamic port)
+          path: MONITORING_HEALTH_CHECK.PATHS.GRAFANA,
+          port: "traffic-port", // CRITICAL: Use dynamic port for bridge networking
           healthyHttpCodes: MONITORING_HEALTH_CHECK.HEALTHY_HTTP_CODES,
           interval: cdk.Duration.seconds(
             MONITORING_HEALTH_CHECK.INTERVAL_SECONDS
@@ -438,7 +470,9 @@ export class MonitoringServiceStack extends cdk.Stack {
           healthyThresholdCount: MONITORING_HEALTH_CHECK.HEALTHY_THRESHOLD,
           unhealthyThresholdCount: MONITORING_HEALTH_CHECK.UNHEALTHY_THRESHOLD,
         },
-        deregistrationDelay: cdk.Duration.seconds(30),
+        deregistrationDelay: cdk.Duration.seconds(
+          MONITORING_TARGET_GROUP.DEREGISTRATION_DELAY_SECONDS
+        ),
       }
     );
 
@@ -457,7 +491,8 @@ export class MonitoringServiceStack extends cdk.Stack {
           ? `${props.envName}-${props.projectName}-prom`
           : `${props.envName}-prometheus`,
         healthCheck: {
-          path: "/", // Root path - Prometheus redirects to /-/healthy
+          path: MONITORING_HEALTH_CHECK.PATHS.PROMETHEUS,
+          port: "traffic-port", // CRITICAL: Use dynamic port for bridge networking
           healthyHttpCodes: MONITORING_HEALTH_CHECK.HEALTHY_HTTP_CODES,
           interval: cdk.Duration.seconds(
             MONITORING_HEALTH_CHECK.INTERVAL_SECONDS
@@ -468,22 +503,31 @@ export class MonitoringServiceStack extends cdk.Stack {
           healthyThresholdCount: MONITORING_HEALTH_CHECK.HEALTHY_THRESHOLD,
           unhealthyThresholdCount: MONITORING_HEALTH_CHECK.UNHEALTHY_THRESHOLD,
         },
-        deregistrationDelay: cdk.Duration.seconds(30),
+        deregistrationDelay: cdk.Duration.seconds(
+          MONITORING_TARGET_GROUP.DEREGISTRATION_DELAY_SECONDS
+        ),
       }
     );
 
     // ========================================================================
     // SECURITY GROUP CONNECTIONS
     // ========================================================================
-    // Allow ALB to reach Prometheus on fixed port 9090
+    // CRITICAL: Both Prometheus and Grafana use bridge networking with dynamic ports
+    // Container ports are fixed (9090 for Prometheus, 3000 for Grafana)
+    // BUT host ports are dynamic (32768-65535) because hostPort is not specified
+    // ALB must be allowed to reach the dynamic host port range
+    
+    // Allow ALB to reach Prometheus on dynamic port range (bridge networking)
     this.prometheusService.connections.allowFrom(
       props.loadBalancer,
-      ec2.Port.tcp(MONITORING_PORTS.PROMETHEUS),
-      "Allow ALB to reach Prometheus on port 9090"
+      ec2.Port.tcpRange(
+        BRIDGE_NETWORK_DYNAMIC_PORT_RANGE.MIN,
+        BRIDGE_NETWORK_DYNAMIC_PORT_RANGE.MAX
+      ),
+      "Allow ALB to reach Prometheus on dynamic ports (bridge networking)"
     );
 
     // Allow ALB to reach Grafana on dynamic port range (bridge networking)
-    // ECS automatically registers the dynamic port with the target group
     this.grafanaService.connections.allowFrom(
       props.loadBalancer,
       ec2.Port.tcpRange(
@@ -496,10 +540,10 @@ export class MonitoringServiceStack extends cdk.Stack {
     // ========================================================================
     // ALB ROUTING RULES
     // ========================================================================
-    // Priority 100: Grafana paths
+    // Grafana paths (priority defined in constants)
     new elbv2.ApplicationListenerRule(this, "GrafanaRule", {
       listener: props.listener,
-      priority: 100,
+      priority: MONITORING_ALB_PRIORITIES.GRAFANA,
       conditions: [
         elbv2.ListenerCondition.pathPatterns([
           `${props.grafanaRootUrl ?? MONITORING_ROUTES.GRAFANA}*`,
@@ -508,10 +552,10 @@ export class MonitoringServiceStack extends cdk.Stack {
       targetGroups: [this.grafanaTargetGroup],
     });
 
-    // Priority 200: Prometheus paths
+    // Prometheus paths (priority defined in constants)
     new elbv2.ApplicationListenerRule(this, "PrometheusRule", {
       listener: props.listener,
-      priority: 200,
+      priority: MONITORING_ALB_PRIORITIES.PROMETHEUS,
       conditions: [
         elbv2.ListenerCondition.pathPatterns([
           `${props.prometheusRoutePrefix ?? MONITORING_ROUTES.PROMETHEUS}*`,
@@ -526,15 +570,15 @@ export class MonitoringServiceStack extends cdk.Stack {
     // Grafana: ECS will register instance with dynamic port
     this.grafanaTargetGroup.addTarget(
       this.grafanaService.loadBalancerTarget({
-        containerName: "grafana",
+        containerName: MONITORING_CONTAINER_NAMES.GRAFANA,
         containerPort: MONITORING_PORTS.GRAFANA,
       })
     );
 
-    // Prometheus: Uses fixed port 9090
+    // Prometheus: ECS will register instance with dynamic port
     this.prometheusTargetGroup.addTarget(
       this.prometheusService.loadBalancerTarget({
-        containerName: "prometheus",
+        containerName: MONITORING_CONTAINER_NAMES.PROMETHEUS,
         containerPort: MONITORING_PORTS.PROMETHEUS,
       })
     );

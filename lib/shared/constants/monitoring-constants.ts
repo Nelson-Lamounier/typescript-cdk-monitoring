@@ -128,4 +128,48 @@ export const MONITORING_HEALTH_CHECK = {
   HEALTHY_THRESHOLD: 2,
   UNHEALTHY_THRESHOLD: 3,
   HEALTHY_HTTP_CODES: "200,301,302",
+  PATHS: {
+    PROMETHEUS: "/-/healthy",
+    GRAFANA: "/api/health",
+  },
+} as const;
+
+/**
+ * Container names
+ */
+export const MONITORING_CONTAINER_NAMES = {
+  PROMETHEUS: "prometheus",
+  GRAFANA: "grafana",
+  NODE_EXPORTER: "node-exporter",
+} as const;
+
+/**
+ * ALB routing priorities
+ */
+export const MONITORING_ALB_PRIORITIES = {
+  GRAFANA: 100,
+  PROMETHEUS: 200,
+} as const;
+
+/**
+ * Target group settings
+ */
+export const MONITORING_TARGET_GROUP = {
+  DEREGISTRATION_DELAY_SECONDS: 30,
+} as const;
+
+/**
+ * Grafana admin secret settings
+ */
+export const GRAFANA_ADMIN_SECRET = {
+  USERNAME: "admin",
+  PASSWORD_LENGTH: 32,
+  EXCLUDE_PUNCTUATION: true,
+} as const;
+
+/**
+ * Node Exporter settings
+ */
+export const NODE_EXPORTER = {
+  MEMORY_RESERVATION_MIB: 64,
 } as const;

@@ -229,6 +229,7 @@ export interface MonitoringServiceStackProps extends BaseStackProps {
   enableEc2ServiceDiscovery?: boolean;
   enableGrafanaCloudWatch?: boolean;
   enableExecuteCommand?: boolean;
+  enableCircuitBreaker?: boolean;
   logRetention?: logs.RetentionDays;
   createSsmParameters?: boolean;
   createOutputs?: boolean;

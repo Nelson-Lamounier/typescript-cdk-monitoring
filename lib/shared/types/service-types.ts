@@ -64,6 +64,7 @@ export interface GrafanaServiceConstructProps {
   maxHealthyPercent?: number;
   healthCheckGracePeriod?: cdk.Duration;
   enableExecuteCommand?: boolean;
+  enableCircuitBreaker?: boolean;
   cpu?: number;
   memoryMiB?: number;
   containerPort?: number;
@@ -127,6 +128,7 @@ export interface PrometheusServiceConstructProps {
   maxHealthyPercent?: number;
   healthCheckGracePeriod?: cdk.Duration;
   enableExecuteCommand?: boolean;
+  enableCircuitBreaker?: boolean;
   cpu?: number;
   memoryMiB?: number;
   containerPort?: number;

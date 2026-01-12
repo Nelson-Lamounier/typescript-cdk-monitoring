@@ -234,6 +234,7 @@ export class GrafanaServiceConstruct extends Construct {
         props.healthCheckGracePeriod ??
         cdk.Duration.seconds(DEFAULT_GRAFANA_HEALTH_GRACE_SECONDS),
       enableExecuteCommand: props.enableExecuteCommand,
+      enableCircuitBreaker: props.enableCircuitBreaker,
       loadBalancerTargets: props.loadBalancerTarget
         ? [props.loadBalancerTarget]
         : undefined,
