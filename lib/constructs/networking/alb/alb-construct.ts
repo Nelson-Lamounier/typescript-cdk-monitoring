@@ -23,6 +23,7 @@ import {
 import { SuppressionManager } from "../../../cdk-nag";
 import { SecurityGroupConstruct } from "../security/security-group-construct";
 import { COMMON_PORTS } from "../../../shared/constants/networking-constants";
+import { BRIDGE_NETWORK_DYNAMIC_PORT_RANGE } from "../../../shared/constants/monitoring-constants";
 
 /**
  * Reusable construct for creating an Application Load Balancer with enhanced security and validation
@@ -198,6 +199,15 @@ export class AlbConstruct extends Construct {
             peer: ec2.Peer.anyIpv4(),
             port: ec2.Port.tcp(COMMON_PORTS.HTTP),
             description: "Allow outbound HTTP for health checks",
+          },
+          {
+            peer: ec2.Peer.ipv4(vpc.vpcCidrBlock),
+            port: ec2.Port.tcpRange(
+              BRIDGE_NETWORK_DYNAMIC_PORT_RANGE.MIN,
+              BRIDGE_NETWORK_DYNAMIC_PORT_RANGE.MAX
+            ),
+            description:
+              "Allow outbound to ECS tasks on dynamic ports for health checks (bridge networking)",
           },
         ],
       });
