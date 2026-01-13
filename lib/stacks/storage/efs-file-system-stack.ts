@@ -627,7 +627,11 @@ export class MonitoringEfsStack extends cdk.Stack {
       },
       {
         job_name: "node-exporter",
-        static_configs: [{ targets: ["localhost:9100"] }],
+        // Note: Node Exporter uses HOST network mode, Prometheus uses BRIDGE mode
+        // Use HOST_IP_PLACEHOLDER which will be replaced at runtime with EC2 instance's private IP
+        static_configs: [
+          { targets: ["HOST_IP_PLACEHOLDER:9100"] },
+        ],
       },
     ];
 

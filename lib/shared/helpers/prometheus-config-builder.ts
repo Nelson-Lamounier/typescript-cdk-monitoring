@@ -1,7 +1,10 @@
 /** @format */
 
 import { CrossAccountTarget } from "../types/monitoring-types";
-import { PROMETHEUS_CONFIG_DEFAULTS } from "../constants/monitoring-constants";
+import {
+  PROMETHEUS_CONFIG_DEFAULTS,
+  GRAFANA_HOST_IP_PLACEHOLDER,
+} from "../constants/monitoring-constants";
 
 /**
  * Prometheus scrape configuration type
@@ -44,9 +47,14 @@ export function buildPrometheusConfig(
   });
 
   // Add local node exporter
+  // Note: Node Exporter uses HOST network mode, so it's accessible on the EC2 instance's port 9100
+  // Prometheus uses BRIDGE network mode, so it cannot access node-exporter via localhost
+  // Use HOST_IP_PLACEHOLDER which will be replaced at runtime with the EC2 instance's private IP
   scrapeConfigs.push({
     job_name: "node-exporter",
-    static_configs: [{ targets: ["localhost:9100"] }],
+    static_configs: [
+      { targets: [`${GRAFANA_HOST_IP_PLACEHOLDER}:9100`] },
+    ],
   });
 
   // Add same-account EC2 service discovery

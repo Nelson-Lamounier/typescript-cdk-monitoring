@@ -279,13 +279,32 @@ chmod -R 777 /mnt/efs/grafana-data/png
 
 # Create configuration files from SSM
 echo "Creating configuration files from SSM parameters..."
-echo "NOTE: HOST_IP_PLACEHOLDER in Grafana datasource config will be replaced at runtime on EC2 instance"
 
 # Download Prometheus config
 aws ssm get-parameter --region ''' + region + ''' --name "/monitoring/''' + environment + '''/prometheus-config-yaml" --query "Parameter.Value" --output text > /mnt/efs/config/prometheus/prometheus.yml
 
-# Download Grafana datasource config (HOST_IP_PLACEHOLDER will be replaced by application-setup script on EC2)
+# Replace HOST_IP_PLACEHOLDER in Prometheus config with EC2 instance's private IP address
+# This is required because Prometheus (bridge networking) cannot access node-exporter (host networking) via localhost
+PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+if [ -z "$PRIVATE_IP" ]; then
+  echo "ERROR: Failed to retrieve private IP from EC2 metadata service"
+  exit 1
+fi
+sed -i "s/HOST_IP_PLACEHOLDER/$PRIVATE_IP/g" /mnt/efs/config/prometheus/prometheus.yml
+echo "Replaced HOST_IP_PLACEHOLDER with $PRIVATE_IP in Prometheus config"
+
+# Download Grafana datasource config
 aws ssm get-parameter --region ''' + region + ''' --name "/monitoring/''' + environment + '''/grafana-datasource-config-yaml" --query "Parameter.Value" --output text > /mnt/efs/config/grafana/provisioning/datasources/prometheus.yml
+
+# Replace HOST_IP_PLACEHOLDER with EC2 instance's private IP address
+# This is required because Grafana (bridge networking) cannot access Prometheus via localhost
+PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+if [ -z "$PRIVATE_IP" ]; then
+  echo "ERROR: Failed to retrieve private IP from EC2 metadata service"
+  exit 1
+fi
+sed -i "s/HOST_IP_PLACEHOLDER/$PRIVATE_IP/g" /mnt/efs/config/grafana/provisioning/datasources/prometheus.yml
+echo "Replaced HOST_IP_PLACEHOLDER with $PRIVATE_IP in Grafana datasource config"
 
 # Download Grafana dashboard config
 aws ssm get-parameter --region ''' + region + ''' --name "/monitoring/''' + environment + '''/grafana-dashboard-config-yaml" --query "Parameter.Value" --output text > /mnt/efs/config/grafana/provisioning/dashboards/dashboards.yml

@@ -486,6 +486,11 @@ export class MonitoringServiceStack extends cdk.Stack {
     // ========================================================================
     // PROMETHEUS TARGET GROUP
     // ========================================================================
+    // CRITICAL: Prometheus health check path must include route prefix
+    // because Prometheus is configured with --web.external-url=/prometheus
+    // All endpoints, including health checks, require the /prometheus prefix
+    const prometheusHealthCheckPath = `${prometheusRoutePrefix}${MONITORING_HEALTH_CHECK.PATHS.PROMETHEUS}`;
+
     this.prometheusTargetGroup = new elbv2.ApplicationTargetGroup(
       this,
       "PrometheusTargetGroup",
@@ -498,7 +503,7 @@ export class MonitoringServiceStack extends cdk.Stack {
           ? `${props.envName}-${props.projectName}-prom`
           : `${props.envName}-prometheus`,
         healthCheck: {
-          path: MONITORING_HEALTH_CHECK.PATHS.PROMETHEUS,
+          path: prometheusHealthCheckPath, // Includes route prefix: /prometheus/-/healthy
           port: "traffic-port", // CRITICAL: Use dynamic port for bridge networking
           healthyHttpCodes: MONITORING_HEALTH_CHECK.HEALTHY_HTTP_CODES,
           interval: cdk.Duration.seconds(
@@ -523,7 +528,7 @@ export class MonitoringServiceStack extends cdk.Stack {
     // Container ports are fixed (9090 for Prometheus, 3000 for Grafana)
     // BUT host ports are dynamic (32768-65535) because hostPort is not specified
     // ALB must be allowed to reach the dynamic host port range
-    
+
     // Allow ALB to reach Prometheus on dynamic port range (bridge networking)
     this.prometheusService.connections.allowFrom(
       props.loadBalancer,
@@ -564,9 +569,7 @@ export class MonitoringServiceStack extends cdk.Stack {
       listener: props.listener,
       priority: MONITORING_ALB_PRIORITIES.PROMETHEUS,
       conditions: [
-        elbv2.ListenerCondition.pathPatterns([
-          `${prometheusRoutePrefix}*`,
-        ]),
+        elbv2.ListenerCondition.pathPatterns([`${prometheusRoutePrefix}*`]),
       ],
       targetGroups: [this.prometheusTargetGroup],
     });
