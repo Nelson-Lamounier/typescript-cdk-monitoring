@@ -336,38 +336,25 @@ quick-verify: verify-all get-alb-dns ## Quick verification of all stacks
 
 
 # ============================================================================
-# COMMANDS TO RUN IN THE TERMINAL
+# PROJECT STRUCTURE VISUALIZATION
 # ============================================================================
 
-tree: check directory folder/files structure ## Quick deploy all stacks and verify
+tree: ## Show directory folder/files structure
 	@echo "$(BLUE)Checking directory folder/files structure...$(NC)"
-	tree -I 'node_modules|cdk.out|dist|build|coverage|.git|.aws-sam' -L 4 --dirsfirst
+	@tree -I 'node_modules|cdk.out|dist|build|coverage|.git|.aws-sam' -L 4 --dirsfirst
 
-# ============================================================================
-# -I = Ignore patterns (node_modules, build artifacts, etc.)
-# -L 4 = Limit depth to 4 levels (prevents overwhelming output)
-# --dirsfirst = Show directories before files (easier to read)
-# ============================================================================
-
-tree-source-code: verify-all get-alb-dns ## Most comprehensive - shows everything important
+tree-source: ## Show TypeScript source code structure only
 	@echo "$(BLUE)Checking source code structure...$(NC)"
-	tree -I 'node_modules|cdk.out|dist|build|coverage|.git' -P '*.ts|*.tsx' --prune
+	@tree -I 'node_modules|cdk.out|dist|build|coverage|.git' -P '*.ts|*.tsx' --prune
 
-tree-source-code: verify-all get-alb-dns ## Focus on source code structure
-	@echo "$(BLUE)Checking source code structure...$(NC)"
-	tree -I 'node_modules|cdk.out|dist|build|coverage|.git' -P '*.ts|*.tsx' --prune
+tree-dirs: ## Show folder organisation without files
+	@echo "$(BLUE)Checking folder organisation (directories only)...$(NC)"
+	@tree -I 'node_modules|cdk.out|dist|build|coverage|.git' -d -L 3
 
-tree-org-no-files: verify-all get-alb-dns ## See folder organisation without files
-	@echo "$(BLUE)Checking folder organisation without files...$(NC)"
-	tree -I 'node_modules|cdk.out|dist|build|coverage|.git' -d -L 3
-# ============================================================================
-# -d = Directories only (no files)
-# -L 3 = Limit to 3 levels deep
-# ============================================================================
-
-tree-org-no-files: verify-all get-alb-dns ## Save to file for further analysis 
-	@echo "$(BLUE)Saving project structure to file...$(NC)"
-	tree -I 'node_modules|cdk.out|dist|build|coverage|.git|.aws-sam' \
-     -L 4 \
-     --dirsfirst \
-     > project-structure.txt
+tree-save: ## Save project structure to file for analysis
+	@echo "$(BLUE)Saving project structure to project-structure.txt...$(NC)"
+	@tree -I 'node_modules|cdk.out|dist|build|coverage|.git|.aws-sam' \
+		-L 4 \
+		--dirsfirst \
+		> project-structure.txt
+	@echo "$(GREEN)✓ Project structure saved to project-structure.txt$(NC)"

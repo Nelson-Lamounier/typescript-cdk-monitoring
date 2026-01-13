@@ -188,6 +188,8 @@ export class MonitoringServiceStack extends cdk.Stack {
     const grafanaDashboardsPath =
       props.grafanaDashboardsPath ?? MONITORING_MOUNT_PATHS.GRAFANA_DASHBOARDS;
     const grafanaRootUrl = props.grafanaRootUrl ?? MONITORING_ROUTES.GRAFANA;
+    const prometheusRoutePrefix =
+      props.prometheusRoutePrefix ?? MONITORING_ROUTES.PROMETHEUS;
     const logRetention = props.logRetention ?? MONITORING_LOG_RETENTION;
     const enableExecuteCommand = props.enableExecuteCommand ?? true;
 
@@ -195,6 +197,9 @@ export class MonitoringServiceStack extends cdk.Stack {
     // In development, we want to see actual failures instead of automatic rollbacks
     const enableCircuitBreaker =
       props.envName === "development" ? false : props.enableCircuitBreaker;
+
+    // Construct Prometheus external URL for subpath serving
+    const prometheusExternalUrl = `http://${props.loadBalancer.loadBalancerDnsName}${prometheusRoutePrefix}`;
 
     // ========================================================================
     // 1. CREATE PROMETHEUS SERVICE
@@ -208,6 +213,7 @@ export class MonitoringServiceStack extends cdk.Stack {
       configVolume: {
         hostPath: prometheusConfigPath,
       },
+      externalUrl: prometheusExternalUrl,
       enableExecuteCommand,
       enableCircuitBreaker,
       logRetention,
@@ -355,7 +361,7 @@ export class MonitoringServiceStack extends cdk.Stack {
     // ========================================================================
     // 5. CONFIGURE LOAD BALANCER ROUTING
     // ========================================================================
-    this.configureLoadBalancerRouting(props);
+    this.configureLoadBalancerRouting(props, prometheusRoutePrefix);
 
     // ========================================================================
     // 6. SSM PARAMETERS (for service discovery)
@@ -437,7 +443,8 @@ export class MonitoringServiceStack extends cdk.Stack {
    * Configure load balancer routing
    */
   private configureLoadBalancerRouting(
-    props: MonitoringServiceStackProps
+    props: MonitoringServiceStackProps,
+    prometheusRoutePrefix: string
   ): void {
     // ========================================================================
     // GRAFANA TARGET GROUP
@@ -558,7 +565,7 @@ export class MonitoringServiceStack extends cdk.Stack {
       priority: MONITORING_ALB_PRIORITIES.PROMETHEUS,
       conditions: [
         elbv2.ListenerCondition.pathPatterns([
-          `${props.prometheusRoutePrefix ?? MONITORING_ROUTES.PROMETHEUS}*`,
+          `${prometheusRoutePrefix}*`,
         ]),
       ],
       targetGroups: [this.prometheusTargetGroup],
