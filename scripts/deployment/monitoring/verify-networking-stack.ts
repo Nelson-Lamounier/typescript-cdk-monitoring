@@ -124,9 +124,23 @@ function createClients(config: VerifyNetworkingStackConfig): {
   cfn: CloudFormationClient;
   ec2: EC2Client;
 } {
-  const clientConfig = {
+  const clientConfig: { region: string } = {
     region: config.region,
   };
+
+  // In CI/CD (OIDC), use environment variables, not profiles
+  // If AWS_SESSION_TOKEN is set, we're using OIDC credentials
+  const isOidcAuth = !!process.env.AWS_SESSION_TOKEN;
+
+  if (config.profile && !isOidcAuth) {
+    // Only use profile for local development when not using OIDC
+    process.env.AWS_PROFILE = config.profile;
+    Logger.info(`Using AWS profile: ${config.profile}`);
+  } else if (isOidcAuth) {
+    // Clear AWS_PROFILE if set to ensure SDK uses OIDC credentials
+    delete process.env.AWS_PROFILE;
+    Logger.info("Using OIDC credentials from environment variables");
+  }
 
   return {
     cfn: new CloudFormationClient(clientConfig),
@@ -151,6 +165,16 @@ async function verifyNetworkingStack(
   Logger.keyValue("Stack Name", stackName);
   Logger.keyValue("Environment", config.environment);
   Logger.keyValue("Region", config.region);
+
+  // Detect authentication method
+  const isOidcAuth = !!process.env.AWS_SESSION_TOKEN;
+  if (isOidcAuth) {
+    Logger.keyValue("Auth Method", "OIDC (environment variables)");
+  } else if (config.profile) {
+    Logger.keyValue("Auth Method", `AWS Profile: ${config.profile}`);
+  } else {
+    Logger.keyValue("Auth Method", "Default credentials");
+  }
   console.log("");
 
   const { cfn, ec2 } = createClients(config);
@@ -162,6 +186,51 @@ async function verifyNetworkingStack(
 
   if (!stackInfo) {
     Logger.error(`Stack ${stackName} not found`);
+    Logger.info("Troubleshooting steps:");
+    Logger.info("  1. Verify the stack name matches exactly (case-sensitive)");
+    Logger.info(`  2. Check AWS region: ${config.region}`);
+    Logger.info(
+      "  3. Verify AWS credentials have CloudFormation read permissions"
+    );
+    Logger.info("  4. Check if stack exists in a different region or account");
+
+    // Try to list stacks to help debug
+    try {
+      const { CloudFormationClient, ListStacksCommand } = await import(
+        "@aws-sdk/client-cloudformation"
+      );
+      const listClient = new CloudFormationClient({ region: config.region });
+      const listCommand = new ListStacksCommand({
+        StackStatusFilter: [
+          "CREATE_COMPLETE",
+          "UPDATE_COMPLETE",
+          "UPDATE_ROLLBACK_COMPLETE",
+        ],
+      });
+      const listResponse = await listClient.send(listCommand);
+      const stackNames =
+        listResponse.StackSummaries?.map((s) => s.StackName) || [];
+
+      if (stackNames.length > 0) {
+        Logger.info("");
+        Logger.info(
+          `Found ${stackNames.length} stack(s) in region ${config.region}:`
+        );
+        stackNames.slice(0, 10).forEach((name) => {
+          if (name?.toLowerCase().includes("networking")) {
+            Logger.info(`  - ${name} (matches "networking")`);
+          }
+        });
+        if (stackNames.length > 10) {
+          Logger.info(`  ... and ${stackNames.length - 10} more`);
+        }
+      }
+    } catch (listError: any) {
+      Logger.warning(
+        `Could not list stacks for debugging: ${listError.message}`
+      );
+    }
+
     return summary;
   }
 
