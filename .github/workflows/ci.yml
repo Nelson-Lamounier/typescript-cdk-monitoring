@@ -33,14 +33,13 @@ jobs:
         id: cache-key
         run: |
           # Hash yarn.lock and package.json for cache key
-          HASH=$(cat infrastructure/yarn.lock infrastructure/package.json | sha256sum | cut -d' ' -f1)
+          HASH=$(cat yarn.lock package.json | sha256sum | cut -d' ' -f1)
           echo "key=deps-${{ runner.os }}-node${{ env.NODE_VERSION }}-$HASH" >> $GITHUB_OUTPUT
 
       - name: Setup Infrastructure
         uses: ./.github/actions/setup-infrastructure
         with:
           node-version: ${{ env.NODE_VERSION }}
-          working-directory: infrastructure
 
   # ============================================================================
   # Code Quality Jobs (Run in Parallel)
@@ -58,16 +57,13 @@ jobs:
         uses: ./.github/actions/setup-infrastructure
         with:
           node-version: ${{ env.NODE_VERSION }}
-          working-directory: infrastructure
 
       - name: Run ESLint
-        working-directory: infrastructure
         run: |
           echo "Running ESLint..."
           npx eslint lib/ bin/ tests/ --max-warnings 0
 
       - name: Check Formatting
-        working-directory: infrastructure
         run: |
           echo "Checking code formatting..."
           yarn format:check
@@ -85,10 +81,8 @@ jobs:
         uses: ./.github/actions/setup-infrastructure
         with:
           node-version: ${{ env.NODE_VERSION }}
-          working-directory: infrastructure
 
       - name: Run TypeScript Compiler
-        working-directory: infrastructure
         run: |
           echo "Running TypeScript type checking..."
           yarn typecheck
