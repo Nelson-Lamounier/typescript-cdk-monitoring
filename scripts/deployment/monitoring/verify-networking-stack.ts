@@ -73,8 +73,29 @@ async function getStackStatus(
       outputs,
     };
   } catch (error: any) {
-    if (error.name === "ValidationError") {
+    if (
+      error.name === "ValidationError" ||
+      error.name === "DoesNotExistException"
+    ) {
       return null;
+    }
+
+    // Handle permission errors specifically
+    if (error.name === "AccessDeniedException") {
+      Logger.error(`Access denied when describing stack: ${stackName}`);
+      Logger.error(
+        "The OIDC role may not have CloudFormation read permissions."
+      );
+      Logger.info("Required permissions:");
+      Logger.info("  - cloudformation:DescribeStacks");
+      Logger.info("  - cloudformation:ListStacks");
+      throw error;
+    }
+
+    // Log other errors for debugging
+    Logger.error(`Error describing stack ${stackName}: ${error.message}`);
+    if (error.name) {
+      Logger.error(`Error type: ${error.name}`);
     }
     throw error;
   }
@@ -216,13 +237,53 @@ async function verifyNetworkingStack(
         Logger.info(
           `Found ${stackNames.length} stack(s) in region ${config.region}:`
         );
+
+        // Always show ALL stacks (up to 10) for debugging
         stackNames.slice(0, 10).forEach((name) => {
-          if (name?.toLowerCase().includes("networking")) {
-            Logger.info(`  - ${name} (matches "networking")`);
+          const isNetworking = name?.toLowerCase().includes("networking");
+          const matchesExpected =
+            name?.toLowerCase() === stackName.toLowerCase();
+
+          if (matchesExpected) {
+            Logger.info(
+              `  ⚠️  ${name} (matches expected name but case may differ)`
+            );
+          } else if (isNetworking) {
+            Logger.info(`  ✓ ${name} (contains "networking")`);
+          } else {
+            Logger.info(`  - ${name}`);
           }
         });
+
         if (stackNames.length > 10) {
-          Logger.info(`  ... and ${stackNames.length - 10} more`);
+          Logger.info(`  ... and ${stackNames.length - 10} more stack(s)`);
+        }
+
+        // Check if expected stack name exists with different casing
+        const expectedName = stackName;
+        const foundExact = stackNames.find((n) => n === expectedName);
+        const foundCaseInsensitive = stackNames.find(
+          (n) => n?.toLowerCase() === expectedName.toLowerCase()
+        );
+
+        if (!foundExact && foundCaseInsensitive) {
+          Logger.warning("");
+          Logger.warning(`Stack name case mismatch detected!`);
+          Logger.warning(`  Expected: "${expectedName}"`);
+          Logger.warning(`  Found:    "${foundCaseInsensitive}"`);
+          Logger.info("");
+          Logger.info(
+            "The stack exists but with different casing. Update the stack name or environment variable."
+          );
+        } else if (!foundExact && !foundCaseInsensitive) {
+          Logger.warning("");
+          Logger.warning(
+            `Expected stack "${expectedName}" not found in the list above.`
+          );
+          Logger.info("Please verify:");
+          Logger.info(`  1. Stack name matches exactly: ${expectedName}`);
+          Logger.info(`  2. Region is correct: ${config.region}`);
+          Logger.info(`  3. AWS account is correct`);
         }
       }
     } catch (listError: any) {
