@@ -187,8 +187,8 @@ async function deployStack(
 
   try {
     // Execute deployment - CDK deploy handles both create and update automatically
-    // We capture output but also allow CDK to display progress to the user
-    const cdkOutput = execSync(deployCommand, {
+    // CDK output is displayed directly via stdio: inherit for better visibility
+    execSync(deployCommand, {
       stdio: "inherit", // Let CDK display output directly for better visibility
       cwd: process.cwd(),
       encoding: "utf-8",
@@ -260,15 +260,19 @@ async function deployStack(
 
     // Extract error details - CDK output was displayed via stdio: inherit
     const errorMessage = error.message || "";
-    
+
     // Note: With stdio: inherit, CDK errors are already displayed to the user
     // We provide additional context and troubleshooting here
-    
+
     Logger.subsection("Troubleshooting");
-    Logger.info("CDK deploy automatically handles both stack creation and updates");
-    Logger.info("If the stack already exists, CDK will update it automatically");
+    Logger.info(
+      "CDK deploy automatically handles both stack creation and updates"
+    );
+    Logger.info(
+      "If the stack already exists, CDK will update it automatically"
+    );
     Logger.info("");
-    
+
     // Check for common error patterns in the error message
     if (
       errorMessage.includes("Cannot delete export") ||
@@ -297,7 +301,9 @@ async function deployStack(
     } else {
       ErrorMessages.deploymentFailed(error.status || 1);
       Logger.info("");
-      Logger.info("The CDK error output above shows the specific failure reason");
+      Logger.info(
+        "The CDK error output above shows the specific failure reason"
+      );
       Logger.info("Common issues:");
       Logger.info("  - Resource conflicts (duplicate names)");
       Logger.info("  - Insufficient permissions");
