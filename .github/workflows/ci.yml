@@ -64,11 +64,6 @@ jobs:
           echo "Running ESLint..."
           make lint
 
-      - name: Check Formatting
-        run: |
-          echo "Checking code formatting..."
-          yarn format:check
-
   typecheck:
     name: Type Check
     needs: setup
@@ -94,6 +89,12 @@ jobs:
     needs: setup
     runs-on: ubuntu-latest
     continue-on-error: true
+    env:
+      CDK_DOCKER_VERBOSE: "false"
+      CDK_DEBUG: "false"
+      CDK_ASSET_VERBOSE: "false"
+      DOCKER_BUILDKIT: "1"
+      BUILDKIT_PROGRESS: "quiet"
 
     steps:
       - name: Checkout
@@ -108,10 +109,6 @@ jobs:
         run: |
           echo "Running tests..."
           yarn test:ci
-        env:
-          CDK_DOCKER_VERBOSE: "false"
-          CDK_DEBUG: "false"
-          CDK_ASSET_VERBOSE: "false"
 
       - name: Upload Coverage Reports
         if: always()

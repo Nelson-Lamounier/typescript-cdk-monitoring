@@ -27,3 +27,8 @@ process.env.CDK_DEBUG = "false";
 // Suppress CDK asset bundling output
 // This prevents Docker build logs from cluttering test output
 process.env.CDK_ASSET_VERBOSE = "false";
+
+// Enable Docker BuildKit but suppress verbose output
+// BuildKit is faster but we use quiet progress to reduce output clutter
+process.env.DOCKER_BUILDKIT = "1";
+process.env.BUILDKIT_PROGRESS = "quiet";

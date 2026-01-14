@@ -249,15 +249,43 @@ destroy-all: ## Destroy all stacks in reverse order (DANGEROUS)
 
 test: ## Run all tests
 	@echo "$(BLUE)Running tests...$(NC)"
-	yarn test
+	CDK_DOCKER_VERBOSE=false CDK_DEBUG=false CDK_ASSET_VERBOSE=false DOCKER_BUILDKIT=1 BUILDKIT_PROGRESS=quiet yarn test
 
 test-watch: ## Run tests in watch mode
 	@echo "$(BLUE)Running tests in watch mode...$(NC)"
-	yarn test:watch
+	CDK_DOCKER_VERBOSE=false CDK_DEBUG=false CDK_ASSET_VERBOSE=false DOCKER_BUILDKIT=1 BUILDKIT_PROGRESS=quiet yarn test:watch
 
 test-coverage: ## Run tests with coverage report
 	@echo "$(BLUE)Running tests with coverage...$(NC)"
-	yarn test --coverage
+	CDK_DOCKER_VERBOSE=false CDK_DEBUG=false CDK_ASSET_VERBOSE=false DOCKER_BUILDKIT=1 BUILDKIT_PROGRESS=quiet yarn test --coverage
+	@echo ""
+	@echo "$(GREEN)Coverage report generated!$(NC)"
+	@echo "$(YELLOW)To view HTML report:$(NC)"
+	@echo "  - macOS: open coverage/lcov-report/index.html"
+	@echo "  - Linux: xdg-open coverage/lcov-report/index.html"
+	@echo "  - Windows: start coverage/lcov-report/index.html"
+	@echo "  - Or run: make view-coverage"
+
+test-update-snapshots: ## Update Jest snapshots
+	@echo "$(BLUE)Updating Jest snapshots...$(NC)"
+	CDK_DOCKER_VERBOSE=false CDK_DEBUG=false CDK_ASSET_VERBOSE=false DOCKER_BUILDKIT=1 BUILDKIT_PROGRESS=quiet yarn test:update-snapshots
+
+view-coverage: ## Open coverage HTML report in browser
+	@echo "$(BLUE)Opening coverage report in browser...$(NC)"
+	@if [ -f "coverage/lcov-report/index.html" ]; then \
+		if command -v open > /dev/null; then \
+			open coverage/lcov-report/index.html; \
+		elif command -v xdg-open > /dev/null; then \
+			xdg-open coverage/lcov-report/index.html; \
+		elif command -v start > /dev/null; then \
+			start coverage/lcov-report/index.html; \
+		else \
+			echo "$(YELLOW)Please open coverage/lcov-report/index.html in your browser$(NC)"; \
+		fi \
+	else \
+		echo "$(RED)Coverage report not found. Run 'make test-coverage' first.$(NC)"; \
+		exit 1; \
+	fi
 
 test-unit: ## Run unit tests only
 	@echo "$(BLUE)Running unit tests...$(NC)"

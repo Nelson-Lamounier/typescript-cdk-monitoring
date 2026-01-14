@@ -7,6 +7,8 @@ module.exports = {
   testTimeout: 10000,
   verbose: false,
   collectCoverage: false,
+  coverageDirectory: "coverage",
+  coverageReporters: ["text", "text-summary", "json", "lcov", "html"],
   reporters: ["default"],
   maxWorkers: 1,
   forceExit: true,
