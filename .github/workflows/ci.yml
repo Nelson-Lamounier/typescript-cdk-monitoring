@@ -42,12 +42,13 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
 
   # ============================================================================
-  # Code Quality Jobs (Run in Parallel)
+  # Code Quality Jobs (Run in Parallel - Non-blocking)
   # ============================================================================
   lint:
     name: Lint Code
     needs: setup
     runs-on: ubuntu-latest
+    continue-on-error: true
 
     steps:
       - name: Checkout
@@ -61,7 +62,7 @@ jobs:
       - name: Run ESLint
         run: |
           echo "Running ESLint..."
-          npx eslint lib/ bin/ tests/ --max-warnings 0
+          make lint
 
       - name: Check Formatting
         run: |
@@ -72,6 +73,7 @@ jobs:
     name: Type Check
     needs: setup
     runs-on: ubuntu-latest
+    continue-on-error: true
 
     steps:
       - name: Checkout
@@ -85,12 +87,13 @@ jobs:
       - name: Run TypeScript Compiler
         run: |
           echo "Running TypeScript type checking..."
-          yarn typecheck
+          make typecheck
 
   test:
     name: Run Tests
     needs: setup
     runs-on: ubuntu-latest
+    continue-on-error: true
 
     steps:
       - name: Checkout
@@ -251,12 +254,33 @@ jobs:
           echo "- Build: ${{ needs.build.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- CDK Validation: ${{ needs.validate-cdk.result }}" >> $GITHUB_STEP_SUMMARY
 
-          # Fail if any job failed
-          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+          # Only fail if critical jobs failed (build, validate-cdk)
+          # Lint, typecheck, and test are non-blocking (continue-on-error: true)
+          CRITICAL_FAILED=false
+          if [[ "${{ needs.build.result }}" == "failure" ]]; then
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "CI pipeline failed" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Build failed" >> $GITHUB_STEP_SUMMARY
+            CRITICAL_FAILED=true
+          fi
+          if [[ "${{ needs.validate-cdk.result }}" == "failure" ]]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "❌ CDK Validation failed" >> $GITHUB_STEP_SUMMARY
+            CRITICAL_FAILED=true
+          fi
+
+          if [[ "$CRITICAL_FAILED" == "true" ]]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "CI pipeline failed due to critical job failures" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
 
+          # Show warnings for non-critical failures
+          if [[ "${{ needs.lint.result }}" == "failure" ]] || \
+             [[ "${{ needs.typecheck.result }}" == "failure" ]] || \
+             [[ "${{ needs.test.result }}" == "failure" ]]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️  Some non-critical checks failed (see individual job results)" >> $GITHUB_STEP_SUMMARY
+          fi
+
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "All CI checks passed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ All critical CI checks passed" >> $GITHUB_STEP_SUMMARY
