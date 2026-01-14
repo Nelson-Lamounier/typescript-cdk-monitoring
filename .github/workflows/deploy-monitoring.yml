@@ -109,6 +109,7 @@ jobs:
 
       - name: Assume Development Account Role
         if: env.ENVIRONMENT == 'development'
+        id: assume-role
         run: |
           TARGET_ACCOUNT="${{ needs.setup.outputs.aws-account-id }}"
           CURRENT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
@@ -120,13 +121,26 @@ jobs:
             echo "Assuming cross-account role for development account..."
             ROLE_ARN="arn:aws:iam::${TARGET_ACCOUNT}:role/GitHubDeploymentRole"
             
+            # Suppress AWS CLI output to prevent credential exposure
             CREDS=$(aws sts assume-role \
               --role-arn "$ROLE_ARN" \
               --role-session-name "GitHubActions-$(date +%s)" \
               --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
-              --output text)
+              --output text \
+              --no-cli-pager 2>&1)
+            
+            if [ $? -ne 0 ]; then
+              echo "ERROR: Failed to assume role"
+              echo "Error details: $CREDS" | sed 's/\(SecretAccessKey\|SessionToken\):[^ ]*/***MASKED***/g'
+              exit 1
+            fi
             
             read ACCESS_KEY SECRET_KEY SESSION_TOKEN <<< "$CREDS"
+            
+            # Mask credentials immediately after extraction (before any logging)
+            echo "::add-mask::${ACCESS_KEY}"
+            echo "::add-mask::${SECRET_KEY}"
+            echo "::add-mask::${SESSION_TOKEN}"
             
             echo "AWS_ACCESS_KEY_ID=$ACCESS_KEY" >> $GITHUB_ENV
             echo "AWS_SECRET_ACCESS_KEY=$SECRET_KEY" >> $GITHUB_ENV
@@ -143,9 +157,21 @@ jobs:
               exit 1
             fi
             echo "✓ Successfully assumed development account role"
+            echo "role_assumed=true" >> $GITHUB_OUTPUT
           else
             echo "✓ Already authenticated to target account"
+            echo "role_assumed=false" >> $GITHUB_OUTPUT
           fi
+
+      - name: Verify CDK Bootstrap (with assumed role)
+        if: env.ENVIRONMENT == 'development' && steps.assume-role.outputs.role_assumed == 'true'
+        run: |
+          echo "Verifying CDK Bootstrap with assumed role credentials..."
+          make verify-bootstrap \
+            AWS_ACCOUNT_ID="${{ needs.setup.outputs.aws-account-id }}" \
+            ENVIRONMENT="${{ env.ENVIRONMENT }}" \
+            AWS_REGION="${{ env.AWS_REGION }}" \
+            PROJECT_NAME="${{ env.PROJECT_NAME }}"
 
       - name: Deploy Networking Stack
         id: deploy-networking
@@ -157,6 +183,8 @@ jobs:
           aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
           aws-region: ${{ env.AWS_REGION }}
           additional-args: "--require-approval never"
+        env:
+          SKIP_BOOTSTRAP_VERIFICATION: "true"
 
       - name: Save Stack Outputs Artifact
         if: steps.deploy-networking.outputs.stack-outputs != ''
@@ -206,13 +234,26 @@ jobs:
             echo "Assuming cross-account role for development account..."
             ROLE_ARN="arn:aws:iam::${TARGET_ACCOUNT}:role/GitHubDeploymentRole"
             
+            # Suppress AWS CLI output to prevent credential exposure
             CREDS=$(aws sts assume-role \
               --role-arn "$ROLE_ARN" \
               --role-session-name "GitHubActions-$(date +%s)" \
               --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
-              --output text)
+              --output text \
+              --no-cli-pager 2>&1)
+            
+            if [ $? -ne 0 ]; then
+              echo "ERROR: Failed to assume role"
+              echo "Error details: $CREDS" | sed 's/\(SecretAccessKey\|SessionToken\):[^ ]*/***MASKED***/g'
+              exit 1
+            fi
             
             read ACCESS_KEY SECRET_KEY SESSION_TOKEN <<< "$CREDS"
+            
+            # Mask credentials immediately after extraction (before any logging)
+            echo "::add-mask::${ACCESS_KEY}"
+            echo "::add-mask::${SECRET_KEY}"
+            echo "::add-mask::${SESSION_TOKEN}"
             
             echo "AWS_ACCESS_KEY_ID=$ACCESS_KEY" >> $GITHUB_ENV
             echo "AWS_SECRET_ACCESS_KEY=$SECRET_KEY" >> $GITHUB_ENV
@@ -285,13 +326,26 @@ jobs:
             echo "Assuming cross-account role for development account..."
             ROLE_ARN="arn:aws:iam::${TARGET_ACCOUNT}:role/GitHubDeploymentRole"
             
+            # Suppress AWS CLI output to prevent credential exposure
             CREDS=$(aws sts assume-role \
               --role-arn "$ROLE_ARN" \
               --role-session-name "GitHubActions-$(date +%s)" \
               --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
-              --output text)
+              --output text \
+              --no-cli-pager 2>&1)
+            
+            if [ $? -ne 0 ]; then
+              echo "ERROR: Failed to assume role"
+              echo "Error details: $CREDS" | sed 's/\(SecretAccessKey\|SessionToken\):[^ ]*/***MASKED***/g'
+              exit 1
+            fi
             
             read ACCESS_KEY SECRET_KEY SESSION_TOKEN <<< "$CREDS"
+            
+            # Mask credentials immediately after extraction (before any logging)
+            echo "::add-mask::${ACCESS_KEY}"
+            echo "::add-mask::${SECRET_KEY}"
+            echo "::add-mask::${SESSION_TOKEN}"
             
             echo "AWS_ACCESS_KEY_ID=$ACCESS_KEY" >> $GITHUB_ENV
             echo "AWS_SECRET_ACCESS_KEY=$SECRET_KEY" >> $GITHUB_ENV
@@ -364,13 +418,26 @@ jobs:
             echo "Assuming cross-account role for development account..."
             ROLE_ARN="arn:aws:iam::${TARGET_ACCOUNT}:role/GitHubDeploymentRole"
             
+            # Suppress AWS CLI output to prevent credential exposure
             CREDS=$(aws sts assume-role \
               --role-arn "$ROLE_ARN" \
               --role-session-name "GitHubActions-$(date +%s)" \
               --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
-              --output text)
+              --output text \
+              --no-cli-pager 2>&1)
+            
+            if [ $? -ne 0 ]; then
+              echo "ERROR: Failed to assume role"
+              echo "Error details: $CREDS" | sed 's/\(SecretAccessKey\|SessionToken\):[^ ]*/***MASKED***/g'
+              exit 1
+            fi
             
             read ACCESS_KEY SECRET_KEY SESSION_TOKEN <<< "$CREDS"
+            
+            # Mask credentials immediately after extraction (before any logging)
+            echo "::add-mask::${ACCESS_KEY}"
+            echo "::add-mask::${SECRET_KEY}"
+            echo "::add-mask::${SESSION_TOKEN}"
             
             echo "AWS_ACCESS_KEY_ID=$ACCESS_KEY" >> $GITHUB_ENV
             echo "AWS_SECRET_ACCESS_KEY=$SECRET_KEY" >> $GITHUB_ENV
@@ -441,13 +508,26 @@ jobs:
             echo "Assuming cross-account role for development account..."
             ROLE_ARN="arn:aws:iam::${TARGET_ACCOUNT}:role/GitHubDeploymentRole"
             
+            # Suppress AWS CLI output to prevent credential exposure
             CREDS=$(aws sts assume-role \
               --role-arn "$ROLE_ARN" \
               --role-session-name "GitHubActions-$(date +%s)" \
               --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
-              --output text)
+              --output text \
+              --no-cli-pager 2>&1)
+            
+            if [ $? -ne 0 ]; then
+              echo "ERROR: Failed to assume role"
+              echo "Error details: $CREDS" | sed 's/\(SecretAccessKey\|SessionToken\):[^ ]*/***MASKED***/g'
+              exit 1
+            fi
             
             read ACCESS_KEY SECRET_KEY SESSION_TOKEN <<< "$CREDS"
+            
+            # Mask credentials immediately after extraction (before any logging)
+            echo "::add-mask::${ACCESS_KEY}"
+            echo "::add-mask::${SECRET_KEY}"
+            echo "::add-mask::${SESSION_TOKEN}"
             
             echo "AWS_ACCESS_KEY_ID=$ACCESS_KEY" >> $GITHUB_ENV
             echo "AWS_SECRET_ACCESS_KEY=$SECRET_KEY" >> $GITHUB_ENV

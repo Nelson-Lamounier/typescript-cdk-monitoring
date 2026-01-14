@@ -224,7 +224,9 @@ async function deployStack(
       // Log summary (without sensitive values)
       Logger.subsection("Stack Outputs Summary");
       Logger.info(
-        `Retrieved ${Object.keys(stackOutputs).length} output(s) (sensitive values masked)`
+        `Retrieved ${
+          Object.keys(stackOutputs).length
+        } output(s) (sensitive values masked)`
       );
       Logger.info("Full outputs saved to deployment artifacts");
 
