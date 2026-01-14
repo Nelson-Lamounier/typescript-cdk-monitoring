@@ -19,14 +19,8 @@ import {
   DescribeInstanceStatusCommand,
   DescribeSecurityGroupsCommand,
 } from "@aws-sdk/client-ec2";
-import {
-  ECSClient,
-  DescribeClustersCommand,
-} from "@aws-sdk/client-ecs";
-import {
-  EFSClient,
-  DescribeMountTargetsCommand,
-} from "@aws-sdk/client-efs";
+import { ECSClient, DescribeClustersCommand } from "@aws-sdk/client-ecs";
+import { EFSClient, DescribeMountTargetsCommand } from "@aws-sdk/client-efs";
 import {
   ElasticLoadBalancingV2Client,
   DescribeLoadBalancersCommand,
@@ -121,7 +115,12 @@ const STORAGE_PARAMS_EFS = [
   "availability-zone",
 ];
 
-const STORAGE_PARAMS_LEGACY = ["efs-id", "access-point-id", "efs-sg-id", "efs-az"];
+const STORAGE_PARAMS_LEGACY = [
+  "efs-id",
+  "access-point-id",
+  "efs-sg-id",
+  "efs-az",
+];
 
 const CONFIG_PARAMS = [
   "prometheus-config-yaml",
@@ -623,9 +622,7 @@ async function checkAlbHealth(dnsName: string): Promise<{
   });
 }
 
-async function verifyInfraStack(
-  config: VerifyInfraStackConfig
-): Promise<{
+async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
   checks: CheckCounts;
   state: VerificationState;
 }> {
@@ -749,7 +746,10 @@ async function verifyInfraStack(
     checks.total++;
     Logger.success(`Cluster Name: ${stackInfo.outputs.clusterName}`);
 
-    const cluster = await getEcsCluster(ecsClient, stackInfo.outputs.clusterName);
+    const cluster = await getEcsCluster(
+      ecsClient,
+      stackInfo.outputs.clusterName
+    );
 
     if (!cluster) {
       Logger.error("Cluster not found");
@@ -784,7 +784,9 @@ async function verifyInfraStack(
       }
 
       const runningTasks = cluster.runningTasksCount || 0;
-      Logger.info(`Running Tasks: ${runningTasks} (tasks deployed in ServiceStack)`);
+      Logger.info(
+        `Running Tasks: ${runningTasks} (tasks deployed in ServiceStack)`
+      );
 
       const containerInsights =
         cluster.settings?.find((s) => s.name === "containerInsights")?.value ||
@@ -887,7 +889,10 @@ async function verifyInfraStack(
     checks.total++;
     Logger.success(`ALB DNS: ${stackInfo.outputs.loadBalancerDns}`);
 
-    const alb = await getLoadBalancer(elbv2Client, stackInfo.outputs.loadBalancerDns);
+    const alb = await getLoadBalancer(
+      elbv2Client,
+      stackInfo.outputs.loadBalancerDns
+    );
 
     if (alb) {
       state.albArn = alb.LoadBalancerArn;
@@ -1035,7 +1040,10 @@ async function verifyInfraStack(
 
   // 8. EFS Mount Target & Subnet Verification
   Logger.subsection("8. EFS Mount Target & Subnet Verification");
-  state.efsFileSystemId = await getEfsFileSystemId(ssmClient, config.environment);
+  state.efsFileSystemId = await getEfsFileSystemId(
+    ssmClient,
+    config.environment
+  );
 
   if (!state.efsFileSystemId) {
     Logger.warning("EFS File System ID not found in SSM parameters");
@@ -1114,9 +1122,7 @@ async function verifyInfraStack(
         }
       }
     } else {
-      Logger.error(
-        `No EFS mount targets found for ${state.efsFileSystemId}`
-      );
+      Logger.error(`No EFS mount targets found for ${state.efsFileSystemId}`);
       checks.failed++;
     }
   }
@@ -1139,7 +1145,9 @@ async function verifyInfraStack(
 
     associations.forEach((assoc) => {
       Logger.info(
-        `   - ${assoc.AssociationName} (${assoc.Name}): ${assoc.Overview?.Status || "Unknown"}`
+        `   - ${assoc.AssociationName} (${assoc.Name}): ${
+          assoc.Overview?.Status || "Unknown"
+        }`
       );
     });
 
@@ -1190,7 +1198,9 @@ async function verifyInfraStack(
 
             if (config.verbose) {
               Logger.info(
-                `EFS mount on ${instanceId}: ${latestExecution?.Status || "Unknown"}`
+                `EFS mount on ${instanceId}: ${
+                  latestExecution?.Status || "Unknown"
+                }`
               );
             }
           }
@@ -1232,7 +1242,9 @@ async function verifyInfraStack(
       checks.total++;
 
       if (state.efsInitStatus === "Success") {
-        Logger.success(`EFS Initialization Association: ${state.efsInitStatus}`);
+        Logger.success(
+          `EFS Initialization Association: ${state.efsInitStatus}`
+        );
         checks.passed++;
 
         if (state.instanceIds.length > 0) {
@@ -1312,10 +1324,14 @@ async function verifyInfraStack(
       checks.total++;
 
       if (cloudwatchInstallStatus === "Success") {
-        Logger.success(`CloudWatch Agent Installation: ${cloudwatchInstallStatus}`);
+        Logger.success(
+          `CloudWatch Agent Installation: ${cloudwatchInstallStatus}`
+        );
         checks.passed++;
       } else {
-        Logger.warning(`CloudWatch Agent Installation: ${cloudwatchInstallStatus}`);
+        Logger.warning(
+          `CloudWatch Agent Installation: ${cloudwatchInstallStatus}`
+        );
         checks.warnings++;
       }
     } else {
@@ -1329,10 +1345,14 @@ async function verifyInfraStack(
       checks.total++;
 
       if (cloudwatchConfigStatus === "Success") {
-        Logger.success(`CloudWatch Agent Configuration: ${cloudwatchConfigStatus}`);
+        Logger.success(
+          `CloudWatch Agent Configuration: ${cloudwatchConfigStatus}`
+        );
         checks.passed++;
       } else {
-        Logger.warning(`CloudWatch Agent Configuration: ${cloudwatchConfigStatus}`);
+        Logger.warning(
+          `CloudWatch Agent Configuration: ${cloudwatchConfigStatus}`
+        );
         checks.warnings++;
       }
     } else {
@@ -1361,9 +1381,7 @@ async function verifyInfraStack(
 
         if (failedExecutions.length > 0) {
           console.log("");
-          Logger.info(
-            `Recent failures for ${assoc.AssociationName}:`
-          );
+          Logger.info(`Recent failures for ${assoc.AssociationName}:`);
           failedExecutions.slice(0, 3).forEach((exec) => {
             Logger.info(
               `     - ${exec.ExecutionId}: ${exec.ResourceId} - ${exec.Status}`
@@ -1422,7 +1440,9 @@ async function verifyInfraStack(
       result = await checkSsmParameter(ssmClient, legacyParam);
       if (result.exists) {
         checks.total++;
-        Logger.success(`${legacyParam}: ${result.value || "N/A"} (legacy path)`);
+        Logger.success(
+          `${legacyParam}: ${result.value || "N/A"} (legacy path)`
+        );
         storageFound++;
         checks.passed++;
       } else {
@@ -1532,7 +1552,9 @@ async function verifyInfraStack(
     checks.total++;
 
     if (metadataParams.length > 0) {
-      Logger.success(`Bootstrap Metadata: ${metadataParams.length} instances tracked`);
+      Logger.success(
+        `Bootstrap Metadata: ${metadataParams.length} instances tracked`
+      );
       checks.passed++;
 
       if (config.verbose && metadataParams.length > 0) {
@@ -1558,15 +1580,16 @@ async function verifyInfraStack(
 
   // 13. Actual EFS Mount Verification
   Logger.subsection("13. Actual EFS Mount Verification");
-  Logger.info("This section runs actual SSM commands to verify EFS is mounted.");
+  Logger.info(
+    "This section runs actual SSM commands to verify EFS is mounted."
+  );
   console.log("");
 
   if (state.asgName && state.instanceIds.length > 0) {
     const asg = await getAutoScalingGroup(asgClient, state.asgName);
     const inServiceInstances =
-      asg?.Instances?.filter(
-        (inst) => inst.LifecycleState === "InService"
-      ) || [];
+      asg?.Instances?.filter((inst) => inst.LifecycleState === "InService") ||
+      [];
 
     if (inServiceInstances.length > 0) {
       const firstInstance = inServiceInstances[0].InstanceId;
@@ -1621,7 +1644,9 @@ async function verifyInfraStack(
         console.log("");
         Logger.info("To manually verify EFS mount on any instance, run:");
         Logger.code(
-          `aws ssm send-command --instance-ids "${firstInstance}" --document-name "AWS-RunShellScript" --parameters 'commands=["df -h /mnt/efs && ls -la /mnt/efs"]' --profile ${config.profile || "default"} --region ${config.region}`
+          `aws ssm send-command --instance-ids "${firstInstance}" --document-name "AWS-RunShellScript" --parameters 'commands=["df -h /mnt/efs && ls -la /mnt/efs"]' --profile ${
+            config.profile || "default"
+          } --region ${config.region}`
         );
       } else {
         Logger.warning("No running instances found in Auto Scaling Group");
@@ -1660,7 +1685,9 @@ async function verifyInfraStack(
       }
     } else {
       Logger.warning(
-        `ALB HTTP Response: ${healthCheck.httpCode || "unknown"} (may be behind firewall)`
+        `ALB HTTP Response: ${
+          healthCheck.httpCode || "unknown"
+        } (may be behind firewall)`
       );
       checks.warnings++;
     }
@@ -1672,7 +1699,9 @@ async function verifyInfraStack(
 
   // 15. Service Stack Deployment Readiness
   Logger.subsection("15. Service Stack Deployment Readiness");
-  console.log("Checking prerequisites for MonitoringServiceStack deployment...");
+  console.log(
+    "Checking prerequisites for MonitoringServiceStack deployment..."
+  );
   console.log("");
 
   // Critical: EFS must be mounted and initialized
@@ -1682,13 +1711,17 @@ async function verifyInfraStack(
       checks.passed++;
     } else if (!state.efsMountAssocId) {
       Logger.warning("EFS mount association not found (may still be mounted)");
-      Logger.info("Run manual verification: aws ssm send-command to check /mnt/efs");
+      Logger.info(
+        "Run manual verification: aws ssm send-command to check /mnt/efs"
+      );
       checks.warnings++;
     } else {
       Logger.warning(
         `EFS mount association status: ${state.efsMountStatus || "Pending"}`
       );
-      Logger.info("This may be normal - check actual mount status in section 13 above");
+      Logger.info(
+        "This may be normal - check actual mount status in section 13 above"
+      );
       checks.warnings++;
     }
 
@@ -1703,7 +1736,9 @@ async function verifyInfraStack(
       checks.warnings++;
     } else {
       Logger.warning(
-        `EFS initialization association status: ${state.efsInitStatus || "Pending"}`
+        `EFS initialization association status: ${
+          state.efsInitStatus || "Pending"
+        }`
       );
       Logger.info(
         "This may be normal - check directory structure in section 13 above"
@@ -1807,13 +1842,17 @@ async function verifyInfraStack(
     Logger.info("Next steps:");
     Logger.info("  1. Deploy service stack:");
     Logger.code(
-      `cdk deploy ${config.environment}-MonitoringService --profile ${config.profile || "default"}`
+      `cdk deploy ${config.environment}-MonitoringService --profile ${
+        config.profile || "default"
+      }`
     );
     console.log("");
     Logger.info("  2. Monitor deployment:");
     if (state.clusterName) {
       Logger.code(
-        `aws ecs list-tasks --cluster ${state.clusterName} --profile ${config.profile || "default"}`
+        `aws ecs list-tasks --cluster ${state.clusterName} --profile ${
+          config.profile || "default"
+        }`
       );
     }
     console.log("");
@@ -1854,7 +1893,9 @@ async function verifyInfraStack(
       console.log("");
       Logger.info("Deploy the EFS stack with:");
       Logger.code(
-        `cdk deploy ${config.environment}-MonitoringEfs --profile ${config.profile || "default"}`
+        `cdk deploy ${config.environment}-MonitoringEfs --profile ${
+          config.profile || "default"
+        }`
       );
     } else {
       if (!state.efsMountAssocId || state.efsMountStatus !== "Success") {
@@ -1879,7 +1920,9 @@ async function verifyInfraStack(
         Logger.info("  3. No ECS container instances registered");
         Logger.info("     - Check Auto Scaling Group health");
         Logger.info("     - Review bootstrap logs: /var/log/ecs/ecs-init.log");
-        Logger.info("     - Verify ECS agent configuration: systemctl status ecs");
+        Logger.info(
+          "     - Verify ECS agent configuration: systemctl status ecs"
+        );
         console.log("");
       }
 
@@ -1887,7 +1930,9 @@ async function verifyInfraStack(
         Logger.info(
           `  4. Missing required SSM parameters (${state.totalParamsFound}/${state.totalParamsExpected})`
         );
-        Logger.info("     - Verify MonitoringEfsStack was deployed successfully");
+        Logger.info(
+          "     - Verify MonitoringEfsStack was deployed successfully"
+        );
         Logger.info("     - Check CloudFormation exports are present");
         Logger.info("     - Ensure stack didn't partially rollback");
         console.log("");
@@ -1968,7 +2013,9 @@ verifyInfraStack(config)
       console.log("");
       Logger.info("Deploy services with:");
       Logger.code(
-        `cdk deploy ${config.environment}-MonitoringService --profile ${config.profile || "default"}`
+        `cdk deploy ${config.environment}-MonitoringService --profile ${
+          config.profile || "default"
+        }`
       );
       console.log("");
       process.exit(0);
