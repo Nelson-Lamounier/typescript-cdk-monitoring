@@ -39,6 +39,7 @@ jobs:
   setup:
     name: Setup & Build
     runs-on: ubuntu-latest
+    environment: development
     outputs:
       cache-key: ${{ steps.cache-key.outputs.key }}
       aws-account-id: ${{ steps.account-id.outputs.account_id }}
@@ -58,22 +59,38 @@ jobs:
         id: account-id
         run: |
           echo "Debug: Checking AWS_ACCOUNT_ID_DEV variable..."
-          echo "Variable value from env: '${{ env.AWS_ACCOUNT_ID_DEV }}'"
-          echo "Variable value from vars: '${{ vars.AWS_ACCOUNT_ID_DEV }}'"
+          echo "Variable value from workflow env: '${{ env.AWS_ACCOUNT_ID_DEV }}'"
+          echo "Variable value from repository vars: '${{ vars.AWS_ACCOUNT_ID_DEV }}'"
+          echo "Variable value from environment vars: '${{ vars.AWS_ACCOUNT_ID_DEV }}'"
+          echo ""
+          echo "Note: With 'environment: development' set, vars context includes both:"
+          echo "  - Repository-level variables"
+          echo "  - Environment-level variables (development environment)"
 
-          # Try both env and vars contexts
+          # Try workflow-level env first (set from vars at workflow level)
           ACCOUNT_ID="${{ env.AWS_ACCOUNT_ID_DEV }}"
+
+          # If empty, try vars context (includes both repo and environment vars when environment is set)
           if [ -z "$ACCOUNT_ID" ] || [ "$ACCOUNT_ID" == "" ]; then
             ACCOUNT_ID="${{ vars.AWS_ACCOUNT_ID_DEV }}"
           fi
 
           if [ -z "$ACCOUNT_ID" ] || [ "$ACCOUNT_ID" == "" ]; then
-            echo "::error::AWS_ACCOUNT_ID_DEV not configured in repository variables"
-            echo "Please verify:"
+            echo "::error::AWS_ACCOUNT_ID_DEV not configured"
+            echo ""
+            echo "Please configure AWS_ACCOUNT_ID_DEV in one of these locations:"
+            echo ""
+            echo "Option 1: Repository-level variable (recommended)"
             echo "  1. Go to repository Settings > Secrets and variables > Actions > Variables"
-            echo "  2. Ensure variable name is exactly: AWS_ACCOUNT_ID_DEV"
-            echo "  3. Ensure variable value is: 771826808455"
-            echo "  4. Ensure variable is set at Repository level (not Organization level)"
+            echo "  2. Add variable: AWS_ACCOUNT_ID_DEV = 771826808455"
+            echo ""
+            echo "Option 2: Environment-level variable"
+            echo "  1. Go to repository Settings > Environments > development"
+            echo "  2. Add variable: AWS_ACCOUNT_ID_DEV = 771826808455"
+            echo ""
+            echo "Current checks:"
+            echo "  - Workflow env: '${{ env.AWS_ACCOUNT_ID_DEV }}'"
+            echo "  - Vars context: '${{ vars.AWS_ACCOUNT_ID_DEV }}'"
             exit 1
           fi
 
