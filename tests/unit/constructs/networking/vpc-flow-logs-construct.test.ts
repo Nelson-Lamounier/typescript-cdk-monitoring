@@ -310,21 +310,18 @@ describe("VpcFlowLogsConstruct", () => {
         projectName: TEST_CONSTANTS.PROJECT_NAMES.MONITORING,
         expectedName: TEST_CONSTANTS.LOG_GROUP_NAMES.WITH_PROJECT,
       },
-    ])(
-      "uses $description",
-      ({ envName, projectName, expectedName }) => {
-        createFlowLogsConstruct(stack, "FlowLogs", {
-          envName,
-          projectName,
-        });
+    ])("uses $description", ({ envName, projectName, expectedName }) => {
+      createFlowLogsConstruct(stack, "FlowLogs", {
+        envName,
+        projectName,
+      });
 
-        const template = Template.fromStack(stack);
+      const template = Template.fromStack(stack);
 
-        template.hasResourceProperties("AWS::Logs::LogGroup", {
-          LogGroupName: expectedName,
-        });
-      }
-    );
+      template.hasResourceProperties("AWS::Logs::LogGroup", {
+        LogGroupName: expectedName,
+      });
+    });
 
     test("uses custom log group name when provided", () => {
       // Create a separate stack with custom log group name
@@ -590,23 +587,20 @@ describe("VpcFlowLogsConstruct", () => {
         expectedType: TEST_CONSTANTS.TRAFFIC_TYPES.REJECT,
         description: "REJECT traffic type",
       },
-    ])(
-      "uses $description",
-      ({ trafficType, expectedType }) => {
-        new VpcFlowLogsConstruct(stack, "FlowLogs", {
-          vpc,
-          envName: TEST_CONSTANTS.ENVIRONMENTS.TEST,
-          trafficType,
-        });
+    ])("uses $description", ({ trafficType, expectedType }) => {
+      new VpcFlowLogsConstruct(stack, "FlowLogs", {
+        vpc,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.TEST,
+        trafficType,
+      });
 
-        const template = Template.fromStack(stack);
+      const template = Template.fromStack(stack);
 
-        template.hasResourceProperties("AWS::EC2::FlowLog", {
-          ResourceType: "VPC",
-          TrafficType: expectedType,
-        });
-      }
-    );
+      template.hasResourceProperties("AWS::EC2::FlowLog", {
+        ResourceType: "VPC",
+        TrafficType: expectedType,
+      });
+    });
   });
 
   // ============================================================================
@@ -728,29 +722,26 @@ describe("VpcFlowLogsConstruct", () => {
         expectedPolicy: TEST_CONSTANTS.REMOVAL_POLICIES.RETAIN,
         description: "RETAIN removal policy for production",
       },
-    ])(
-      "uses $description by default",
-      ({ envName, expectedPolicy }) => {
-        const testStack = createTestStack(app, `TestStack-${envName}`);
-        const testVpc = createTestVpc(testStack, `Vpc-${envName}`);
+    ])("uses $description by default", ({ envName, expectedPolicy }) => {
+      const testStack = createTestStack(app, `TestStack-${envName}`);
+      const testVpc = createTestVpc(testStack, `Vpc-${envName}`);
 
-        new VpcFlowLogsConstruct(testStack, "FlowLogs", {
-          vpc: testVpc,
-          envName,
-        });
+      new VpcFlowLogsConstruct(testStack, "FlowLogs", {
+        vpc: testVpc,
+        envName,
+      });
 
-        const template = Template.fromStack(testStack);
+      const template = Template.fromStack(testStack);
 
-        // DeletionPolicy is a resource-level attribute, not a property
-        const logGroupResources = template.findResources("AWS::Logs::LogGroup");
-        const logGroupResource = Object.values(logGroupResources)[0] as {
-          DeletionPolicy?: string;
-          UpdateReplacePolicy?: string;
-        };
-        expect(logGroupResource.DeletionPolicy).toBe(expectedPolicy);
-        expect(logGroupResource.UpdateReplacePolicy).toBe(expectedPolicy);
-      }
-    );
+      // DeletionPolicy is a resource-level attribute, not a property
+      const logGroupResources = template.findResources("AWS::Logs::LogGroup");
+      const logGroupResource = Object.values(logGroupResources)[0] as {
+        DeletionPolicy?: string;
+        UpdateReplacePolicy?: string;
+      };
+      expect(logGroupResource.DeletionPolicy).toBe(expectedPolicy);
+      expect(logGroupResource.UpdateReplacePolicy).toBe(expectedPolicy);
+    });
 
     test.each([
       {
@@ -956,26 +947,23 @@ describe("VpcFlowLogsConstruct", () => {
         tagValue: TEST_CONSTANTS.TAGS.CDK,
         description: "ManagedBy tag",
       },
-    ])(
-      "adds $description",
-      ({ tagKey, tagValue }) => {
-        new VpcFlowLogsConstruct(stack, "FlowLogs", {
-          vpc,
-          envName: TEST_CONSTANTS.ENVIRONMENTS.STAGING,
-        });
+    ])("adds $description", ({ tagKey, tagValue }) => {
+      new VpcFlowLogsConstruct(stack, "FlowLogs", {
+        vpc,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.STAGING,
+      });
 
-        const template = Template.fromStack(stack);
+      const template = Template.fromStack(stack);
 
-        template.hasResourceProperties("AWS::Logs::LogGroup", {
-          Tags: Match.arrayWith([
-            {
-              Key: tagKey,
-              Value: tagValue,
-            },
-          ]),
-        });
-      }
-    );
+      template.hasResourceProperties("AWS::Logs::LogGroup", {
+        Tags: Match.arrayWith([
+          {
+            Key: tagKey,
+            Value: tagValue,
+          },
+        ]),
+      });
+    });
 
     test("adds Project tag when project name provided", () => {
       createFlowLogsConstruct(stack, "FlowLogs", {
@@ -1029,8 +1017,7 @@ describe("VpcFlowLogsConstruct", () => {
           ec2.LogFormat.SRC_ADDR,
           ec2.LogFormat.DST_ADDR,
         ],
-        maxAggregationInterval:
-          ec2.FlowLogMaxAggregationInterval.TEN_MINUTES,
+        maxAggregationInterval: ec2.FlowLogMaxAggregationInterval.TEN_MINUTES,
         removalPolicy: cdk.RemovalPolicy.RETAIN,
       });
 
