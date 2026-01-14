@@ -282,13 +282,17 @@ test-monitoring-service: ## Run monitoring service stack tests
 test-stacks: test-networking test-monitoring-efs test-monitoring-infra test-monitoring-service ## Run all stack tests
 	@echo "$(BLUE)All stack tests completed$(NC)"
 
-lint: ## Run linter
+lint: ## Run linter (ESLint with max-warnings 0)
 	@echo "$(BLUE)Running linter...$(NC)"
-	yarn lint
+	npx eslint lib/ bin/ tests/ --max-warnings 0
 
 lint-fix: ## Run linter with auto-fix
 	@echo "$(BLUE)Running linter with auto-fix...$(NC)"
 	yarn lint:fix
+
+typecheck: ## Run TypeScript type checking
+	@echo "$(BLUE)Running TypeScript type checking...$(NC)"
+	yarn typecheck
 
 build: ## Build TypeScript code
 	@echo "$(BLUE)Building TypeScript...$(NC)"
