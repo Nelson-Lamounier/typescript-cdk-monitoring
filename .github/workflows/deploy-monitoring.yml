@@ -122,7 +122,6 @@ jobs:
           echo "Verifying Networking Stack deployment..."
           make verify-networking \
             ENVIRONMENT=${{ env.ENVIRONMENT }} \
-            AWS_PROFILE=default \
             AWS_REGION=${{ env.AWS_REGION }}
 
   # =================================================================
@@ -162,7 +161,6 @@ jobs:
           echo "Verifying EFS Stack deployment..."
           make verify-efs \
             ENVIRONMENT=${{ env.ENVIRONMENT }} \
-            AWS_PROFILE=default \
             AWS_REGION=${{ env.AWS_REGION }}
 
   # =================================================================
@@ -202,7 +200,6 @@ jobs:
           echo "Verifying Infrastructure Stack deployment..."
           make verify-infra \
             ENVIRONMENT=${{ env.ENVIRONMENT }} \
-            AWS_PROFILE=default \
             AWS_REGION=${{ env.AWS_REGION }}
 
   # =================================================================
@@ -242,7 +239,6 @@ jobs:
           echo "Verifying Service Stack deployment..."
           make verify-service \
             ENVIRONMENT=${{ env.ENVIRONMENT }} \
-            AWS_PROFILE=default \
             AWS_REGION=${{ env.AWS_REGION }}
 
   # =================================================================

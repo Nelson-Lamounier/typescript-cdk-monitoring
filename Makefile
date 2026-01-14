@@ -82,10 +82,18 @@ help: ## Show this help message
 verify-networking: ## Verify Networking stack deployment and readiness
 	@echo "$(BLUE)Verifying Networking Stack...$(NC)"
 	@echo "Environment: $(ENVIRONMENT)"
-	@echo "AWS Profile: $(AWS_PROFILE)"
+	@echo "AWS Region: $(AWS_REGION)"
+	@if [ -n "$(AWS_PROFILE)" ]; then \
+		echo "AWS Profile: $(AWS_PROFILE)"; \
+	else \
+		echo "AWS Profile: (using default credentials)"; \
+	fi
 	@echo ""
-	@npx tsx scripts/deployment/verify-environment.ts -e $(ENVIRONMENT) -p $(AWS_PROFILE) -r $(AWS_REGION) || \
-		npx tsx scripts/deployment/validate-environment.ts -e $(ENVIRONMENT) -p $(AWS_PROFILE) -r $(AWS_REGION)
+	@if [ -n "$(AWS_PROFILE)" ]; then \
+		npx tsx scripts/deployment/monitoring/verify-networking-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION) -p $(AWS_PROFILE); \
+	else \
+		npx tsx scripts/deployment/monitoring/verify-networking-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION); \
+	fi
 
 verify-efs: ## Verify EFS stack deployment and readiness
 	@echo "$(BLUE)Verifying EFS Stack...$(NC)"
@@ -97,16 +105,26 @@ verify-efs: ## Verify EFS stack deployment and readiness
 verify-infra: ## Verify Infrastructure stack deployment and readiness
 	@echo "$(BLUE)Verifying Infrastructure Stack...$(NC)"
 	@echo "Environment: $(ENVIRONMENT)"
-	@echo "AWS Profile: $(AWS_PROFILE)"
-	@echo ""
-	@npx tsx scripts/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -p $(AWS_PROFILE) -r $(AWS_REGION)
+	@echo "AWS Region: $(AWS_REGION)"
+	@if [ -n "$(AWS_PROFILE)" ]; then \
+		echo "AWS Profile: $(AWS_PROFILE)"; \
+		npx tsx scripts/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION) -p $(AWS_PROFILE); \
+	else \
+		echo "AWS Profile: (using default credentials)"; \
+		npx tsx scripts/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION); \
+	fi
 
 verify-service: ## Verify Service stack deployment and readiness
 	@echo "$(BLUE)Verifying Service Stack...$(NC)"
 	@echo "Environment: $(ENVIRONMENT)"
-	@echo "AWS Profile: $(AWS_PROFILE)"
-	@echo ""
-	@npx tsx scripts/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -p $(AWS_PROFILE) -r $(AWS_REGION) --service-only || true
+	@echo "AWS Region: $(AWS_REGION)"
+	@if [ -n "$(AWS_PROFILE)" ]; then \
+		echo "AWS Profile: $(AWS_PROFILE)"; \
+		npx tsx scripts/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION) -p $(AWS_PROFILE) --service-only || true; \
+	else \
+		echo "AWS Profile: (using default credentials)"; \
+		npx tsx scripts/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION) --service-only || true; \
+	fi
 
 verify-all: verify-networking verify-efs verify-infra verify-service ## Verify all stacks in order
 	@echo ""
