@@ -148,6 +148,7 @@ jobs:
           fi
 
       - name: Deploy Networking Stack
+        id: deploy-networking
         uses: ./.github/actions/deploy-cdk-stack
         with:
           stack-name: ${{ env.ENVIRONMENT }}-Networking
@@ -156,6 +157,15 @@ jobs:
           aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
           aws-region: ${{ env.AWS_REGION }}
           additional-args: "--require-approval never"
+
+      - name: Save Stack Outputs Artifact
+        if: steps.deploy-networking.outputs.stack-outputs != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ENVIRONMENT }}-Networking-outputs
+          path: .deployment-outputs/${{ env.ENVIRONMENT }}-Networking-*.json
+          retention-days: 90
+          if-no-files-found: ignore
 
       - name: Verify Networking Stack
         run: |
@@ -217,6 +227,7 @@ jobs:
           fi
 
       - name: Deploy EFS Stack
+        id: deploy-efs
         uses: ./.github/actions/deploy-cdk-stack
         with:
           stack-name: ${{ env.ENVIRONMENT }}-MonitoringEfs
@@ -225,6 +236,15 @@ jobs:
           aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
           aws-region: ${{ env.AWS_REGION }}
           additional-args: "--require-approval never"
+
+      - name: Save Stack Outputs Artifact
+        if: steps.deploy-efs.outputs.stack-outputs != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ENVIRONMENT }}-MonitoringEfs-outputs
+          path: .deployment-outputs/${{ env.ENVIRONMENT }}-MonitoringEfs-*.json
+          retention-days: 90
+          if-no-files-found: ignore
 
       - name: Verify EFS Stack
         run: |
@@ -286,6 +306,7 @@ jobs:
           fi
 
       - name: Deploy Infrastructure Stack
+        id: deploy-infra
         uses: ./.github/actions/deploy-cdk-stack
         with:
           stack-name: ${{ env.ENVIRONMENT }}-MonitoringInfra
@@ -294,6 +315,15 @@ jobs:
           aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
           aws-region: ${{ env.AWS_REGION }}
           additional-args: "--require-approval never"
+
+      - name: Save Stack Outputs Artifact
+        if: steps.deploy-infra.outputs.stack-outputs != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ENVIRONMENT }}-MonitoringInfra-outputs
+          path: .deployment-outputs/${{ env.ENVIRONMENT }}-MonitoringInfra-*.json
+          retention-days: 90
+          if-no-files-found: ignore
 
       - name: Verify Infrastructure Stack
         run: |
@@ -355,6 +385,7 @@ jobs:
           fi
 
       - name: Deploy Service Stack
+        id: deploy-service
         uses: ./.github/actions/deploy-cdk-stack
         with:
           stack-name: ${{ env.ENVIRONMENT }}-MonitoringService
@@ -363,6 +394,15 @@ jobs:
           aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
           aws-region: ${{ env.AWS_REGION }}
           additional-args: "--require-approval never"
+
+      - name: Save Stack Outputs Artifact
+        if: steps.deploy-service.outputs.stack-outputs != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ENVIRONMENT }}-MonitoringService-outputs
+          path: .deployment-outputs/${{ env.ENVIRONMENT }}-MonitoringService-*.json
+          retention-days: 90
+          if-no-files-found: ignore
 
       - name: Verify Service Stack
         run: |

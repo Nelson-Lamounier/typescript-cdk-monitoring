@@ -51,3 +51,6 @@ yarn-error.log*
 # Test coverage reports
 coverage/
 .nyc_output
+
+# Deployment outputs (contains sensitive information)
+.deployment-outputs/

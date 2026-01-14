@@ -5,13 +5,135 @@
 
 import { execSync } from "child_process";
 import * as fs from "fs";
+import * as path from "path";
 
 import { program } from "commander";
+import {
+  CloudFormationClient,
+  DescribeStacksCommand,
+} from "@aws-sdk/client-cloudformation";
 
 import { AWSHelpers } from "./utils/aws-helpers.js";
 import { ErrorMessages } from "./utils/error-messages.js";
 import { Logger } from "./utils/logger.js";
 import type { DeploymentConfig, DeploymentResult } from "./utils/types.js";
+
+/**
+ * Mask sensitive values in output for GitHub Actions logs
+ */
+function maskSensitiveValue(value: string): void {
+  if (process.env.GITHUB_ACTIONS === "true" && value) {
+    // GitHub Actions automatically masks values written to stderr with ::
+    console.error(`::add-mask::${value}`);
+  }
+}
+
+/**
+ * Get stack outputs from CloudFormation
+ */
+async function getStackOutputs(
+  stackName: string,
+  region: string
+): Promise<Record<string, string>> {
+  const cfnClient = new CloudFormationClient({ region });
+
+  try {
+    const command = new DescribeStacksCommand({
+      StackName: stackName,
+    });
+
+    const response = await cfnClient.send(command);
+    const stack = response.Stacks?.[0];
+
+    if (!stack || !stack.Outputs) {
+      return {};
+    }
+
+    const outputs: Record<string, string> = {};
+    stack.Outputs.forEach((output) => {
+      if (output.OutputKey && output.OutputValue) {
+        outputs[output.OutputKey] = output.OutputValue;
+      }
+    });
+
+    return outputs;
+  } catch (error: any) {
+    Logger.warning(`Failed to retrieve stack outputs: ${error.message}`);
+    return {};
+  }
+}
+
+/**
+ * Save outputs to a secure file
+ */
+function saveOutputsSecurely(
+  stackName: string,
+  outputs: Record<string, string>,
+  environment: string
+): string {
+  const outputDir = path.join(process.cwd(), ".deployment-outputs");
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const filename = `${stackName}-${timestamp}.json`;
+  const filepath = path.join(outputDir, filename);
+
+  const outputData = {
+    stackName,
+    environment,
+    timestamp: new Date().toISOString(),
+    outputs,
+  };
+
+  fs.writeFileSync(filepath, JSON.stringify(outputData, null, 2));
+  return filepath;
+}
+
+/**
+ * Mask all sensitive values in outputs
+ */
+function maskOutputs(outputs: Record<string, string>): void {
+  // List of output keys that contain sensitive information
+  const sensitiveKeys = [
+    "VpcId",
+    "SubnetId",
+    "SubnetIds",
+    "PrivateSubnetIds",
+    "PublicSubnetIds",
+    "SecurityGroupId",
+    "FileSystemId",
+    "AccessPointId",
+    "LoadBalancerDns",
+    "LoadBalancerArn",
+    "ListenerArn",
+    "TargetGroupArn",
+    "ServiceArn",
+    "TaskDefinitionArn",
+    "ClusterArn",
+    "AutoScalingGroupName",
+    "RoleArn",
+    "CertificateArn",
+    "HostedZoneId",
+  ];
+
+  Object.entries(outputs).forEach(([key, value]) => {
+    // Mask if key matches sensitive pattern or contains IDs/ARNs
+    if (
+      sensitiveKeys.some((sensitive) =>
+        key.toLowerCase().includes(sensitive.toLowerCase())
+      ) ||
+      value.match(/^(arn:|vpc-|subnet-|sg-|fs-|fsap-|i-[0-9a-f]+)/i)
+    ) {
+      maskSensitiveValue(value);
+      // Also mask comma-separated values
+      if (value.includes(",")) {
+        value.split(",").forEach((v) => maskSensitiveValue(v.trim()));
+      }
+    }
+  });
+}
 
 async function deployStack(
   config: DeploymentConfig
@@ -64,10 +186,11 @@ async function deployStack(
   Logger.info(`Started at: ${startTime.toISOString()}`);
 
   try {
-    // Execute deployment
+    // Execute deployment (suppress CDK output to avoid exposing sensitive data)
     execSync(deployCommand, {
-      stdio: "inherit",
+      stdio: "pipe", // Changed from "inherit" to capture output
       cwd: process.cwd(),
+      encoding: "utf-8",
     });
 
     const endTime = new Date();
@@ -79,12 +202,53 @@ async function deployStack(
     Logger.info(`Completed at: ${endTime.toISOString()}`);
     Logger.info(`Duration: ${duration} seconds`);
 
-    // Set GitHub Actions output
-    if (process.env.GITHUB_OUTPUT) {
-      fs.appendFileSync(process.env.GITHUB_OUTPUT, "status=success\n");
-    }
+    // Retrieve and process stack outputs
+    Logger.subsection("Retrieving Stack Outputs");
+    const stackOutputs = await getStackOutputs(
+      config.stackName,
+      config.awsRegion
+    );
 
-    return { success: true };
+    if (Object.keys(stackOutputs).length > 0) {
+      // Mask sensitive values before logging
+      maskOutputs(stackOutputs);
+
+      // Save outputs securely
+      const outputFile = saveOutputsSecurely(
+        config.stackName,
+        stackOutputs,
+        config.environment
+      );
+      Logger.info(`Stack outputs saved to: ${outputFile}`);
+
+      // Log summary (without sensitive values)
+      Logger.subsection("Stack Outputs Summary");
+      Logger.info(
+        `Retrieved ${Object.keys(stackOutputs).length} output(s) (sensitive values masked)`
+      );
+      Logger.info("Full outputs saved to deployment artifacts");
+
+      // Set GitHub Actions outputs
+      if (process.env.GITHUB_OUTPUT) {
+        fs.appendFileSync(process.env.GITHUB_OUTPUT, "status=success\n");
+        fs.appendFileSync(
+          process.env.GITHUB_OUTPUT,
+          `stack_outputs=${JSON.stringify(stackOutputs)}\n`
+        );
+        fs.appendFileSync(
+          process.env.GITHUB_OUTPUT,
+          `output_file=${outputFile}\n`
+        );
+      }
+
+      return { success: true, stackOutputs };
+    } else {
+      Logger.warning("No stack outputs found");
+      if (process.env.GITHUB_OUTPUT) {
+        fs.appendFileSync(process.env.GITHUB_OUTPUT, "status=success\n");
+      }
+      return { success: true };
+    }
   } catch (error: any) {
     const endTime = new Date();
     Logger.error("DEPLOYMENT FAILED");
