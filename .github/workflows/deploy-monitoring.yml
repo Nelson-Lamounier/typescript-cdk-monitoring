@@ -107,6 +107,46 @@ jobs:
           build-cache-key: ${{ needs.setup.outputs.cache-key }}
           environment-name: ${{ env.ENVIRONMENT }}
 
+      - name: Assume Development Account Role
+        if: env.ENVIRONMENT == 'development'
+        run: |
+          TARGET_ACCOUNT="${{ needs.setup.outputs.aws-account-id }}"
+          CURRENT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+
+          echo "Current account: ***${CURRENT_ACCOUNT: -4}"
+          echo "Target account: ***${TARGET_ACCOUNT: -4}"
+
+          if [ "$CURRENT_ACCOUNT" != "$TARGET_ACCOUNT" ]; then
+            echo "Assuming cross-account role for development account..."
+            ROLE_ARN="arn:aws:iam::${TARGET_ACCOUNT}:role/GitHubDeploymentRole"
+            
+            CREDS=$(aws sts assume-role \
+              --role-arn "$ROLE_ARN" \
+              --role-session-name "GitHubActions-$(date +%s)" \
+              --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
+              --output text)
+            
+            read ACCESS_KEY SECRET_KEY SESSION_TOKEN <<< "$CREDS"
+            
+            echo "AWS_ACCESS_KEY_ID=$ACCESS_KEY" >> $GITHUB_ENV
+            echo "AWS_SECRET_ACCESS_KEY=$SECRET_KEY" >> $GITHUB_ENV
+            echo "AWS_SESSION_TOKEN=$SESSION_TOKEN" >> $GITHUB_ENV
+            
+            # Verify we're in the correct account
+            export AWS_ACCESS_KEY_ID="$ACCESS_KEY"
+            export AWS_SECRET_ACCESS_KEY="$SECRET_KEY"
+            export AWS_SESSION_TOKEN="$SESSION_TOKEN"
+            
+            VERIFIED_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+            if [ "$VERIFIED_ACCOUNT" != "$TARGET_ACCOUNT" ]; then
+              echo "ERROR: Failed to assume development account role"
+              exit 1
+            fi
+            echo "✓ Successfully assumed development account role"
+          else
+            echo "✓ Already authenticated to target account"
+          fi
+
       - name: Deploy Networking Stack
         uses: ./.github/actions/deploy-cdk-stack
         with:
@@ -145,6 +185,36 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           build-cache-key: ${{ needs.setup.outputs.cache-key }}
           environment-name: ${{ env.ENVIRONMENT }}
+
+      - name: Assume Development Account Role
+        if: env.ENVIRONMENT == 'development'
+        run: |
+          TARGET_ACCOUNT="${{ needs.setup.outputs.aws-account-id }}"
+          CURRENT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+
+          if [ "$CURRENT_ACCOUNT" != "$TARGET_ACCOUNT" ]; then
+            echo "Assuming cross-account role for development account..."
+            ROLE_ARN="arn:aws:iam::${TARGET_ACCOUNT}:role/GitHubDeploymentRole"
+            
+            CREDS=$(aws sts assume-role \
+              --role-arn "$ROLE_ARN" \
+              --role-session-name "GitHubActions-$(date +%s)" \
+              --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
+              --output text)
+            
+            read ACCESS_KEY SECRET_KEY SESSION_TOKEN <<< "$CREDS"
+            
+            echo "AWS_ACCESS_KEY_ID=$ACCESS_KEY" >> $GITHUB_ENV
+            echo "AWS_SECRET_ACCESS_KEY=$SECRET_KEY" >> $GITHUB_ENV
+            echo "AWS_SESSION_TOKEN=$SESSION_TOKEN" >> $GITHUB_ENV
+            
+            VERIFIED_ACCOUNT=$(AWS_ACCESS_KEY_ID="$ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$SECRET_KEY" AWS_SESSION_TOKEN="$SESSION_TOKEN" aws sts get-caller-identity --query Account --output text)
+            if [ "$VERIFIED_ACCOUNT" != "$TARGET_ACCOUNT" ]; then
+              echo "ERROR: Failed to assume development account role"
+              exit 1
+            fi
+            echo "✓ Successfully assumed development account role"
+          fi
 
       - name: Deploy EFS Stack
         uses: ./.github/actions/deploy-cdk-stack
@@ -185,6 +255,36 @@ jobs:
           build-cache-key: ${{ needs.setup.outputs.cache-key }}
           environment-name: ${{ env.ENVIRONMENT }}
 
+      - name: Assume Development Account Role
+        if: env.ENVIRONMENT == 'development'
+        run: |
+          TARGET_ACCOUNT="${{ needs.setup.outputs.aws-account-id }}"
+          CURRENT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+
+          if [ "$CURRENT_ACCOUNT" != "$TARGET_ACCOUNT" ]; then
+            echo "Assuming cross-account role for development account..."
+            ROLE_ARN="arn:aws:iam::${TARGET_ACCOUNT}:role/GitHubDeploymentRole"
+            
+            CREDS=$(aws sts assume-role \
+              --role-arn "$ROLE_ARN" \
+              --role-session-name "GitHubActions-$(date +%s)" \
+              --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
+              --output text)
+            
+            read ACCESS_KEY SECRET_KEY SESSION_TOKEN <<< "$CREDS"
+            
+            echo "AWS_ACCESS_KEY_ID=$ACCESS_KEY" >> $GITHUB_ENV
+            echo "AWS_SECRET_ACCESS_KEY=$SECRET_KEY" >> $GITHUB_ENV
+            echo "AWS_SESSION_TOKEN=$SESSION_TOKEN" >> $GITHUB_ENV
+            
+            VERIFIED_ACCOUNT=$(AWS_ACCESS_KEY_ID="$ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$SECRET_KEY" AWS_SESSION_TOKEN="$SESSION_TOKEN" aws sts get-caller-identity --query Account --output text)
+            if [ "$VERIFIED_ACCOUNT" != "$TARGET_ACCOUNT" ]; then
+              echo "ERROR: Failed to assume development account role"
+              exit 1
+            fi
+            echo "✓ Successfully assumed development account role"
+          fi
+
       - name: Deploy Infrastructure Stack
         uses: ./.github/actions/deploy-cdk-stack
         with:
@@ -224,6 +324,36 @@ jobs:
           build-cache-key: ${{ needs.setup.outputs.cache-key }}
           environment-name: ${{ env.ENVIRONMENT }}
 
+      - name: Assume Development Account Role
+        if: env.ENVIRONMENT == 'development'
+        run: |
+          TARGET_ACCOUNT="${{ needs.setup.outputs.aws-account-id }}"
+          CURRENT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+
+          if [ "$CURRENT_ACCOUNT" != "$TARGET_ACCOUNT" ]; then
+            echo "Assuming cross-account role for development account..."
+            ROLE_ARN="arn:aws:iam::${TARGET_ACCOUNT}:role/GitHubDeploymentRole"
+            
+            CREDS=$(aws sts assume-role \
+              --role-arn "$ROLE_ARN" \
+              --role-session-name "GitHubActions-$(date +%s)" \
+              --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
+              --output text)
+            
+            read ACCESS_KEY SECRET_KEY SESSION_TOKEN <<< "$CREDS"
+            
+            echo "AWS_ACCESS_KEY_ID=$ACCESS_KEY" >> $GITHUB_ENV
+            echo "AWS_SECRET_ACCESS_KEY=$SECRET_KEY" >> $GITHUB_ENV
+            echo "AWS_SESSION_TOKEN=$SESSION_TOKEN" >> $GITHUB_ENV
+            
+            VERIFIED_ACCOUNT=$(AWS_ACCESS_KEY_ID="$ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$SECRET_KEY" AWS_SESSION_TOKEN="$SESSION_TOKEN" aws sts get-caller-identity --query Account --output text)
+            if [ "$VERIFIED_ACCOUNT" != "$TARGET_ACCOUNT" ]; then
+              echo "ERROR: Failed to assume development account role"
+              exit 1
+            fi
+            echo "✓ Successfully assumed development account role"
+          fi
+
       - name: Deploy Service Stack
         uses: ./.github/actions/deploy-cdk-stack
         with:
@@ -260,6 +390,36 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Assume Development Account Role
+        if: env.ENVIRONMENT == 'development'
+        run: |
+          TARGET_ACCOUNT="${{ env.AWS_ACCOUNT_ID_DEV }}"
+          CURRENT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+
+          if [ "$CURRENT_ACCOUNT" != "$TARGET_ACCOUNT" ]; then
+            echo "Assuming cross-account role for development account..."
+            ROLE_ARN="arn:aws:iam::${TARGET_ACCOUNT}:role/GitHubDeploymentRole"
+            
+            CREDS=$(aws sts assume-role \
+              --role-arn "$ROLE_ARN" \
+              --role-session-name "GitHubActions-$(date +%s)" \
+              --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
+              --output text)
+            
+            read ACCESS_KEY SECRET_KEY SESSION_TOKEN <<< "$CREDS"
+            
+            echo "AWS_ACCESS_KEY_ID=$ACCESS_KEY" >> $GITHUB_ENV
+            echo "AWS_SECRET_ACCESS_KEY=$SECRET_KEY" >> $GITHUB_ENV
+            echo "AWS_SESSION_TOKEN=$SESSION_TOKEN" >> $GITHUB_ENV
+            
+            VERIFIED_ACCOUNT=$(AWS_ACCESS_KEY_ID="$ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$SECRET_KEY" AWS_SESSION_TOKEN="$SESSION_TOKEN" aws sts get-caller-identity --query Account --output text)
+            if [ "$VERIFIED_ACCOUNT" != "$TARGET_ACCOUNT" ]; then
+              echo "ERROR: Failed to assume development account role"
+              exit 1
+            fi
+            echo "✓ Successfully assumed development account role"
+          fi
 
       - name: Get Service Endpoints
         id: endpoints
