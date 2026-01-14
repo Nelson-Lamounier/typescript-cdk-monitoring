@@ -6,7 +6,7 @@ on:
   push:
     branches:
       - main
-      - develop # Remove after testing
+
   workflow_dispatch:
     inputs:
       environment:

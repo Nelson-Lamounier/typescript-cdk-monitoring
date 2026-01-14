@@ -1,0 +1,317 @@
+# @format
+
+# .github/workflows/deploy-monitoring-development.yml
+name: Deploy Monitoring to Development
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - "lib/stacks/**"
+      - "bin/**"
+      - "config/**"
+      - "scripts/deployment/**"
+      - "Makefile"
+      - ".github/workflows/deploy-monitoring-development.yml"
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: "Skip tests (use for hotfixes only)"
+        type: boolean
+        default: false
+
+env:
+  NODE_VERSION: "22"
+  AWS_REGION: ${{ vars.AWS_REGION != '' && vars.AWS_REGION || 'eu-west-1' }}
+  ENVIRONMENT: "development"
+  PROJECT_NAME: "monitoring"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # =================================================================
+  # Setup & Build
+  # =================================================================
+  setup:
+    name: Setup & Build
+    runs-on: ubuntu-latest
+    outputs:
+      cache-key: ${{ steps.cache-key.outputs.key }}
+      aws-account-id: ${{ steps.account-id.outputs.account_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate Cache Key
+        id: cache-key
+        run: |
+          HASH=$(find lib bin config scripts -name "*.ts" -o -name "package.json" | \
+                 sort | xargs cat | sha256sum | cut -d' ' -f1)
+          echo "key=build-${{ runner.os }}-$HASH" >> $GITHUB_OUTPUT
+
+      - name: Get AWS Account ID
+        id: account-id
+        run: |
+          ACCOUNT_ID="${{ vars.AWS_ACCOUNT_ID_DEV }}"
+          if [ -z "$ACCOUNT_ID" ]; then
+            echo "ERROR: AWS_ACCOUNT_ID_DEV not configured in repository variables"
+            exit 1
+          fi
+          echo "account_id=$ACCOUNT_ID" >> $GITHUB_OUTPUT
+
+      - name: Setup Infrastructure
+        uses: ./.github/actions/setup-infrastructure
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Cache Build Artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            dist
+            node_modules
+            .turbo
+          key: ${{ steps.cache-key.outputs.key }}
+          restore-keys: build-${{ runner.os }}-
+
+      - name: Build TypeScript
+        run: |
+          echo "Building TypeScript..."
+          yarn build
+
+  # =================================================================
+  # Deploy Networking Stack
+  # =================================================================
+  deploy-networking:
+    name: Deploy Networking Stack
+    needs: setup
+    runs-on: ubuntu-latest
+    environment: development
+
+    steps:
+      - name: Setup CDK Deployment Environment
+        uses: ./.github/actions/setup-cdk-deployment
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          aws-role: ${{ secrets.AWS_OIDC_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          build-cache-key: ${{ needs.setup.outputs.cache-key }}
+          environment-name: ${{ env.ENVIRONMENT }}
+
+      - name: Deploy Networking Stack
+        uses: ./.github/actions/deploy-cdk-stack
+        with:
+          stack-name: ${{ env.ENVIRONMENT }}-Networking
+          environment: ${{ env.ENVIRONMENT }}
+          project-name: ${{ env.PROJECT_NAME }}
+          aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
+          aws-region: ${{ env.AWS_REGION }}
+          additional-args: "--require-approval never"
+
+      - name: Verify Networking Stack
+        run: |
+          echo "Verifying Networking Stack deployment..."
+          make verify-networking \
+            ENVIRONMENT=${{ env.ENVIRONMENT }} \
+            AWS_PROFILE=default \
+            AWS_REGION=${{ env.AWS_REGION }}
+
+  # =================================================================
+  # Deploy EFS Stack
+  # =================================================================
+  deploy-efs:
+    name: Deploy EFS Stack
+    needs: [setup, deploy-networking]
+    runs-on: ubuntu-latest
+    environment: development
+
+    steps:
+      - name: Setup CDK Deployment Environment
+        uses: ./.github/actions/setup-cdk-deployment
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          aws-role: ${{ secrets.AWS_OIDC_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          build-cache-key: ${{ needs.setup.outputs.cache-key }}
+          environment-name: ${{ env.ENVIRONMENT }}
+
+      - name: Deploy EFS Stack
+        uses: ./.github/actions/deploy-cdk-stack
+        with:
+          stack-name: ${{ env.ENVIRONMENT }}-MonitoringEfs
+          environment: ${{ env.ENVIRONMENT }}
+          project-name: ${{ env.PROJECT_NAME }}
+          aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
+          aws-region: ${{ env.AWS_REGION }}
+          additional-args: "--require-approval never"
+
+      - name: Verify EFS Stack
+        run: |
+          echo "Verifying EFS Stack deployment..."
+          make verify-efs \
+            ENVIRONMENT=${{ env.ENVIRONMENT }} \
+            AWS_PROFILE=default \
+            AWS_REGION=${{ env.AWS_REGION }}
+
+  # =================================================================
+  # Deploy Infrastructure Stack
+  # =================================================================
+  deploy-infra:
+    name: Deploy Infrastructure Stack
+    needs: [setup, deploy-efs]
+    runs-on: ubuntu-latest
+    environment: development
+
+    steps:
+      - name: Setup CDK Deployment Environment
+        uses: ./.github/actions/setup-cdk-deployment
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          aws-role: ${{ secrets.AWS_OIDC_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          build-cache-key: ${{ needs.setup.outputs.cache-key }}
+          environment-name: ${{ env.ENVIRONMENT }}
+
+      - name: Deploy Infrastructure Stack
+        uses: ./.github/actions/deploy-cdk-stack
+        with:
+          stack-name: ${{ env.ENVIRONMENT }}-MonitoringInfra
+          environment: ${{ env.ENVIRONMENT }}
+          project-name: ${{ env.PROJECT_NAME }}
+          aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
+          aws-region: ${{ env.AWS_REGION }}
+          additional-args: "--require-approval never"
+
+      - name: Verify Infrastructure Stack
+        run: |
+          echo "Verifying Infrastructure Stack deployment..."
+          make verify-infra \
+            ENVIRONMENT=${{ env.ENVIRONMENT }} \
+            AWS_PROFILE=default \
+            AWS_REGION=${{ env.AWS_REGION }}
+
+  # =================================================================
+  # Deploy Service Stack
+  # =================================================================
+  deploy-service:
+    name: Deploy Service Stack
+    needs: [setup, deploy-infra]
+    runs-on: ubuntu-latest
+    environment: development
+
+    steps:
+      - name: Setup CDK Deployment Environment
+        uses: ./.github/actions/setup-cdk-deployment
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          aws-role: ${{ secrets.AWS_OIDC_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          build-cache-key: ${{ needs.setup.outputs.cache-key }}
+          environment-name: ${{ env.ENVIRONMENT }}
+
+      - name: Deploy Service Stack
+        uses: ./.github/actions/deploy-cdk-stack
+        with:
+          stack-name: ${{ env.ENVIRONMENT }}-MonitoringService
+          environment: ${{ env.ENVIRONMENT }}
+          project-name: ${{ env.PROJECT_NAME }}
+          aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
+          aws-region: ${{ env.AWS_REGION }}
+          additional-args: "--require-approval never"
+
+      - name: Verify Service Stack
+        run: |
+          echo "Verifying Service Stack deployment..."
+          make verify-service \
+            ENVIRONMENT=${{ env.ENVIRONMENT }} \
+            AWS_PROFILE=default \
+            AWS_REGION=${{ env.AWS_REGION }}
+
+  # =================================================================
+  # Final Verification & Summary
+  # =================================================================
+  deployment-summary:
+    name: Deployment Summary
+    needs: [deploy-networking, deploy-efs, deploy-infra, deploy-service]
+    runs-on: ubuntu-latest
+    environment: development
+    if: always()
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get Service Endpoints
+        id: endpoints
+        run: |
+          STACK_NAME="${{ env.ENVIRONMENT }}-MonitoringInfra"
+
+          ALB_DNS=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query 'Stacks[0].Outputs[?OutputKey==`LoadBalancerDns`].OutputValue' \
+            --output text 2>/dev/null || echo "")
+
+          if [ -n "$ALB_DNS" ]; then
+            echo "alb_dns=$ALB_DNS" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate Deployment Summary
+        if: always()
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          ## Monitoring Infrastructure Deployment - ${{ env.ENVIRONMENT }}
+
+          **Environment**: ${{ env.ENVIRONMENT }}
+          **Region**: ${{ env.AWS_REGION }}
+          **Timestamp**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+
+          ### Deployment Status
+
+          | Stack | Status |
+          |-------|--------|
+          | Networking | ${{ needs.deploy-networking.result }} |
+          | EFS | ${{ needs.deploy-efs.result }} |
+          | Infrastructure | ${{ needs.deploy-infra.result }} |
+          | Service | ${{ needs.deploy-service.result }} |
+
+          ### Access Points
+
+          EOF
+
+          if [ -n "${{ steps.endpoints.outputs.alb_dns }}" ]; then
+            cat >> $GITHUB_STEP_SUMMARY << EOF
+          - **Grafana Dashboard**: http://${{ steps.endpoints.outputs.alb_dns }}/grafana
+          - **Prometheus Metrics**: http://${{ steps.endpoints.outputs.alb_dns }}/prometheus
+          EOF
+          fi
+
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+
+          ### Next Steps
+
+          1. Verify all stacks are healthy: \`make verify-all ENVIRONMENT=${{ env.ENVIRONMENT }}\`
+          2. Check CloudWatch logs for any errors
+          3. Access Grafana and change default password (admin/admin)
+
+          EOF
+
+      - name: Check Deployment Status
+        run: |
+          if [[ "${{ needs.deploy-networking.result }}" != "success" ]] || \
+             [[ "${{ needs.deploy-efs.result }}" != "success" ]] || \
+             [[ "${{ needs.deploy-infra.result }}" != "success" ]] || \
+             [[ "${{ needs.deploy-service.result }}" != "success" ]]; then
+            echo "One or more stacks failed to deploy"
+            exit 1
+          fi
+          echo "All stacks deployed successfully"
