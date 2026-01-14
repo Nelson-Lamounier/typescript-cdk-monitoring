@@ -24,7 +24,10 @@
  * @param indent - Current indentation level (default: 0)
  * @returns YAML formatted string
  */
-export function convertToYaml(obj: any, indent: number = 0): string {
+export function convertToYaml(
+  obj: unknown,
+  indent: number = 0
+): string {
   const indentStr = " ".repeat(indent);
   const lines: string[] = [];
 
@@ -86,7 +89,7 @@ export function convertToYaml(obj: any, indent: number = 0): string {
  * @param value - Value to format
  * @returns Formatted YAML value
  */
-function formatYamlValue(value: any): string {
+function formatYamlValue(value: unknown): string {
   if (typeof value === "string") {
     // Quote strings that contain special characters or start with special chars
     if (

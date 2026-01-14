@@ -1,6 +1,7 @@
 /** @format */
 
 import * as logs from "aws-cdk-lib/aws-logs";
+
 import { PRODUCTION_ENV_NAMES } from "./storage-constants";
 
 export const DEFAULT_ECS_CLUSTER_NAME_SUFFIX = "cluster";

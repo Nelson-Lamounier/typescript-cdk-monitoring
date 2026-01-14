@@ -10,7 +10,10 @@ import * as logs from "aws-cdk-lib/aws-logs";
 import { Annotations, Match, Template } from "aws-cdk-lib/assertions";
 
 import { PrometheusConstruct } from "../../../../../lib/constructs/services/monitoring/prometheus";
-import type { PrometheusServiceConstructProps } from "../../../../../lib/shared/types/service-types";
+import type {
+  PrometheusServiceConstructProps,
+  PrometheusVolumeConfig,
+} from "../../../../../lib/shared/types/service-types";
 
 // ============================================================================
 // CUSTOM MATCHERS (Type declarations will be added when matchers are used)
@@ -142,9 +145,12 @@ class TestFixtures {
 
   /**
    * Private constructor to enforce singleton pattern per app instance
-   * @param app - CDK app instance
+   * @param _app - CDK app instance (used as Map key, not stored)
    */
-  private constructor(private readonly _app: cdk.App) {}
+  private constructor(_app: cdk.App) {
+    // App is used as Map key in getInstance, not stored in instance
+    void _app;
+  }
 
   /**
    * Get or create TestFixtures instance for the given app
@@ -828,7 +834,7 @@ describe("PrometheusConstruct", () => {
         staticTargets: [
           {
             jobName: TEST_CONSTANTS.STATIC_TARGETS.JOB_NAME,
-            targets: TEST_CONSTANTS.STATIC_TARGETS.TARGETS,
+            targets: [...TEST_CONSTANTS.STATIC_TARGETS.TARGETS],
           },
         ],
       });
@@ -895,27 +901,25 @@ describe("PrometheusConstruct", () => {
         const vpc = fixtures.getVpc(stack);
 
         expect(() => {
-          const props: {
-            cluster: ecs.ICluster;
-            envName: string;
-            launchType: "FARGATE";
-            networkConfiguration: unknown;
-            dataVolume?: unknown;
-            configVolume?: unknown;
-          } = {
+          let dataVolume: PrometheusVolumeConfig;
+          let configVolume: PrometheusVolumeConfig | undefined;
+
+          if (volumeType === "dataVolume") {
+            dataVolume = { hostPath: volumePath };
+          } else {
+            const { fileSystem, accessPoint } = fixtures.getEfsResources(stack);
+            dataVolume = { efs: { fileSystem, accessPoint } };
+            configVolume = { hostPath: volumePath };
+          }
+
+          const props: PrometheusServiceConstructProps = {
             cluster: fixtures.getCluster(stack),
             envName: TEST_CONSTANTS.ENVIRONMENTS.DEV,
             launchType: "FARGATE",
             networkConfiguration: getFargateNetworkConfig(vpc),
+            dataVolume,
+            configVolume,
           };
-
-          if (volumeType === "dataVolume") {
-            props.dataVolume = { hostPath: volumePath };
-          } else {
-            const { fileSystem, accessPoint } = fixtures.getEfsResources(stack);
-            props.dataVolume = { efs: { fileSystem, accessPoint } };
-            props.configVolume = { hostPath: volumePath };
-          }
 
           new PrometheusConstruct(stack, "Prometheus", props);
         }).toThrow(TEST_CONSTANTS.VALIDATION_ERRORS.HOST_PATH_FARGATE);
@@ -950,7 +954,7 @@ describe("PrometheusConstruct", () => {
     ])("exposes $description", ({ property }) => {
       const prometheus = createPrometheusConstruct(stack);
 
-      const prop = (prometheus as Record<string, unknown>)[property];
+      const prop = (prometheus as unknown as Record<string, unknown>)[property];
       expect(prop).toBeDefined();
     });
   });

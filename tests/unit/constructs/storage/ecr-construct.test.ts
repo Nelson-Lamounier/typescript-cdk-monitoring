@@ -52,7 +52,7 @@ describe("EcrConstruct", () => {
   });
 
   test("creates replication configuration when destinations provided", () => {
-    const repo = new EcrConstruct(stack, "EcrWithReplication", {
+    new EcrConstruct(stack, "EcrWithReplication", {
       envName: "dev",
       repositoryName: "my-repo",
       replicationDestinations: [

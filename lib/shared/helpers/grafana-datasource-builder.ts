@@ -43,14 +43,26 @@ export function buildDatasourceProvisioning(
   };
 }
 
+interface DatasourceObject {
+  datasources?: Array<{
+    name: string;
+    type: string;
+    access: string;
+    url?: string;
+    isDefault?: boolean;
+    jsonData?: Record<string, unknown>;
+  }>;
+}
+
 function YAMLStringify(obj: unknown): string {
   // Minimal YAML writer for the simple structure above
   // This avoids adding a new dependency for tests.
+  const typedObj = obj as DatasourceObject;
   return [
     "apiVersion: 1",
     "datasources:",
-    ...(Array.isArray((obj as any).datasources)
-      ? (obj as any).datasources.map((ds: any) => {
+    ...(Array.isArray(typedObj.datasources)
+      ? typedObj.datasources.map((ds) => {
           const lines: string[] = [];
           lines.push("  - name: " + ds.name);
           lines.push("    type: " + ds.type);

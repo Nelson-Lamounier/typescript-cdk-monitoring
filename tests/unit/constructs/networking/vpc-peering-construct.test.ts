@@ -607,9 +607,14 @@ describe("VpcPeeringConstruct", () => {
 
       // Verify specific actions exist in at least one policy statement
       const policies = template.findResources("AWS::IAM::Policy");
-      const hasPeeringActions = Object.values(policies).some((policy: any) => {
-        const statements = policy.Properties?.PolicyDocument?.Statement || [];
-        return statements.some((stmt: any) => {
+      const hasPeeringActions = Object.values(policies).some(
+        (policy: {
+          Properties?: {
+            PolicyDocument?: { Statement?: Array<{ Action?: string | string[] }> };
+          };
+        }) => {
+          const statements = policy.Properties?.PolicyDocument?.Statement || [];
+          return statements.some((stmt) => {
           const actions = Array.isArray(stmt.Action) ? stmt.Action : [stmt.Action];
           return (
             actions.includes("ec2:CreateVpcPeeringConnection") &&
@@ -763,16 +768,21 @@ describe("VpcPeeringConstruct", () => {
 
       // Filter for routes that target peer VPC CIDR (peering routes)
       const peeringRoutes = Object.values(routes).filter(
-        (route: any) =>
-          route.Properties.DestinationCidrBlock === peerVpcCidr &&
-          route.Properties.VpcPeeringConnectionId !== undefined
+        (route: {
+          Properties?: {
+            DestinationCidrBlock?: string;
+            VpcPeeringConnectionId?: string;
+          };
+        }) =>
+          route.Properties?.DestinationCidrBlock === peerVpcCidr &&
+          route.Properties?.VpcPeeringConnectionId !== undefined
       );
       
       expect(peeringRoutes.length).toBeGreaterThanOrEqual(1);
       
       // All peering routes should target peer VPC CIDR
-      peeringRoutes.forEach((route: any) => {
-        expect(route.Properties.DestinationCidrBlock).toBe(peerVpcCidr);
+      peeringRoutes.forEach((route) => {
+        expect(route.Properties?.DestinationCidrBlock).toBe(peerVpcCidr);
       });
     });
 

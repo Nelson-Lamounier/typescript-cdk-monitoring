@@ -88,8 +88,10 @@ describe("AutoScalingGroupConstruct", () => {
 
     const template = Template.fromStack(stack);
     const asgs = template.findResources("AWS::AutoScaling::AutoScalingGroup");
-    const asg = Object.values(asgs)[0] as any;
-    expect(asg.Properties.VPCZoneIdentifier).toBeDefined();
+    const asg = Object.values(asgs)[0] as {
+      Properties?: { VPCZoneIdentifier?: unknown };
+    };
+    expect(asg.Properties?.VPCZoneIdentifier).toBeDefined();
   });
 
   test("throws when cluster is not concrete", () => {

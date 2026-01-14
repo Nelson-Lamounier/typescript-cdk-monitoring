@@ -229,7 +229,7 @@ export class AlbTargetGroupConstruct extends Construct {
             alarmConfig.alarmDescription ??
             `Unhealthy hosts exceeded threshold for target group ${name}`,
         });
-      } catch (error) {
+      } catch {
         cdk.Annotations.of(this).addWarning(
           "Could not create unhealthy host alarm because the target group is not yet attached to a load balancer."
         );

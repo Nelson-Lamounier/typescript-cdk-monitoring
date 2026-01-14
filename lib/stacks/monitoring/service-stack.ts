@@ -336,9 +336,11 @@ export class MonitoringServiceStack extends cdk.Stack {
     this.grafanaService = grafanaConstruct.service as ecs.Ec2Service;
 
     // Grant the Grafana task execution role permission to read the secret
-    grafanaAdminSecret.grantRead(
-      grafanaConstruct.taskDefinition.executionRole!
-    );
+    const executionRole = grafanaConstruct.taskDefinition.executionRole;
+    if (!executionRole) {
+      throw new Error("Grafana task definition execution role is required");
+    }
+    grafanaAdminSecret.grantRead(executionRole);
 
     // ========================================================================
     // 4. CREATE NODE EXPORTER SERVICE

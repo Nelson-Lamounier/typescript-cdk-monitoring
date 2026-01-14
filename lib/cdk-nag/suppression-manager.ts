@@ -1,5 +1,6 @@
 /** @format */
 
+import * as cdk from "aws-cdk-lib";
 import { NagPackSuppression } from "cdk-nag";
 
 /**
@@ -440,7 +441,7 @@ export class SuppressionManager {
    * This is the recommended way to apply suppressions
    */
   static applyToStack(
-    stack: any,
+    stack: cdk.Stack,
     stackType:
       | "ComputeStack"
       | "MonitoringStack"
@@ -452,6 +453,7 @@ export class SuppressionManager {
       | "CertificateStack",
     envName?: string
   ): void {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { NagSuppressions } = require("cdk-nag");
 
     const suppressions: NagPackSuppression[] = [];

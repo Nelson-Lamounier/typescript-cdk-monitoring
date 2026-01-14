@@ -393,11 +393,14 @@ export class SsmStateManagerConstruct extends Construct {
     );
 
     // Association to run CloudWatch Agent configuration
+    if (!cloudWatchConfigDocument.name) {
+      throw new Error("CloudWatch config document name is required");
+    }
     this.cloudWatchAgentConfigAssociation = new ssm.CfnAssociation(
       this,
       "CloudWatchAgentConfigAssociation",
       {
-        name: cloudWatchConfigDocument.name!,
+        name: cloudWatchConfigDocument.name,
         associationName: `${envName}-cloudwatch-agent-config`,
         targets: associationTargets,
         scheduleExpression: "rate(30 days)", // Run monthly for maintenance

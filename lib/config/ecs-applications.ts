@@ -1,6 +1,7 @@
 /** @format */
 
 import * as ecs from "aws-cdk-lib/aws-ecs";
+
 import { EcsApplicationConfig, EcsServiceConfig } from "../types/ecs-service-config";
 import { CrossAccountTarget } from "../types";
 
