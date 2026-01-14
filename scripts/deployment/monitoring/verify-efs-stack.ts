@@ -4,11 +4,9 @@
 // infrastructure/scripts/deployment/monitoring/verify-efs-stack.ts
 
 import { program } from "commander";
-
 import {
   CloudFormationClient,
   DescribeStacksCommand,
-  StackStatus,
 } from "@aws-sdk/client-cloudformation";
 import { EC2Client, DescribeSecurityGroupsCommand } from "@aws-sdk/client-ec2";
 import {
@@ -667,7 +665,7 @@ async function verifyEfsStack(
     Logger.success("Security Group exists");
     console.log("");
     console.log("Inbound Rules:");
-    securityGroup.IpPermissions?.forEach((rule) => {
+    securityGroup.IpPermissions?.forEach((rule: any) => {
       const source =
         rule.IpRanges?.[0]?.CidrIp ||
         rule.UserIdGroupPairs?.[0]?.GroupId ||
@@ -679,7 +677,7 @@ async function verifyEfsStack(
 
     console.log("");
     console.log("Outbound Rules:");
-    securityGroup.IpPermissionsEgress?.forEach((rule) => {
+    securityGroup.IpPermissionsEgress?.forEach((rule: any) => {
       const dest = rule.IpRanges?.[0]?.CidrIp || "N/A";
       Logger.info(
         `Protocol: ${rule.IpProtocol}, Ports: ${rule.FromPort || "All"}-${
@@ -689,7 +687,7 @@ async function verifyEfsStack(
     });
 
     const hasNfsRule = securityGroup.IpPermissions?.some(
-      (rule) =>
+      (rule: any) =>
         rule.FromPort === 2049 &&
         rule.ToPort === 2049 &&
         rule.IpProtocol === "tcp"
@@ -776,7 +774,7 @@ async function verifyEfsStack(
   }
 
   const hasNfsRule = securityGroup?.IpPermissions?.some(
-    (rule) =>
+    (rule: any) =>
       rule.FromPort === 2049 &&
       rule.ToPort === 2049 &&
       rule.IpProtocol === "tcp"

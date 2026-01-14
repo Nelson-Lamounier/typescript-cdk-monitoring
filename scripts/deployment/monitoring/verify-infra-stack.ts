@@ -3,8 +3,9 @@
 
 // infrastructure/scripts/deployment/monitoring/verify-infra-stack.ts
 
-import { program } from "commander";
+import * as http from "http";
 
+import { program } from "commander";
 import {
   CloudFormationClient,
   DescribeStacksCommand,
@@ -13,7 +14,7 @@ import {
 import {
   AutoScalingClient,
   DescribeAutoScalingGroupsCommand,
-} from "@aws-sdk/client-autoscaling";
+} from "@aws-sdk/client-auto-scaling";
 import {
   EC2Client,
   DescribeInstanceStatusCommand,
@@ -44,7 +45,6 @@ import {
   SendCommandCommand,
   GetCommandInvocationCommand,
 } from "@aws-sdk/client-ssm";
-import * as http from "http";
 
 import { Logger } from "../utils/logger.js";
 
@@ -291,13 +291,17 @@ async function getInstanceHealth(
 
 async function getLoadBalancer(
   elbv2Client: ElasticLoadBalancingV2Client,
-  dnsName: string
+  dnsName: string | undefined
 ): Promise<any> {
+  if (!dnsName) {
+    return null;
+  }
+
   try {
     const command = new DescribeLoadBalancersCommand({});
 
     const response = await elbv2Client.send(command);
-    return response.LoadBalancers?.find((lb) => lb.DNSName === dnsName);
+    return response.LoadBalancers?.find((lb: any) => lb.DNSName === dnsName);
   } catch {
     return null;
   }
@@ -393,7 +397,7 @@ async function getLogGroup(
 async function getEfsFileSystemId(
   ssmClient: SSMClient,
   environment: string
-): Promise<string | null> {
+): Promise<string | undefined> {
   const paths = [
     `/monitoring/${environment}/storage/efs-id`,
     `/monitoring/${environment}/efs/config/file-system-id`,
@@ -414,13 +418,13 @@ async function getEfsFileSystemId(
     }
   }
 
-  return null;
+  return undefined;
 }
 
 async function getEfsAvailabilityZone(
   ssmClient: SSMClient,
   environment: string
-): Promise<string | null> {
+): Promise<string | undefined> {
   const paths = [
     `/monitoring/${environment}/storage/efs-az`,
     `/monitoring/${environment}/efs/config/availability-zone`,
@@ -441,7 +445,7 @@ async function getEfsAvailabilityZone(
     }
   }
 
-  return null;
+  return undefined;
 }
 
 async function getMountTargets(
@@ -604,7 +608,7 @@ async function checkAlbHealth(dnsName: string): Promise<{
 }> {
   return new Promise((resolve) => {
     const url = `http://${dnsName}`;
-    const req = http.get(url, { timeout: 5000 }, (res) => {
+    const req = http.get(url, { timeout: 5000 }, (res: any) => {
       resolve({
         reachable: true,
         httpCode: res.statusCode,
@@ -789,8 +793,8 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
       );
 
       const containerInsights =
-        cluster.settings?.find((s) => s.name === "containerInsights")?.value ||
-        "disabled";
+        cluster.settings?.find((s: any) => s.name === "containerInsights")
+          ?.value || "disabled";
       checks.total++;
 
       if (containerInsights === "enabled") {
@@ -837,8 +841,8 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
       checks.passed++;
 
       state.instanceIds =
-        asg.Instances?.map((inst) => inst.InstanceId || "").filter(
-          (id) => id !== ""
+        asg.Instances?.map((inst: any) => inst.InstanceId || "").filter(
+          (id: string) => id !== ""
         ) || [];
 
       checks.total++;
@@ -1076,8 +1080,8 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
       if (state.asgName && state.instanceIds.length > 0) {
         const asg = await getAutoScalingGroup(asgClient, state.asgName);
         const instanceAzs = new Set(
-          asg?.Instances?.map((inst) => inst.AvailabilityZone).filter(
-            (az): az is string => !!az
+          asg?.Instances?.map((inst: any) => inst.AvailabilityZone).filter(
+            (az: any): az is string => !!az
           ) || []
         );
 
@@ -1185,9 +1189,10 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
           let successfulMounts = 0;
 
           for (const instanceId of state.instanceIds) {
+            if (!efsMountAssoc.AssociationId) continue;
             const executions = await getAssociationExecutions(
               ssmClient,
-              efsMountAssoc.AssociationId!,
+              efsMountAssoc.AssociationId,
               instanceId
             );
 
@@ -1404,7 +1409,6 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
 
   const infraParamPrefix = `${paramPrefix}/infra/config`;
   let infraFound = 0;
-  let infraMissing = 0;
 
   console.log("Infrastructure Parameters:");
   for (const param of INFRA_PARAMS) {
@@ -1419,7 +1423,6 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
       checks.passed++;
     } else {
       Logger.error(`${paramName}: NOT FOUND (REQUIRED)`);
-      infraMissing++;
       checks.failed++;
     }
   }
@@ -1428,7 +1431,6 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
   console.log("Storage Parameters (from EFS Stack):");
 
   let storageFound = 0;
-  let storageMissing = 0;
 
   for (let i = 0; i < STORAGE_PARAMS_EFS.length; i++) {
     const efsParam = `${paramPrefix}/efs/config/${STORAGE_PARAMS_EFS[i]}`;
@@ -1448,7 +1450,6 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
       } else {
         checks.total++;
         Logger.error(`${efsParam} or ${legacyParam}: NOT FOUND (REQUIRED)`);
-        storageMissing++;
         checks.failed++;
       }
     } else {
@@ -1463,7 +1464,6 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
   console.log("Configuration Parameters:");
 
   let configFound = 0;
-  let configMissing = 0;
 
   for (const param of CONFIG_PARAMS) {
     const paramName = `${paramPrefix}/${param}`;
@@ -1477,7 +1477,6 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
       checks.passed++;
     } else {
       Logger.error(`${paramName}: NOT FOUND (REQUIRED)`);
-      configMissing++;
       checks.failed++;
     }
   }
@@ -1512,7 +1511,7 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
 
     const response = await eventBridgeClient.send(command);
     const rules =
-      response.Rules?.filter((rule) =>
+      response.Rules?.filter((rule: any) =>
         rule.Description?.includes(config.environment)
       ) || [];
 
@@ -1522,7 +1521,7 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
       Logger.success(`EventBridge Rules: ${rules.length}`);
       checks.passed++;
 
-      rules.forEach((rule) => {
+      rules.forEach((rule: any) => {
         Logger.info(`   - ${rule.Name}: ${rule.State || "UNKNOWN"}`);
       });
     } else {
@@ -1588,8 +1587,9 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
   if (state.asgName && state.instanceIds.length > 0) {
     const asg = await getAutoScalingGroup(asgClient, state.asgName);
     const inServiceInstances =
-      asg?.Instances?.filter((inst) => inst.LifecycleState === "InService") ||
-      [];
+      asg?.Instances?.filter(
+        (inst: any) => inst.LifecycleState === "InService"
+      ) || [];
 
     if (inServiceInstances.length > 0) {
       const firstInstance = inServiceInstances[0].InstanceId;
