@@ -15,6 +15,8 @@
  * const jsonConfig = { apiVersion: 1, datasources: [...] };
  * const yamlConfig = convertToYaml(jsonConfig);
  * ```
+ *
+ * @format
  */
 
 /**
@@ -24,10 +26,7 @@
  * @param indent - Current indentation level (default: 0)
  * @returns YAML formatted string
  */
-export function convertToYaml(
-  obj: unknown,
-  indent: number = 0
-): string {
+export function convertToYaml(obj: unknown, indent: number = 0): string {
   const indentStr = " ".repeat(indent);
   const lines: string[] = [];
 
@@ -53,11 +52,12 @@ export function convertToYaml(
     return lines.join("\n");
   }
 
-  if (typeof obj === "object") {
-    const keys = Object.keys(obj);
+  if (typeof obj === "object" && obj !== null) {
+    const record = obj as Record<string, unknown>;
+    const keys = Object.keys(record);
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
-      const value = obj[key];
+      const value = record[key];
 
       if (value === null || value === undefined) {
         lines.push(`${indentStr}${key}: null`);
