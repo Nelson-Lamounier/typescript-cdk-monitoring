@@ -60,16 +60,13 @@ runs:
     - name: Verify CDK Bootstrap
       shell: bash
       run: |
-        # Skip bootstrap verification if already done in workflow (for cross-account deployments)
-        if [ -z "${SKIP_BOOTSTRAP_VERIFICATION:-}" ]; then
-          make verify-bootstrap \
-            AWS_ACCOUNT_ID="${{ inputs.aws-account-id }}" \
-            ENVIRONMENT="${{ inputs.environment }}" \
-            AWS_REGION="${{ inputs.aws-region }}" \
-            PROJECT_NAME="${{ inputs.project-name }}"
-        else
-          echo "Bootstrap verification skipped (already verified in workflow with assumed role credentials)"
-        fi
+        # Verify bootstrap - CDK can verify cross-account bootstrap if stacks are defined with target account
+        # This works because CDK uses the bootstrap deploy role which has CloudFormation read permissions
+        make verify-bootstrap \
+          AWS_ACCOUNT_ID="${{ inputs.aws-account-id }}" \
+          ENVIRONMENT="${{ inputs.environment }}" \
+          AWS_REGION="${{ inputs.aws-region }}" \
+          PROJECT_NAME="${{ inputs.project-name }}"
 
     - name: Deploy Stack
       id: deploy

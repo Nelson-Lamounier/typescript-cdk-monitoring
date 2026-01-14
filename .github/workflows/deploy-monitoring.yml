@@ -107,62 +107,6 @@ jobs:
           build-cache-key: ${{ needs.setup.outputs.cache-key }}
           environment-name: ${{ env.ENVIRONMENT }}
 
-      - name: Assume Development Account Role
-        if: env.ENVIRONMENT == 'development'
-        id: assume-role
-        run: |
-          TARGET_ACCOUNT="${{ needs.setup.outputs.aws-account-id }}"
-          CURRENT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-
-          echo "Current account: ***${CURRENT_ACCOUNT: -4}"
-          echo "Target account: ***${TARGET_ACCOUNT: -4}"
-
-          if [ "$CURRENT_ACCOUNT" != "$TARGET_ACCOUNT" ]; then
-            echo "Assuming cross-account role for development account..."
-            ROLE_ARN="arn:aws:iam::${TARGET_ACCOUNT}:role/GitHubDeploymentRole"
-            
-            # Suppress AWS CLI output to prevent credential exposure
-            CREDS=$(aws sts assume-role \
-              --role-arn "$ROLE_ARN" \
-              --role-session-name "GitHubActions-$(date +%s)" \
-              --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
-              --output text \
-              --no-cli-pager 2>&1)
-            
-            if [ $? -ne 0 ]; then
-              echo "ERROR: Failed to assume role"
-              echo "Error details: $CREDS" | sed 's/\(SecretAccessKey\|SessionToken\):[^ ]*/***MASKED***/g'
-              exit 1
-            fi
-            
-            read ACCESS_KEY SECRET_KEY SESSION_TOKEN <<< "$CREDS"
-            
-            # Mask credentials immediately after extraction (before any logging)
-            echo "::add-mask::${ACCESS_KEY}"
-            echo "::add-mask::${SECRET_KEY}"
-            echo "::add-mask::${SESSION_TOKEN}"
-            
-            echo "AWS_ACCESS_KEY_ID=$ACCESS_KEY" >> $GITHUB_ENV
-            echo "AWS_SECRET_ACCESS_KEY=$SECRET_KEY" >> $GITHUB_ENV
-            echo "AWS_SESSION_TOKEN=$SESSION_TOKEN" >> $GITHUB_ENV
-            
-            # Verify we're in the correct account
-            export AWS_ACCESS_KEY_ID="$ACCESS_KEY"
-            export AWS_SECRET_ACCESS_KEY="$SECRET_KEY"
-            export AWS_SESSION_TOKEN="$SESSION_TOKEN"
-            
-            VERIFIED_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-            if [ "$VERIFIED_ACCOUNT" != "$TARGET_ACCOUNT" ]; then
-              echo "ERROR: Failed to assume development account role"
-              exit 1
-            fi
-            echo "✓ Successfully assumed development account role"
-            echo "role_assumed=true" >> $GITHUB_OUTPUT
-          else
-            echo "✓ Already authenticated to target account"
-            echo "role_assumed=false" >> $GITHUB_OUTPUT
-          fi
-
       - name: Deploy Networking Stack
         id: deploy-networking
         uses: ./.github/actions/deploy-cdk-stack
@@ -174,7 +118,13 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           additional-args: "--require-approval never"
         env:
-          SKIP_BOOTSTRAP_VERIFICATION: "true"
+          # CDK automatically uses bootstrap roles for cross-account deployment
+          # Prerequisites:
+          # 1. Development account must be bootstrapped with: cdk bootstrap aws://<dev-account-id>/<region> --trust <pipeline-account-id>
+          # 2. Pipeline account's OIDC role must be trusted by the bootstrap deploy role
+          # CDK will automatically assume the bootstrap deploy role when deploying to a different account
+          CDK_DEFAULT_ACCOUNT: ${{ needs.setup.outputs.aws-account-id }}
+          CDK_DEFAULT_REGION: ${{ env.AWS_REGION }}
 
       - name: Save Stack Outputs Artifact
         if: steps.deploy-networking.outputs.stack-outputs != ''
@@ -214,49 +164,6 @@ jobs:
           build-cache-key: ${{ needs.setup.outputs.cache-key }}
           environment-name: ${{ env.ENVIRONMENT }}
 
-      - name: Assume Development Account Role
-        if: env.ENVIRONMENT == 'development'
-        run: |
-          TARGET_ACCOUNT="${{ needs.setup.outputs.aws-account-id }}"
-          CURRENT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-
-          if [ "$CURRENT_ACCOUNT" != "$TARGET_ACCOUNT" ]; then
-            echo "Assuming cross-account role for development account..."
-            ROLE_ARN="arn:aws:iam::${TARGET_ACCOUNT}:role/GitHubDeploymentRole"
-            
-            # Suppress AWS CLI output to prevent credential exposure
-            CREDS=$(aws sts assume-role \
-              --role-arn "$ROLE_ARN" \
-              --role-session-name "GitHubActions-$(date +%s)" \
-              --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
-              --output text \
-              --no-cli-pager 2>&1)
-            
-            if [ $? -ne 0 ]; then
-              echo "ERROR: Failed to assume role"
-              echo "Error details: $CREDS" | sed 's/\(SecretAccessKey\|SessionToken\):[^ ]*/***MASKED***/g'
-              exit 1
-            fi
-            
-            read ACCESS_KEY SECRET_KEY SESSION_TOKEN <<< "$CREDS"
-            
-            # Mask credentials immediately after extraction (before any logging)
-            echo "::add-mask::${ACCESS_KEY}"
-            echo "::add-mask::${SECRET_KEY}"
-            echo "::add-mask::${SESSION_TOKEN}"
-            
-            echo "AWS_ACCESS_KEY_ID=$ACCESS_KEY" >> $GITHUB_ENV
-            echo "AWS_SECRET_ACCESS_KEY=$SECRET_KEY" >> $GITHUB_ENV
-            echo "AWS_SESSION_TOKEN=$SESSION_TOKEN" >> $GITHUB_ENV
-            
-            VERIFIED_ACCOUNT=$(AWS_ACCESS_KEY_ID="$ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$SECRET_KEY" AWS_SESSION_TOKEN="$SESSION_TOKEN" aws sts get-caller-identity --query Account --output text)
-            if [ "$VERIFIED_ACCOUNT" != "$TARGET_ACCOUNT" ]; then
-              echo "ERROR: Failed to assume development account role"
-              exit 1
-            fi
-            echo "✓ Successfully assumed development account role"
-          fi
-
       - name: Deploy EFS Stack
         id: deploy-efs
         uses: ./.github/actions/deploy-cdk-stack
@@ -268,7 +175,10 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           additional-args: "--require-approval never"
         env:
-          SKIP_BOOTSTRAP_VERIFICATION: "true"
+          # CDK automatically uses bootstrap roles for cross-account deployment
+          # Ensure development account is bootstrapped with --trust pointing to pipeline account's OIDC role
+          CDK_DEFAULT_ACCOUNT: ${{ needs.setup.outputs.aws-account-id }}
+          CDK_DEFAULT_REGION: ${{ env.AWS_REGION }}
 
       - name: Save Stack Outputs Artifact
         if: steps.deploy-efs.outputs.stack-outputs != ''
@@ -308,49 +218,6 @@ jobs:
           build-cache-key: ${{ needs.setup.outputs.cache-key }}
           environment-name: ${{ env.ENVIRONMENT }}
 
-      - name: Assume Development Account Role
-        if: env.ENVIRONMENT == 'development'
-        run: |
-          TARGET_ACCOUNT="${{ needs.setup.outputs.aws-account-id }}"
-          CURRENT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-
-          if [ "$CURRENT_ACCOUNT" != "$TARGET_ACCOUNT" ]; then
-            echo "Assuming cross-account role for development account..."
-            ROLE_ARN="arn:aws:iam::${TARGET_ACCOUNT}:role/GitHubDeploymentRole"
-            
-            # Suppress AWS CLI output to prevent credential exposure
-            CREDS=$(aws sts assume-role \
-              --role-arn "$ROLE_ARN" \
-              --role-session-name "GitHubActions-$(date +%s)" \
-              --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
-              --output text \
-              --no-cli-pager 2>&1)
-            
-            if [ $? -ne 0 ]; then
-              echo "ERROR: Failed to assume role"
-              echo "Error details: $CREDS" | sed 's/\(SecretAccessKey\|SessionToken\):[^ ]*/***MASKED***/g'
-              exit 1
-            fi
-            
-            read ACCESS_KEY SECRET_KEY SESSION_TOKEN <<< "$CREDS"
-            
-            # Mask credentials immediately after extraction (before any logging)
-            echo "::add-mask::${ACCESS_KEY}"
-            echo "::add-mask::${SECRET_KEY}"
-            echo "::add-mask::${SESSION_TOKEN}"
-            
-            echo "AWS_ACCESS_KEY_ID=$ACCESS_KEY" >> $GITHUB_ENV
-            echo "AWS_SECRET_ACCESS_KEY=$SECRET_KEY" >> $GITHUB_ENV
-            echo "AWS_SESSION_TOKEN=$SESSION_TOKEN" >> $GITHUB_ENV
-            
-            VERIFIED_ACCOUNT=$(AWS_ACCESS_KEY_ID="$ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$SECRET_KEY" AWS_SESSION_TOKEN="$SESSION_TOKEN" aws sts get-caller-identity --query Account --output text)
-            if [ "$VERIFIED_ACCOUNT" != "$TARGET_ACCOUNT" ]; then
-              echo "ERROR: Failed to assume development account role"
-              exit 1
-            fi
-            echo "✓ Successfully assumed development account role"
-          fi
-
       - name: Deploy Infrastructure Stack
         id: deploy-infra
         uses: ./.github/actions/deploy-cdk-stack
@@ -362,7 +229,10 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           additional-args: "--require-approval never"
         env:
-          SKIP_BOOTSTRAP_VERIFICATION: "true"
+          # CDK automatically uses bootstrap roles for cross-account deployment
+          # Ensure development account is bootstrapped with --trust pointing to pipeline account's OIDC role
+          CDK_DEFAULT_ACCOUNT: ${{ needs.setup.outputs.aws-account-id }}
+          CDK_DEFAULT_REGION: ${{ env.AWS_REGION }}
 
       - name: Save Stack Outputs Artifact
         if: steps.deploy-infra.outputs.stack-outputs != ''
@@ -402,49 +272,6 @@ jobs:
           build-cache-key: ${{ needs.setup.outputs.cache-key }}
           environment-name: ${{ env.ENVIRONMENT }}
 
-      - name: Assume Development Account Role
-        if: env.ENVIRONMENT == 'development'
-        run: |
-          TARGET_ACCOUNT="${{ needs.setup.outputs.aws-account-id }}"
-          CURRENT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-
-          if [ "$CURRENT_ACCOUNT" != "$TARGET_ACCOUNT" ]; then
-            echo "Assuming cross-account role for development account..."
-            ROLE_ARN="arn:aws:iam::${TARGET_ACCOUNT}:role/GitHubDeploymentRole"
-            
-            # Suppress AWS CLI output to prevent credential exposure
-            CREDS=$(aws sts assume-role \
-              --role-arn "$ROLE_ARN" \
-              --role-session-name "GitHubActions-$(date +%s)" \
-              --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
-              --output text \
-              --no-cli-pager 2>&1)
-            
-            if [ $? -ne 0 ]; then
-              echo "ERROR: Failed to assume role"
-              echo "Error details: $CREDS" | sed 's/\(SecretAccessKey\|SessionToken\):[^ ]*/***MASKED***/g'
-              exit 1
-            fi
-            
-            read ACCESS_KEY SECRET_KEY SESSION_TOKEN <<< "$CREDS"
-            
-            # Mask credentials immediately after extraction (before any logging)
-            echo "::add-mask::${ACCESS_KEY}"
-            echo "::add-mask::${SECRET_KEY}"
-            echo "::add-mask::${SESSION_TOKEN}"
-            
-            echo "AWS_ACCESS_KEY_ID=$ACCESS_KEY" >> $GITHUB_ENV
-            echo "AWS_SECRET_ACCESS_KEY=$SECRET_KEY" >> $GITHUB_ENV
-            echo "AWS_SESSION_TOKEN=$SESSION_TOKEN" >> $GITHUB_ENV
-            
-            VERIFIED_ACCOUNT=$(AWS_ACCESS_KEY_ID="$ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$SECRET_KEY" AWS_SESSION_TOKEN="$SESSION_TOKEN" aws sts get-caller-identity --query Account --output text)
-            if [ "$VERIFIED_ACCOUNT" != "$TARGET_ACCOUNT" ]; then
-              echo "ERROR: Failed to assume development account role"
-              exit 1
-            fi
-            echo "✓ Successfully assumed development account role"
-          fi
-
       - name: Deploy Service Stack
         id: deploy-service
         uses: ./.github/actions/deploy-cdk-stack
@@ -456,7 +283,10 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           additional-args: "--require-approval never"
         env:
-          SKIP_BOOTSTRAP_VERIFICATION: "true"
+          # CDK automatically uses bootstrap roles for cross-account deployment
+          # Ensure development account is bootstrapped with --trust pointing to pipeline account's OIDC role
+          CDK_DEFAULT_ACCOUNT: ${{ needs.setup.outputs.aws-account-id }}
+          CDK_DEFAULT_REGION: ${{ env.AWS_REGION }}
 
       - name: Save Stack Outputs Artifact
         if: steps.deploy-service.outputs.stack-outputs != ''
