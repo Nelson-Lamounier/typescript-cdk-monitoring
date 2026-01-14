@@ -27,9 +27,14 @@
     "synth": "cdk synth"
   },
   "devDependencies": {
+    "@aws-sdk/client-autoscaling": "^3.943.0",
+    "@aws-sdk/client-cloudwatch-logs": "^3.943.0",
     "@aws-sdk/client-dynamodb": "^3.943.0",
     "@aws-sdk/client-ec2": "^3.943.0",
     "@aws-sdk/client-ecs": "^3.948.0",
+    "@aws-sdk/client-efs": "^3.943.0",
+    "@aws-sdk/client-eventbridge": "^3.943.0",
+    "@aws-sdk/client-elastic-load-balancing-v2": "^3.943.0",
     "@aws-sdk/client-s3": "^3.943.0",
     "@aws-sdk/client-ssm": "^3.943.0",
     "@babel/core": "^7.28.5",
@@ -37,6 +42,7 @@
     "@babel/preset-typescript": "^7.28.5",
     "@jest/test-sequencer": "^30.2.0",
     "@types/aws-lambda": "^8.10.159",
+    "@types/chalk": "^2.2.0",
     "@types/jest": "^29.5.11",
     "@types/node": "^20.10.0",
     "@types/source-map-support": "^0.5.10",
@@ -58,11 +64,14 @@
     "typescript-eslint": "^8.18.1"
   },
   "dependencies": {
+    "@aws-sdk/client-cloudformation": "^3.948.0",
     "@aws-sdk/client-sns": "^3.948.0",
     "@aws-sdk/client-sts": "^3.948.0",
     "@aws-sdk/s3-request-presigner": "^3.948.0",
     "aws-cdk-lib": "^2.232.1",
     "cdk-nag": "^2.37.55",
+    "chalk": "^3.0.0",
+    "commander": "^12.1.0",
     "constructs": "^10.4.4",
     "dotenv": "^16.3.1",
     "source-map-support": "^0.5.21"

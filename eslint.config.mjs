@@ -105,7 +105,7 @@ export default [
 
   // Lambda handlers and scripts - more relaxed rules
   {
-    files: ["lambda/**/*.ts", "handlers/**/*.ts", "scripts/**/*.js", "playground/**/*.ts"],
+    files: ["lambda/**/*.ts", "handlers/**/*.ts", "scripts/**/*.ts", "scripts/**/*.js", "playground/**/*.ts"],
     languageOptions: {
       parser: tseslint.parser,
       parserOptions: {

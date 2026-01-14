@@ -18,6 +18,7 @@
     "experimentalDecorators": true,
     "strictPropertyInitialization": true,
     "typeRoots": ["./node_modules/@types"],
+    "moduleResolution": "node",
     "outDir": "dist",
     "rootDir": ".",
     "esModuleInterop": true,
@@ -31,6 +32,7 @@
     "handlers/**/*.ts",
     "lambda/**/*.ts",
     "lib/**/*.ts",
+    "scripts/**/*.ts",
     "tests/**/*.ts"
   ],
   "exclude": ["node_modules", "cdk.out", "**/*.js", "**/*.d.ts"]
