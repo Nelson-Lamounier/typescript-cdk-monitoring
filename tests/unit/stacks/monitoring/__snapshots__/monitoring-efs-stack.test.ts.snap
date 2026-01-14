@@ -1,0 +1,1115 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`MonitoringEfsStack Stack Creation matches snapshot for minimal configuration 1`] = `
+{
+  "Metadata": {
+    "cdk_nag": {
+      "rules_to_suppress": [
+        {
+          "applies_to": [
+            "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+          ],
+          "id": "AwsSolutions-IAM4",
+          "reason": "AWS managed policies are used for Lambda functions created by CDK for custom resources (Auto Scaling lifecycle hooks, VPC default security group restriction, EventBridge targets). These are standard CloudFormation custom resource Lambda functions managed by CDK.",
+        },
+        {
+          "applies_to": [
+            "Resource::*",
+          ],
+          "id": "AwsSolutions-IAM5",
+          "reason": "Wildcard permissions are used by CDK-managed custom resource Lambdas for EventBridge to CloudWatch Logs integration and other CDK framework operations. This is required by the CDK framework to manage resource policies and cannot be scoped further. This is standard CDK behavior.",
+        },
+        {
+          "applies_to": [
+            "Action::ecs:Submit*",
+          ],
+          "id": "AwsSolutions-IAM5",
+          "reason": "ECS Container Instance IAM role requires wildcard action permissions (ecs:Submit*) to communicate with ECS control plane. This is a standard permission for ECS EC2 instances as documented in AWS ECS best practices and is created by CDK's Auto Scaling Group construct.",
+        },
+        {
+          "applies_to": [
+            {
+              "regex": "/^Resource::arn:(aws|<AWS::Partition>):autoscaling:.*:.*:autoScalingGroup:\\*:autoScalingGroupName\\/<.*>$/",
+            },
+          ],
+          "id": "AwsSolutions-IAM5",
+          "reason": "Auto Scaling Group lifecycle hook Lambda (DrainECSHook) requires permissions to manage Auto Scaling lifecycle actions. The wildcard is scoped to the specific Auto Scaling Group name pattern and is necessary for proper instance lifecycle management during ECS task draining. This is a CDK-managed resource.",
+        },
+        {
+          "id": "AwsSolutions-L1",
+          "reason": "Lambda runtime versions are managed by CDK for custom resources. CDK automatically updates these with new releases. Upgrading CDK version will update these runtimes.",
+        },
+        {
+          "applies_to": [
+            "Resource::*",
+          ],
+          "id": "AwsSolutions-IAM5",
+          "reason": "Monitoring services (Prometheus, Grafana) require read access to CloudWatch metrics and logs across the account for comprehensive observability. This is standard practice for monitoring solutions and is read-only access.",
+        },
+        {
+          "applies_to": [
+            {
+              "regex": "/^Resource::arn:aws:logs:.*:.*:log-group:\\*$/",
+            },
+            {
+              "regex": "/^Resource::arn:aws:logs:.*:.*:log-group:\\*:\\*$/",
+            },
+          ],
+          "id": "AwsSolutions-IAM5",
+          "reason": "Grafana CloudWatch datasource requires permissions to query logs across all log groups in the account. The wildcard is scoped to the account and region, and permissions are read-only.",
+        },
+        {
+          "applies_to": [
+            {
+              "regex": "/^Resource::arn:aws:logs:.*:.*:log-group:<.*>:\\*$/",
+            },
+          ],
+          "id": "AwsSolutions-IAM5",
+          "reason": "ECS task roles require CloudWatch Logs permissions to write to their specific log groups. The wildcard allows log stream creation within the task's designated log group, which is necessary for ECS container logging.",
+        },
+        {
+          "applies_to": [
+            {
+              "regex": "/^Resource::arn:aws:ssm:.*:.*:parameter/monitoring/.*\\*$/",
+            },
+          ],
+          "id": "AwsSolutions-IAM5",
+          "reason": "EC2 instances in monitoring infrastructure require read access to SSM parameters under the monitoring stack path for EFS setup scripts and configuration. The wildcard is scoped to the specific stack's parameter namespace (/monitoring/{stackName}/*) and provides read-only access to configuration data.",
+        },
+        {
+          "id": "AwsSolutions-SNS3",
+          "reason": "SNS topic is used for internal ECS lifecycle hooks managed by CDK for the monitoring cluster. SSL enforcement is handled by AWS internal services. The lifecycle hook topic is used for draining ECS tasks during instance termination.",
+        },
+        {
+          "id": "AwsSolutions-EC23",
+          "reason": "EFS security group allows NFS access from VPC CIDR block only. The CIDR block is dynamically resolved from VPC configuration using CloudFormation intrinsic functions, which CDK Nag cannot validate at synthesis time. This is secure as it restricts access to the VPC's private network only.",
+        },
+        {
+          "id": "CdkNagValidationFailure",
+          "reason": "CDK Nag validation failure occurs when CloudFormation intrinsic functions (like Fn::GetAtt for VPC CIDR) are used in security group rules. This is expected behavior and the actual values will be resolved at deployment time with proper CIDR restrictions.",
+        },
+        {
+          "applies_to": [
+            "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole",
+          ],
+          "id": "AwsSolutions-IAM4",
+          "reason": "EFS initialization Lambda requires AWS managed policy AWSLambdaVPCAccessExecutionRole for VPC access to mount EFS. This is a standard AWS managed policy for Lambda functions that need VPC access and cannot be replaced with a custom policy.",
+        },
+        {
+          "applies_to": [
+            {
+              "regex": "/^Resource::arn:aws:ssm:.*:.*:parameter/monitoring/.*\\*$/",
+            },
+          ],
+          "id": "AwsSolutions-IAM5",
+          "reason": "EFS initialization Lambda requires wildcard access to SSM parameters under the monitoring stack path for reading configuration. The wildcard is scoped to the specific stack's parameter namespace and is read-only access.",
+        },
+        {
+          "applies_to": [
+            "Resource::<*Function*.Arn>:*",
+            "Resource::<*>:*",
+            {
+              "regex": "/^Resource::<.*Function.*\\.Arn>:\\*$/g",
+            },
+            "Resource::<EfsInitLambdaFunctionFC8F36D2.Arn>:*",
+          ],
+          "id": "AwsSolutions-IAM5",
+          "reason": "CDK Custom Resource Provider framework requires wildcard permissions on the Lambda function ARN for invoking the function. This is managed by CDK and is necessary for the Custom Resource lifecycle management.",
+        },
+      ],
+    },
+  },
+  "Outputs": {
+    "AccessPointId": {
+      "Description": "EFS access point ID for development monitoring",
+      "Value": {
+        "Ref": "EfsAccessPointEA27A26F",
+      },
+    },
+    "AvailabilityZone": {
+      "Description": "EFS availability zone (first mount target)",
+      "Value": "dummy1a",
+    },
+    "EfsAccessPointAccessPointArn6BCB6535": {
+      "Description": "EFS Access Point ARN for development",
+      "Export": {
+        "Name": "SnapshotStack-access-point-arn",
+      },
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            "arn:",
+            {
+              "Ref": "AWS::Partition",
+            },
+            ":elasticfilesystem:eu-west-1:123456789012:access-point/",
+            {
+              "Ref": "EfsAccessPointEA27A26F",
+            },
+          ],
+        ],
+      },
+    },
+    "EfsAccessPointAccessPointId41DD13A6": {
+      "Description": "EFS Access Point ID for development",
+      "Export": {
+        "Name": "SnapshotStack-access-point-id",
+      },
+      "Value": {
+        "Ref": "EfsAccessPointEA27A26F",
+      },
+    },
+    "EfsFileSystemFileSystemArn5B358054": {
+      "Description": "EFS File System ARN for development",
+      "Export": {
+        "Name": "SnapshotStack-efs-arn",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "EfsFileSystemEfsdevelopment4A26EAF9",
+          "Arn",
+        ],
+      },
+    },
+    "EfsFileSystemFileSystemDnsNameB2390D2C": {
+      "Description": "EFS DNS name for development",
+      "Export": {
+        "Name": "SnapshotStack-efs-dns",
+      },
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            {
+              "Ref": "EfsFileSystemEfsdevelopment4A26EAF9",
+            },
+            ".efs.eu-west-1.amazonaws.com",
+          ],
+        ],
+      },
+    },
+    "EfsFileSystemFileSystemIdEE8BFB26": {
+      "Description": "EFS File System ID for development",
+      "Export": {
+        "Name": "SnapshotStack-efs-id",
+      },
+      "Value": {
+        "Ref": "EfsFileSystemEfsdevelopment4A26EAF9",
+      },
+    },
+    "FileSystemId": {
+      "Description": "EFS file system ID for development monitoring",
+      "Value": {
+        "Ref": "EfsFileSystemEfsdevelopment4A26EAF9",
+      },
+    },
+    "ParametersParameterCount6DC4838A": {
+      "Description": "Number of SSM parameters created for development",
+      "Value": "4",
+    },
+    "ParametersParameterPathPrefix4435E05D": {
+      "Description": "SSM parameter path prefix for development",
+      "Export": {
+        "Name": "SnapshotStack-ssm-path-prefix",
+      },
+      "Value": "/monitoring/development/efs",
+    },
+    "SecurityGroupId": {
+      "Description": "EFS mount target security group ID",
+      "Value": {
+        "Fn::GetAtt": [
+          "EfsSecurityGroupEfsMountTargetSgA4E5C597",
+          "GroupId",
+        ],
+      },
+    },
+    "SsmParameterPrefix": {
+      "Description": "SSM Parameter Store path prefix for EFS resources",
+      "Value": "/monitoring/development/efs",
+    },
+  },
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+  },
+  "Resources": {
+    "EfsAccessPointEA27A26F": {
+      "Properties": {
+        "AccessPointTags": [
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Storage",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "development-shared-storage-access-point",
+          },
+          {
+            "Key": "Purpose",
+            "Value": "shared-storage",
+          },
+        ],
+        "FileSystemId": {
+          "Ref": "EfsFileSystemEfsdevelopment4A26EAF9",
+        },
+        "PosixUser": {
+          "Gid": "0",
+          "Uid": "0",
+        },
+        "RootDirectory": {
+          "CreationInfo": {
+            "OwnerGid": "0",
+            "OwnerUid": "0",
+            "Permissions": "755",
+          },
+          "Path": "/monitoring",
+        },
+      },
+      "Type": "AWS::EFS::AccessPoint",
+    },
+    "EfsFileSystemEfsdevelopment4A26EAF9": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "BackupPolicy": {
+          "Status": "ENABLED",
+        },
+        "Encrypted": true,
+        "FileSystemTags": [
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Storage",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "development-shared-storage-efs",
+          },
+          {
+            "Key": "Purpose",
+            "Value": "shared-storage",
+          },
+        ],
+        "LifecyclePolicies": [
+          {
+            "TransitionToIA": "AFTER_30_DAYS",
+          },
+        ],
+        "PerformanceMode": "generalPurpose",
+        "ProvisionedThroughputInMibps": 10,
+        "ThroughputMode": "provisioned",
+      },
+      "Type": "AWS::EFS::FileSystem",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "EfsFileSystemEfsdevelopmentEfsMountTarget18AD74D79": {
+      "Properties": {
+        "FileSystemId": {
+          "Ref": "EfsFileSystemEfsdevelopment4A26EAF9",
+        },
+        "SecurityGroups": [
+          {
+            "Fn::GetAtt": [
+              "EfsSecurityGroupEfsMountTargetSgA4E5C597",
+              "GroupId",
+            ],
+          },
+        ],
+        "SubnetId": {
+          "Fn::ImportValue": "TestVpcStack:ExportsOutputRefTestVpcPublicSubnet1SubnetA7DB1EDF095592DF",
+        },
+      },
+      "Type": "AWS::EFS::MountTarget",
+    },
+    "EfsFileSystemEfsdevelopmentEfsMountTarget23EB8CB50": {
+      "Properties": {
+        "FileSystemId": {
+          "Ref": "EfsFileSystemEfsdevelopment4A26EAF9",
+        },
+        "SecurityGroups": [
+          {
+            "Fn::GetAtt": [
+              "EfsSecurityGroupEfsMountTargetSgA4E5C597",
+              "GroupId",
+            ],
+          },
+        ],
+        "SubnetId": {
+          "Fn::ImportValue": "TestVpcStack:ExportsOutputRefTestVpcPublicSubnet2Subnet80A14523FD2CDFFC",
+        },
+      },
+      "Type": "AWS::EFS::MountTarget",
+    },
+    "EfsInitDocumentAutomationDocument5BA7C449": {
+      "Properties": {
+        "Content": {
+          "assumeRole": "{{ AutomationAssumeRole }}",
+          "description": "Initialize EFS configuration for development environment",
+          "mainSteps": [
+            {
+              "action": "aws:executeScript",
+              "description": "Create and store EFS directory setup script",
+              "inputs": {
+                "Handler": "create_setup_script",
+                "InputPayload": {
+                  "environment": "{{ Environment }}",
+                  "region": "eu-west-1",
+                },
+                "Runtime": "python3.11",
+                "Script": "import boto3
+
+def create_setup_script(events, context):
+    """
+    Generate and store EFS directory setup script in SSM
+    
+    Args:
+        events: Input payload with environment and region
+        context: Lambda context (unused)
+    
+    Returns:
+        dict: Status and parameter name
+    """
+    ssm_client = boto3.client('ssm', region_name=events['region'])
+    environment = events['environment']
+    region = events['region']
+    
+    # Generate setup script
+    setup_script = f'''#!/bin/bash
+set -e
+
+echo "Setting up EFS directory structure and permissions..."
+
+# Create directory structure with proper ownership from the start
+mkdir -p /mnt/efs/prometheus-data
+mkdir -p /mnt/efs/grafana-data/plugins
+mkdir -p /mnt/efs/grafana-data/logs
+mkdir -p /mnt/efs/grafana-data/csv
+mkdir -p /mnt/efs/grafana-data/png
+mkdir -p /mnt/efs/config/prometheus
+mkdir -p /mnt/efs/config/grafana/provisioning/datasources
+mkdir -p /mnt/efs/config/grafana/provisioning/dashboards
+mkdir -p /mnt/efs/config/grafana/dashboards
+mkdir -p /mnt/efs/config/alertmanager
+
+# Set ownership and permissions for Prometheus (UID 65534)
+chown -R 65534:65534 /mnt/efs/prometheus-data /mnt/efs/config/prometheus
+chmod -R 755 /mnt/efs/prometheus-data /mnt/efs/config/prometheus
+
+# Set ownership and permissions for Grafana (UID 472, GID 0)
+chown -R 472:0 /mnt/efs/grafana-data /mnt/efs/config/grafana
+chmod -R 755 /mnt/efs/grafana-data /mnt/efs/config/grafana
+
+# Ensure Grafana can write to its data directories
+chmod -R 777 /mnt/efs/grafana-data/plugins
+chmod -R 777 /mnt/efs/grafana-data/logs
+chmod -R 777 /mnt/efs/grafana-data/csv
+chmod -R 777 /mnt/efs/grafana-data/png
+
+# Create configuration files from SSM
+echo "Creating configuration files from SSM parameters..."
+
+# Download Prometheus config
+aws ssm get-parameter --region ''' + region + ''' --name "/monitoring/''' + environment + '''/prometheus-config-yaml" --query "Parameter.Value" --output text > /mnt/efs/config/prometheus/prometheus.yml
+
+# Replace HOST_IP_PLACEHOLDER in Prometheus config with EC2 instance's private IP address
+# This is required because Prometheus (bridge networking) cannot access node-exporter (host networking) via localhost
+PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+if [ -z "$PRIVATE_IP" ]; then
+  echo "ERROR: Failed to retrieve private IP from EC2 metadata service"
+  exit 1
+fi
+sed -i "s/HOST_IP_PLACEHOLDER/$PRIVATE_IP/g" /mnt/efs/config/prometheus/prometheus.yml
+echo "Replaced HOST_IP_PLACEHOLDER with $PRIVATE_IP in Prometheus config"
+
+# Download Grafana datasource config
+aws ssm get-parameter --region ''' + region + ''' --name "/monitoring/''' + environment + '''/grafana-datasource-config-yaml" --query "Parameter.Value" --output text > /mnt/efs/config/grafana/provisioning/datasources/prometheus.yml
+
+# Replace HOST_IP_PLACEHOLDER with EC2 instance's private IP address
+# This is required because Grafana (bridge networking) cannot access Prometheus via localhost
+PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+if [ -z "$PRIVATE_IP" ]; then
+  echo "ERROR: Failed to retrieve private IP from EC2 metadata service"
+  exit 1
+fi
+sed -i "s/HOST_IP_PLACEHOLDER/$PRIVATE_IP/g" /mnt/efs/config/grafana/provisioning/datasources/prometheus.yml
+echo "Replaced HOST_IP_PLACEHOLDER with $PRIVATE_IP in Grafana datasource config"
+
+# Download Grafana dashboard config
+aws ssm get-parameter --region ''' + region + ''' --name "/monitoring/''' + environment + '''/grafana-dashboard-config-yaml" --query "Parameter.Value" --output text > /mnt/efs/config/grafana/provisioning/dashboards/dashboards.yml
+
+# Set proper ownership for config files
+chown 65534:65534 /mnt/efs/config/prometheus/prometheus.yml
+chown 472:0 /mnt/efs/config/grafana/provisioning/datasources/prometheus.yml
+chown 472:0 /mnt/efs/config/grafana/provisioning/dashboards/dashboards.yml
+
+# Verify directory structure and permissions
+echo "Verifying directory structure:"
+ls -la /mnt/efs/
+ls -la /mnt/efs/grafana-data/
+ls -la /mnt/efs/config/grafana/
+
+echo "EFS setup completed successfully"
+'''
+    
+    parameter_name = f"/monitoring/{environment}/efs-setup-script"
+    
+    try:
+        # Store setup script in SSM
+        print(f"Storing setup script in parameter: {parameter_name}")
+        ssm_client.put_parameter(
+            Name=parameter_name,
+            Value=setup_script,
+            Type='String',
+            Overwrite=True,
+            Description=f'EFS setup script for {environment} environment'
+        )
+        
+        return {
+            'statusCode': 200,
+            'body': {
+                'message': 'Setup script created successfully',
+                'parameterName': parameter_name,
+                'scriptSize': len(setup_script)
+            }
+        }
+        
+    except Exception as e:
+        error_msg = f"Failed to create setup script: {str(e)}"
+        print(f"ERROR: {error_msg}")
+        raise Exception(error_msg)",
+              },
+              "name": "CreateEfsSetupScript",
+            },
+          ],
+          "outputs": [
+            "CreateEfsSetupScript.OutputPayload",
+          ],
+          "parameters": {
+            "AccessPointId": {
+              "description": "EFS Access Point ID",
+              "type": "String",
+            },
+            "AutomationAssumeRole": {
+              "default": {
+                "Fn::GetAtt": [
+                  "EfsInitDocumentAutomationRole4573C690",
+                  "Arn",
+                ],
+              },
+              "description": "IAM role for automation execution",
+              "type": "AWS::IAM::Role::Arn",
+            },
+            "Environment": {
+              "default": "development",
+              "description": "Environment name",
+              "type": "String",
+            },
+            "FileSystemId": {
+              "description": "EFS File System ID",
+              "type": "String",
+            },
+          },
+          "schemaVersion": "0.3",
+        },
+        "DocumentFormat": "YAML",
+        "DocumentType": "Automation",
+        "Name": "SnapshotStack-development-efs-init",
+        "Tags": [
+          {
+            "Key": "Component",
+            "Value": "EFS-Initialization",
+          },
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Storage",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+        ],
+        "UpdateMethod": "NewVersion",
+      },
+      "Type": "AWS::SSM::Document",
+    },
+    "EfsInitDocumentAutomationExecution28C78747": {
+      "DependsOn": [
+        "EfsInitDocumentAutomationDocument5BA7C449",
+        "GrafanaDashboardConfigC8728B71",
+        "GrafanaDashboardConfigYaml4EF75870",
+        "GrafanaDatasourceConfig688C0C65",
+        "GrafanaDatasourceConfigYaml65FC4816",
+        "PrometheusConfig76F4735C",
+        "PrometheusConfigYaml2C828A74",
+      ],
+      "Properties": {
+        "ApplyOnlyAtCronInterval": false,
+        "Name": "SnapshotStack-development-efs-init",
+        "Parameters": {
+          "AccessPointId": [
+            {
+              "Ref": "EfsAccessPointEA27A26F",
+            },
+          ],
+          "AutomationAssumeRole": [
+            {
+              "Fn::GetAtt": [
+                "EfsInitDocumentAutomationRole4573C690",
+                "Arn",
+              ],
+            },
+          ],
+          "Environment": [
+            "development",
+          ],
+          "FileSystemId": [
+            {
+              "Ref": "EfsFileSystemEfsdevelopment4A26EAF9",
+            },
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Association",
+    },
+    "EfsInitDocumentAutomationRole4573C690": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ssm.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "Automation role for EFS initialization in development",
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AmazonSSMAutomationRole",
+              ],
+            ],
+          },
+        ],
+        "Tags": [
+          {
+            "Key": "Component",
+            "Value": "EFS-Initialization",
+          },
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Storage",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "EfsInitDocumentAutomationRoleDefaultPolicy6CD2DF3F": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "ssm:GetParameter",
+                "ssm:GetParameters",
+                "ssm:PutParameter",
+                "ssm:AddTagsToResource",
+              ],
+              "Effect": "Allow",
+              "Resource": "arn:aws:ssm:eu-west-1:123456789012:parameter/monitoring/development/*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "EfsInitDocumentAutomationRoleDefaultPolicy6CD2DF3F",
+        "Roles": [
+          {
+            "Ref": "EfsInitDocumentAutomationRole4573C690",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "EfsSecurityGroupEfsMountTargetSgA4E5C597": {
+      "Properties": {
+        "GroupDescription": "EFS mount target security group for development monitoring",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "255.255.255.255/32",
+            "Description": "Disallow all traffic",
+            "FromPort": 252,
+            "IpProtocol": "icmp",
+            "ToPort": 86,
+          },
+        ],
+        "SecurityGroupIngress": [
+          {
+            "CidrIp": {
+              "Fn::ImportValue": "TestVpcStack:ExportsOutputFnGetAttTestVpcE77CE678CidrBlock88E0B11C",
+            },
+            "Description": {
+              "Fn::Join": [
+                "",
+                [
+                  "Allow NFS traffic from ",
+                  {
+                    "Fn::ImportValue": "TestVpcStack:ExportsOutputFnGetAttTestVpcE77CE678CidrBlock88E0B11C",
+                  },
+                ],
+              ],
+            },
+            "FromPort": 2049,
+            "IpProtocol": "tcp",
+            "ToPort": 2049,
+          },
+        ],
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Storage",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "development-efs-mount-target-sg",
+          },
+          {
+            "Key": "Purpose",
+            "Value": "EfsAccess",
+          },
+        ],
+        "VpcId": {
+          "Fn::ImportValue": "TestVpcStack:ExportsOutputRefTestVpcE77CE67811D13B85",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+    "GrafanaDashboardConfigC8728B71": {
+      "Properties": {
+        "Description": "Grafana dashboard provider configuration for development",
+        "Name": "/monitoring/development/grafana-dashboard-config",
+        "Tags": {
+          "Environment": "development",
+          "Layer": "Storage",
+          "ManagedBy": "CDK",
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": "{
+  "apiVersion": 1,
+  "providers": [
+    {
+      "name": "default",
+      "orgId": 1,
+      "folder": "",
+      "type": "file",
+      "disableDeletion": false,
+      "updateIntervalSeconds": 10,
+      "allowUiUpdates": true,
+      "options": {
+        "path": "/var/lib/grafana/dashboards"
+      }
+    }
+  ]
+}",
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "GrafanaDashboardConfigYaml4EF75870": {
+      "Properties": {
+        "Description": "Grafana YAML dashboard provider configuration for development",
+        "Name": "/monitoring/development/grafana-dashboard-config-yaml",
+        "Tags": {
+          "Environment": "development",
+          "Layer": "Storage",
+          "ManagedBy": "CDK",
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": "apiVersion: 1
+providers:
+  -     name: default
+        orgId: 1
+        folder: 
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 10
+        allowUiUpdates: true
+        options:
+          path: /var/lib/grafana/dashboards",
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "GrafanaDatasourceConfig688C0C65": {
+      "Properties": {
+        "Description": "Grafana datasource configuration for development",
+        "Name": "/monitoring/development/grafana-datasource-config",
+        "Tags": {
+          "Environment": "development",
+          "Layer": "Storage",
+          "ManagedBy": "CDK",
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": "{
+  "apiVersion": 1,
+  "datasources": [
+    {
+      "name": "Prometheus",
+      "type": "prometheus",
+      "access": "proxy",
+      "url": "http://HOST_IP_PLACEHOLDER:9090/prometheus",
+      "isDefault": true
+    }
+  ]
+}",
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "GrafanaDatasourceConfigYaml65FC4816": {
+      "Properties": {
+        "Description": "Grafana YAML datasource configuration for development",
+        "Name": "/monitoring/development/grafana-datasource-config-yaml",
+        "Tags": {
+          "Environment": "development",
+          "Layer": "Storage",
+          "ManagedBy": "CDK",
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": "apiVersion: 1
+datasources:
+  -     name: Prometheus
+        type: prometheus
+        access: proxy
+        url: "http://HOST_IP_PLACEHOLDER:9090/prometheus"
+        isDefault: true",
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "ParametersCustomParam070CFF361": {
+      "Properties": {
+        "Description": "EFS file system ID for development monitoring",
+        "Name": "/monitoring/development/efs/config/file-system-id",
+        "Tags": {
+          "Component": "SSMParameters",
+          "Environment": "development",
+          "Layer": "Storage",
+          "ManagedBy": "CDK",
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": {
+          "Ref": "EfsFileSystemEfsdevelopment4A26EAF9",
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "ParametersCustomParam16BB6DF6F": {
+      "Properties": {
+        "Description": "EFS access point ID for development monitoring",
+        "Name": "/monitoring/development/efs/config/access-point-id",
+        "Tags": {
+          "Component": "SSMParameters",
+          "Environment": "development",
+          "Layer": "Storage",
+          "ManagedBy": "CDK",
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": {
+          "Ref": "EfsAccessPointEA27A26F",
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "ParametersCustomParam298A454C6": {
+      "Properties": {
+        "Description": "EFS security group ID for development monitoring",
+        "Name": "/monitoring/development/efs/config/security-group-id",
+        "Tags": {
+          "Component": "SSMParameters",
+          "Environment": "development",
+          "Layer": "Storage",
+          "ManagedBy": "CDK",
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "EfsSecurityGroupEfsMountTargetSgA4E5C597",
+            "GroupId",
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "ParametersCustomParam337C26767": {
+      "Properties": {
+        "Description": "EFS availability zone for development monitoring",
+        "Name": "/monitoring/development/efs/config/availability-zone",
+        "Tags": {
+          "Component": "SSMParameters",
+          "Environment": "development",
+          "Layer": "Storage",
+          "ManagedBy": "CDK",
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": "dummy1a",
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "PrometheusConfig76F4735C": {
+      "Properties": {
+        "Description": "Prometheus configuration for development monitoring",
+        "Name": "/monitoring/development/prometheus-config",
+        "Tags": {
+          "Environment": "development",
+          "Layer": "Storage",
+          "ManagedBy": "CDK",
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": "{
+  "global": {
+    "scrape_interval": "15s",
+    "evaluation_interval": "15s",
+    "external_labels": {
+      "environment": "development",
+      "cluster": "development-monitoring"
+    }
+  },
+  "rule_files": [
+    "/etc/prometheus/alerts.yml"
+  ],
+  "scrape_configs": [
+    {
+      "job_name": "prometheus",
+      "static_configs": [
+        {
+          "targets": [
+            "localhost:9090"
+          ]
+        }
+      ],
+      "metrics_path": "/prometheus/metrics"
+    },
+    {
+      "job_name": "node-exporter",
+      "static_configs": [
+        {
+          "targets": [
+            "HOST_IP_PLACEHOLDER:9100"
+          ]
+        }
+      ]
+    },
+    {
+      "job_name": "node-exporter-pipeline",
+      "ec2_sd_configs": [
+        {
+          "region": "eu-west-1",
+          "port": 9100,
+          "filters": [
+            {
+              "name": "tag:Environment",
+              "values": [
+                "development"
+              ]
+            },
+            {
+              "name": "tag:Service",
+              "values": [
+                "NodeExporter",
+                "monitoring"
+              ]
+            },
+            {
+              "name": "instance-state-name",
+              "values": [
+                "running"
+              ]
+            }
+          ]
+        }
+      ],
+      "relabel_configs": [
+        {
+          "source_labels": [
+            "__meta_ec2_private_ip"
+          ],
+          "target_label": "__address__",
+          "replacement": "\${1}:9100"
+        },
+        {
+          "source_labels": [
+            "__meta_ec2_tag_Environment"
+          ],
+          "target_label": "environment"
+        },
+        {
+          "source_labels": [
+            "__meta_ec2_tag_Service"
+          ],
+          "target_label": "service"
+        },
+        {
+          "source_labels": [
+            "__meta_ec2_instance_id"
+          ],
+          "target_label": "instance_id"
+        },
+        {
+          "source_labels": [
+            "__meta_ec2_tag_Name"
+          ],
+          "target_label": "instance_name"
+        }
+      ]
+    }
+  ]
+}",
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "PrometheusConfigYaml2C828A74": {
+      "Properties": {
+        "Description": "Prometheus YAML configuration for development monitoring",
+        "Name": "/monitoring/development/prometheus-config-yaml",
+        "Tags": {
+          "Environment": "development",
+          "Layer": "Storage",
+          "ManagedBy": "CDK",
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": "global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: development
+    cluster: development-monitoring
+rule_files:
+  - /etc/prometheus/alerts.yml
+scrape_configs:
+  -     job_name: prometheus
+        static_configs:
+          -         targets:
+                      - "localhost:9090"
+        metrics_path: /prometheus/metrics
+  -     job_name: node-exporter
+        static_configs:
+          -         targets:
+                      - "HOST_IP_PLACEHOLDER:9100"
+  -     job_name: node-exporter-pipeline
+        ec2_sd_configs:
+          -         region: eu-west-1
+                    port: 9100
+                    filters:
+                      -             name: "tag:Environment"
+                                    values:
+                                      - development
+                      -             name: "tag:Service"
+                                    values:
+                                      - NodeExporter
+                                      - monitoring
+                      -             name: instance-state-name
+                                    values:
+                                      - running
+        relabel_configs:
+          -         source_labels:
+                      - __meta_ec2_private_ip
+                    target_label: __address__
+                    replacement: "\${1}:9100"
+          -         source_labels:
+                      - __meta_ec2_tag_Environment
+                    target_label: environment
+          -         source_labels:
+                      - __meta_ec2_tag_Service
+                    target_label: service
+          -         source_labels:
+                      - __meta_ec2_instance_id
+                    target_label: instance_id
+          -         source_labels:
+                      - __meta_ec2_tag_Name
+                    target_label: instance_name",
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                  ],
+                  {
+                    "Ref": "BootstrapVersion",
+                  },
+                ],
+              },
+            ],
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI.",
+        },
+      ],
+    },
+  },
+}
+`;
