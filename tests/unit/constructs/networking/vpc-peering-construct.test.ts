@@ -2,7 +2,6 @@
 
 import * as cdk from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
-import * as ssm from "aws-cdk-lib/aws-ssm";
 import { Template, Match } from "aws-cdk-lib/assertions";
 
 import { VpcPeeringConstruct } from "../../../../lib/constructs/networking/vpc/vpc-peering-construct";

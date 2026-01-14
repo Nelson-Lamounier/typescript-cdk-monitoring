@@ -10,6 +10,7 @@ import * as logs from "aws-cdk-lib/aws-logs";
 import { Annotations, Match, Template } from "aws-cdk-lib/assertions";
 
 import { PrometheusConstruct } from "../../../../../lib/constructs/services/monitoring/prometheus";
+import type { PrometheusServiceConstructProps } from "../../../../../lib/shared/types/service-types";
 
 // ============================================================================
 // CUSTOM MATCHERS (Type declarations will be added when matchers are used)
@@ -143,7 +144,7 @@ class TestFixtures {
    * Private constructor to enforce singleton pattern per app instance
    * @param app - CDK app instance
    */
-  private constructor(private readonly app: cdk.App) {}
+  private constructor(private readonly _app: cdk.App) {}
 
   /**
    * Get or create TestFixtures instance for the given app
@@ -320,17 +321,7 @@ function getFargateNetworkConfig(vpc: ec2.Vpc) {
  */
 function createPrometheusConstruct(
   stack: cdk.Stack,
-  props: Partial<{
-    cluster: ecs.ICluster;
-    envName: string;
-    projectName?: string;
-    launchType: "FARGATE" | "EC2";
-    networkConfiguration?: unknown;
-    dataVolume?: unknown;
-    configVolume?: unknown;
-    scrapeInterval?: string;
-    staticTargets?: Array<{ jobName: string; targets: string[] }>;
-  }> = {}
+  props: Partial<PrometheusServiceConstructProps> = {}
 ): PrometheusConstruct {
   const fixtures = TestFixtures.getInstance(stack.node.root as cdk.App);
   const vpc = fixtures.getVpc(stack);
@@ -342,14 +333,23 @@ function createPrometheusConstruct(
     envName: props.envName ?? TEST_CONSTANTS.ENVIRONMENTS.DEV,
     projectName: props.projectName,
     launchType: props.launchType ?? "FARGATE",
+    serviceName: props.serviceName,
+    desiredCount: props.desiredCount,
+    minHealthyPercent: props.minHealthyPercent,
+    maxHealthyPercent: props.maxHealthyPercent,
+    healthCheckGracePeriod: props.healthCheckGracePeriod,
+    logRetention: props.logRetention,
     networkConfiguration:
       props.networkConfiguration ?? getFargateNetworkConfig(vpc),
     dataVolume: props.dataVolume ?? {
       efs: { fileSystem, accessPoint },
     },
-    configVolume: props.configVolume,
+    configVolume: props.configVolume as PrometheusServiceConstructProps["configVolume"],
     scrapeInterval: props.scrapeInterval,
     staticTargets: props.staticTargets,
+    retentionTime: props.retentionTime,
+    containerPort: props.containerPort,
+    alertmanager: props.alertmanager,
   });
 }
 

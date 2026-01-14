@@ -21,7 +21,6 @@ describe("EcsTaskDefinitionConstruct", () => {
     new EcsTaskDefinitionConstruct(stack, "Task", {
       envName: "dev",
       launchType: "EC2",
-      taskDefinition: undefined as unknown as ecs.TaskDefinition, // not used for creation
       containers: [
         {
           name: "app",

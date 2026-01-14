@@ -9,11 +9,7 @@ import { Template, Match } from "aws-cdk-lib/assertions";
 
 import { VpcFlowLogsConstruct } from "../../../../lib/constructs/networking/vpc/vpc-flow-logs-construct";
 import { VpcConstruct } from "../../../../lib/constructs/networking/vpc/vpc-construct";
-import {
-  DEFAULT_FLOW_LOGS_RETENTION_DAYS,
-  MIN_PRODUCTION_FLOW_LOGS_RETENTION_DAYS,
-} from "../../../../lib/shared/constants/networking-constants";
-import { isProductionEnvironment } from "../../../../lib/shared/utils/environment";
+import { MIN_PRODUCTION_FLOW_LOGS_RETENTION_DAYS } from "../../../../lib/shared/constants/networking-constants";
 
 // ============================================================================
 // CUSTOM MATCHERS (Type declarations will be added when matchers are used)
@@ -837,10 +833,6 @@ describe("VpcFlowLogsConstruct", () => {
       createFlowLogsConstruct(stack, "FlowLogs");
 
       const template = Template.fromStack(stack);
-
-      // Get the log group logical ID to verify ARN references
-      const logGroupResources = template.findResources("AWS::Logs::LogGroup");
-      const logGroupLogicalId = Object.keys(logGroupResources)[0];
 
       // Verify the IAM policy has resources scoped to the log group ARN
       // Check that Resource array contains exactly 2 elements referencing the log group
