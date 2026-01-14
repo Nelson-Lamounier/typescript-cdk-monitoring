@@ -20,12 +20,15 @@
 ENVIRONMENT ?= development
 AWS_PROFILE ?= dev-account
 AWS_REGION ?= eu-west-1
+PROJECT_NAME ?= monitoring
+AWS_ACCOUNT_ID ?=
 
 # Script paths
 VERIFY_EFS_SCRIPT := scripts/tests/verify-efs-stack.sh
 VERIFY_INFRA_SCRIPT := scripts/tests/verify-infra-stack.sh
 
 # Stack names
+NETWORKING_STACK := $(ENVIRONMENT)-Networking
 EFS_STACK := $(ENVIRONMENT)-MonitoringEfs
 INFRA_STACK := $(ENVIRONMENT)-MonitoringInfra
 SERVICE_STACK := $(ENVIRONMENT)-MonitoringService
@@ -76,31 +79,78 @@ help: ## Show this help message
 # VERIFICATION TARGETS
 # ============================================================================
 
+verify-networking: ## Verify Networking stack deployment and readiness
+	@echo "$(BLUE)Verifying Networking Stack...$(NC)"
+	@echo "Environment: $(ENVIRONMENT)"
+	@echo "AWS Profile: $(AWS_PROFILE)"
+	@echo ""
+	@npx tsx scripts/deployment/verify-environment.ts -e $(ENVIRONMENT) -p $(AWS_PROFILE) -r $(AWS_REGION) || \
+		npx tsx scripts/deployment/validate-environment.ts -e $(ENVIRONMENT) -p $(AWS_PROFILE) -r $(AWS_REGION)
+
 verify-efs: ## Verify EFS stack deployment and readiness
 	@echo "$(BLUE)Verifying EFS Stack...$(NC)"
 	@echo "Environment: $(ENVIRONMENT)"
 	@echo "AWS Profile: $(AWS_PROFILE)"
 	@echo ""
-	@chmod +x $(VERIFY_EFS_SCRIPT)
-	@$(VERIFY_EFS_SCRIPT) -e $(ENVIRONMENT) -p $(AWS_PROFILE)
+	@npx tsx scripts/deployment/monitoring/verify-efs-stack.ts -e $(ENVIRONMENT) -p $(AWS_PROFILE) -r $(AWS_REGION)
 
 verify-infra: ## Verify Infrastructure stack deployment and readiness
 	@echo "$(BLUE)Verifying Infrastructure Stack...$(NC)"
 	@echo "Environment: $(ENVIRONMENT)"
 	@echo "AWS Profile: $(AWS_PROFILE)"
 	@echo ""
-	@chmod +x $(VERIFY_INFRA_SCRIPT)
-	@$(VERIFY_INFRA_SCRIPT) -e $(ENVIRONMENT) -p $(AWS_PROFILE)
+	@npx tsx scripts/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -p $(AWS_PROFILE) -r $(AWS_REGION)
 
-verify-all: verify-efs verify-infra ## Verify all stacks (EFS, then Infrastructure)
+verify-service: ## Verify Service stack deployment and readiness
+	@echo "$(BLUE)Verifying Service Stack...$(NC)"
+	@echo "Environment: $(ENVIRONMENT)"
+	@echo "AWS Profile: $(AWS_PROFILE)"
+	@echo ""
+	@npx tsx scripts/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -p $(AWS_PROFILE) -r $(AWS_REGION) --service-only || true
+
+verify-all: verify-networking verify-efs verify-infra verify-service ## Verify all stacks in order
 	@echo ""
 	@echo "$(GREEN)✓ All verification checks completed$(NC)"
+
+verify-bootstrap: ## Verify CDK bootstrap stack
+	@echo "$(BLUE)Verifying CDK Bootstrap...$(NC)"
+	@echo "Environment: $(ENVIRONMENT)"
+	@echo "AWS Profile: $(AWS_PROFILE)"
+	@echo "AWS Region: $(AWS_REGION)"
+	@echo ""
+	@if [ -z "$(AWS_ACCOUNT_ID)" ]; then \
+		echo "$(RED)ERROR: AWS_ACCOUNT_ID not set$(NC)"; \
+		echo "Usage: make verify-bootstrap AWS_ACCOUNT_ID=<account-id> ENVIRONMENT=$(ENVIRONMENT) AWS_REGION=$(AWS_REGION)"; \
+		exit 1; \
+	fi
+	@npx tsx scripts/deployment/verify-bootstrap.ts \
+		--aws-account-id $(AWS_ACCOUNT_ID) \
+		--aws-region $(AWS_REGION) \
+		--environment $(ENVIRONMENT) \
+		--project-name $(PROJECT_NAME)
+
+verify-environment: ## Verify CDK deployment environment setup
+	@echo "$(BLUE)Verifying CDK Deployment Environment...$(NC)"
+	@echo "Environment: $(ENVIRONMENT)"
+	@echo "AWS Region: $(AWS_REGION)"
+	@echo ""
+	@npx tsx scripts/deployment/verify-environment.ts \
+		--environment $(ENVIRONMENT) \
+		--aws-region $(AWS_REGION) \
+		--auto-build-on-failure
 
 # ============================================================================
 # DEPLOYMENT TARGETS
 # ============================================================================
 
-deploy-efs: ## Deploy EFS stack (must be deployed first)
+deploy-networking: ## Deploy Networking stack (foundational - must be deployed first)
+	@echo "$(BLUE)Deploying Networking Stack...$(NC)"
+	@echo "Stack: $(NETWORKING_STACK)"
+	@echo "Profile: $(AWS_PROFILE)"
+	@echo ""
+	cdk deploy $(NETWORKING_STACK) --profile $(AWS_PROFILE) --require-approval never
+
+deploy-efs: ## Deploy EFS stack (requires Networking stack)
 	@echo "$(BLUE)Deploying EFS Stack...$(NC)"
 	@echo "Stack: $(EFS_STACK)"
 	@echo "Profile: $(AWS_PROFILE)"
@@ -125,7 +175,7 @@ deploy-service: ## Deploy Service stack (requires Infrastructure stack)
 	@echo ""
 	cdk deploy $(SERVICE_STACK) --profile $(AWS_PROFILE) --require-approval never
 
-deploy-all: deploy-efs deploy-infra deploy-service ## Deploy all stacks in correct order
+deploy-all: deploy-networking deploy-efs deploy-infra deploy-service ## Deploy all stacks in correct order
 	@echo ""
 	@echo "$(GREEN)✓ All stacks deployed successfully$(NC)"
 	@echo ""
