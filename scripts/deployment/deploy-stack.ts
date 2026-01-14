@@ -186,9 +186,10 @@ async function deployStack(
   Logger.info(`Started at: ${startTime.toISOString()}`);
 
   try {
-    // Execute deployment (suppress CDK output to avoid exposing sensitive data)
-    execSync(deployCommand, {
-      stdio: "pipe", // Changed from "inherit" to capture output
+    // Execute deployment - CDK deploy handles both create and update automatically
+    // We capture output but also allow CDK to display progress to the user
+    const cdkOutput = execSync(deployCommand, {
+      stdio: "inherit", // Let CDK display output directly for better visibility
       cwd: process.cwd(),
       encoding: "utf-8",
     });
@@ -257,16 +258,51 @@ async function deployStack(
     Logger.info(`Failed at: ${endTime.toISOString()}`);
     Logger.info(`Exit code: ${error.status || 1}`);
 
-    // Check for specific errors
-    const errorOutput = error.stdout?.toString() || error.message || "";
-
+    // Extract error details - CDK output was displayed via stdio: inherit
+    const errorMessage = error.message || "";
+    
+    // Note: With stdio: inherit, CDK errors are already displayed to the user
+    // We provide additional context and troubleshooting here
+    
+    Logger.subsection("Troubleshooting");
+    Logger.info("CDK deploy automatically handles both stack creation and updates");
+    Logger.info("If the stack already exists, CDK will update it automatically");
+    Logger.info("");
+    
+    // Check for common error patterns in the error message
     if (
-      errorOutput.includes("Cannot delete export") ||
-      errorOutput.includes("is in use")
+      errorMessage.includes("Cannot delete export") ||
+      errorMessage.includes("is in use")
     ) {
       ErrorMessages.exportDependencyError();
+    } else if (
+      errorMessage.includes("does not exist") &&
+      errorMessage.includes("Stack")
+    ) {
+      Logger.error("Stack not found in CDK application");
+      Logger.info("This may indicate:");
+      Logger.info("  1. Stack name mismatch (check environment suffix)");
+      Logger.info("  2. Stack not exported in CDK app");
+      Logger.info("  3. CDK context configuration issue");
+    } else if (
+      errorMessage.includes("AccessDenied") ||
+      errorMessage.includes("UnauthorizedOperation")
+    ) {
+      Logger.error("Permission denied");
+      Logger.info("Check IAM role permissions for:");
+      Logger.info("  - cloudformation:*");
+      Logger.info("  - iam:* (for role creation)");
+      Logger.info("  - s3:* (for asset uploads)");
+      Logger.info("  - ecr:* (for Docker images, if used)");
     } else {
       ErrorMessages.deploymentFailed(error.status || 1);
+      Logger.info("");
+      Logger.info("The CDK error output above shows the specific failure reason");
+      Logger.info("Common issues:");
+      Logger.info("  - Resource conflicts (duplicate names)");
+      Logger.info("  - Insufficient permissions");
+      Logger.info("  - Resource limits exceeded");
+      Logger.info("  - Invalid configuration");
     }
 
     // Set GitHub Actions output
@@ -274,7 +310,7 @@ async function deployStack(
       fs.appendFileSync(process.env.GITHUB_OUTPUT, "status=failure\n");
     }
 
-    return { success: false, error: error.message };
+    return { success: false, error: errorMessage || "Deployment failed" };
   }
 }
 
