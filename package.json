@@ -14,7 +14,7 @@
     "test:security": "jest test/unit/monitoring/security.test.ts --coverage",
     "test:integration": "jest test/unit/monitoring/integration.test.ts",
     "test:comprehensive": "jest test/unit/monitoring/comprehensive-monitoring.test.ts --coverage",
-    "test:ci": "jest --coverage --ci --watchAll=false --passWithNoTests",
+    "test:ci": "CDK_DOCKER_VERBOSE=false CDK_DEBUG=false CDK_ASSET_VERBOSE=false jest --coverage --ci --watchAll=false --passWithNoTests",
     "test:monitoring-pipeline": "jest test/unit/monitoring --coverage --ci --watchAll=false --passWithNoTests",
     "test:verbose": "VERBOSE_TESTS=1 jest --verbose",
     "lint": "eslint . --max-warnings 50",

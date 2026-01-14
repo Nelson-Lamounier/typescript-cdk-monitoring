@@ -17,3 +17,13 @@ if (!process.env.CDK_DEFAULT_REGION) {
 // Suppress AWS SDK credential warnings during tests
 // Tests don't need real AWS credentials for CDK synthesis
 process.env.AWS_REGION = process.env.AWS_REGION || "eu-west-1";
+
+// Suppress CDK Docker output during tests
+// CDK uses Docker for bundling Lambda functions and other containerized resources
+// Setting these to false suppresses verbose Docker build output
+process.env.CDK_DOCKER_VERBOSE = "false";
+process.env.CDK_DEBUG = "false";
+
+// Suppress CDK asset bundling output
+// This prevents Docker build logs from cluttering test output
+process.env.CDK_ASSET_VERBOSE = "false";

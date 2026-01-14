@@ -1,392 +1,27 @@
 # @format
 
+# .github/workflows/ci.yml
 name: Continuous Integration
 
 on:
   push:
-    branches:
-      - "**" # Run on all branches
+    branches: ["**"]
   pull_request:
-    branches:
-      - "**" # Run on PRs to any branch
-  workflow_dispatch:
-    inputs:
-      jobs_to_run:
-        description: "Jobs to run (comma-separated or 'all')"
-        required: false
-        type: string
-        default: "all"
-      rerun_failed_from:
-        description: "Run ID to re-run failed jobs from (leave empty for normal run)"
-        required: false
-        type: string
-        default: ""
+    branches: ["**"]
 
 env:
   NODE_VERSION: "22"
-  AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-1' }}
-  TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-  TURBO_TEAM: ${{ vars.TURBO_TEAM }}
 
 permissions:
-  id-token: write # Required for OIDC authentication to AWS
   contents: read
-  actions: read
-  # CI jobs need id-token: write for OIDC authentication when validating AWS resources
 
 jobs:
   # ============================================================================
-  # JOB 0: Determine CI Jobs to Run
+  # Dependency Installation (Required by all other jobs)
   # ============================================================================
-  determine-jobs:
-    name: Determine CI Jobs to Run
+  setup:
+    name: Setup Dependencies
     runs-on: ubuntu-latest
-    outputs:
-      run_security_scan: ${{ steps.decide.outputs.run_security_scan }}
-      run_lint: ${{ steps.decide.outputs.run_lint }}
-      run_build: ${{ steps.decide.outputs.run_build }}
-      run_validate_setup: ${{ steps.decide.outputs.run_validate_setup }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup GitHub CLI
-        run: |
-          # GitHub CLI is pre-installed on GitHub runners
-          gh --version
-        env:
-          GH_TOKEN: ${{ github.token }}
-
-      - name: Determine Which Jobs to Run
-        id: decide
-        run: |
-          JOBS_INPUT="${{ github.event.inputs.jobs_to_run }}"
-          RERUN_FROM="${{ github.event.inputs.rerun_failed_from }}"
-
-          echo "Input parameters:"
-          echo "  Jobs to run: $JOBS_INPUT"
-          echo "  Rerun from: $RERUN_FROM"
-          echo ""
-
-          # If rerun_failed_from is specified, check which jobs failed
-          if [ -n "$RERUN_FROM" ]; then
-            echo "Analyzing failed jobs from run $RERUN_FROM..."
-            echo ""
-            
-            # Validate run ID format
-            if ! [[ "$RERUN_FROM" =~ ^[0-9]+$ ]]; then
-              echo "ERROR: Run ID must be a numeric value"
-              echo "Provided: '$RERUN_FROM'"
-              echo "Expected: A numeric GitHub Actions run ID (e.g., 1234567890)"
-              exit 1
-            fi
-            
-            # Get failed jobs from previous run with error handling
-            echo "Fetching run information from GitHub API..."
-            if ! RUN_INFO=$(gh run view "$RERUN_FROM" --json jobs,status,conclusion 2>&1); then
-              echo "WARNING: Cannot access run $RERUN_FROM"
-              echo "GitHub CLI Error: $RUN_INFO"
-              echo "FALLBACK: Running all jobs instead"
-              RERUN_FROM=""
-            else
-              echo "Successfully retrieved run information"
-              
-              # Get failed jobs from previous run
-              FAILED_JOBS=$(echo "$RUN_INFO" | jq -r '.jobs[] | select(.conclusion == "failure") | .name' || echo "")
-              
-              if [ -n "$FAILED_JOBS" ]; then
-                FAILED_COUNT=$(echo "$FAILED_JOBS" | wc -l)
-                echo "Found $FAILED_COUNT failed job(s):"
-                echo "$FAILED_JOBS" | sed 's/^/    /'
-                echo ""
-                
-                # Set outputs based on failed jobs (CI jobs only)
-                echo "$FAILED_JOBS" | grep -q "Security Validation" && echo "run_security_scan=true" >> $GITHUB_OUTPUT || echo "run_security_scan=false" >> $GITHUB_OUTPUT
-                echo "$FAILED_JOBS" | grep -q "Lint & Quality" && echo "run_lint=true" >> $GITHUB_OUTPUT || echo "run_lint=false" >> $GITHUB_OUTPUT
-                echo "$FAILED_JOBS" | grep -q "Build Infrastructure" && echo "run_build=true" >> $GITHUB_OUTPUT || echo "run_build=false" >> $GITHUB_OUTPUT
-                echo "$FAILED_JOBS" | grep -q "Validate & Setup" && echo "run_validate_setup=true" >> $GITHUB_OUTPUT || echo "run_validate_setup=false" >> $GITHUB_OUTPUT
-              else
-                echo "No failed jobs found - running all jobs instead"
-                echo "run_security_scan=true" >> $GITHUB_OUTPUT
-                echo "run_lint=true" >> $GITHUB_OUTPUT
-                echo "run_build=true" >> $GITHUB_OUTPUT
-                echo "run_validate_setup=true" >> $GITHUB_OUTPUT
-              fi
-            fi
-            
-          elif [ "$JOBS_INPUT" = "all" ] || [ -z "$JOBS_INPUT" ]; then
-            echo "Running all CI jobs (default behavior)"
-            echo "run_security_scan=true" >> $GITHUB_OUTPUT
-            echo "run_lint=true" >> $GITHUB_OUTPUT
-            echo "run_build=true" >> $GITHUB_OUTPUT
-            echo "run_validate_setup=true" >> $GITHUB_OUTPUT
-            
-          else
-            echo "Running selective CI jobs: $JOBS_INPUT"
-            # Parse comma-separated job list - start with all false
-            echo "run_security_scan=false" >> $GITHUB_OUTPUT
-            echo "run_lint=false" >> $GITHUB_OUTPUT
-            echo "run_build=false" >> $GITHUB_OUTPUT
-            echo "run_validate_setup=false" >> $GITHUB_OUTPUT
-
-            # Enable specified jobs (case-insensitive matching)
-            JOBS_LOWER=$(echo "$JOBS_INPUT" | tr '[:upper:]' '[:lower:]')
-            
-            echo "$JOBS_LOWER" | grep -q "security" && echo "run_security_scan=true" >> $GITHUB_OUTPUT
-            echo "$JOBS_LOWER" | grep -q "lint" && echo "run_lint=true" >> $GITHUB_OUTPUT
-            echo "$JOBS_LOWER" | grep -q "build" && echo "run_build=true" >> $GITHUB_OUTPUT
-            echo "$JOBS_LOWER" | grep -q "validate\|setup" && echo "run_validate_setup=true" >> $GITHUB_OUTPUT
-          fi
-
-          echo ""
-          echo "CI Job execution plan determined:"
-          echo "  Security Scan: $(grep 'run_security_scan=' $GITHUB_OUTPUT | cut -d'=' -f2 | tail -1)"
-          echo "  Lint & Quality: $(grep 'run_lint=' $GITHUB_OUTPUT | cut -d'=' -f2 | tail -1)"
-          echo "  Build: $(grep 'run_build=' $GITHUB_OUTPUT | cut -d'=' -f2 | tail -1)"
-          echo "  Validate Setup: $(grep 'run_validate_setup=' $GITHUB_OUTPUT | cut -d'=' -f2 | tail -1)"
-        env:
-          GH_TOKEN: ${{ github.token }}
-
-  # ============================================================================
-  # JOB 1: Security Validation
-  # ============================================================================
-  security-scan:
-    name: Security Validation
-    needs: [determine-jobs]
-    runs-on: ubuntu-latest
-    if: needs.determine-jobs.outputs.run_security_scan == 'true'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Security - Check for Secrets in Code
-        run: |
-          # Basic secret detection patterns
-          echo "Scanning for potential secrets..."
-
-          # Check for common secret patterns (excluding workflow files)
-          if grep -r -E "(password|secret|key|token).*=.*['\"][^'\"]{8,}" --exclude="*.yml" --exclude="*.yaml" . || true; then
-            echo "WARNING: Potential hardcoded secrets detected. Please review."
-          fi
-
-          # Check for AWS account IDs in code
-          if grep -r -E "[0-9]{12}" --exclude-dir=".git" --exclude="*.yml" --exclude="*.yaml" . || true; then
-            echo "WARNING: Potential AWS account IDs found in code. Ensure they're properly masked."
-          fi
-
-          echo "SUCCESS: Security scan completed"
-
-  # ============================================================================
-  # JOB 2: Lint & Quality Checks
-  # ============================================================================
-  lint-and-quality:
-    name: Lint & Quality Checks
-    needs: [determine-jobs, security-scan]
-    runs-on: ubuntu-latest
-    if: |
-      always() &&
-      needs.determine-jobs.outputs.run_lint == 'true' &&
-      (needs.security-scan.result == 'success' || needs.security-scan.result == 'skipped')
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Infrastructure Environment
-        uses: ./.github/actions/setup-infrastructure
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: TypeScript Linting
-        run: |
-          echo "Running TypeScript/ESLint checks..."
-          npx eslint lib/ bin/ tests/ --max-warnings 50 || echo "Linting completed with warnings"
-
-      - name: Type Checking
-        run: |
-          echo "Running TypeScript type checking..."
-          yarn typecheck || echo "Type checking completed with warnings (non-blocking)"
-
-      - name: CDK Validation
-        run: |
-          echo "Validating CDK configuration..."
-          # Validate CDK synthesis - exit code 1 is expected due to CDK Nag warnings
-          # Only validate NetworkingStack as other stacks are not yet implemented
-          CDK_ENVIRONMENT=pipeline yarn cdk synth NetworkingStack-pipeline --context environment=pipeline --quiet > /dev/null 2>&1 || echo "CDK synthesis completed with warnings (expected)"
-          echo "CDK validation completed - NetworkingStack can be synthesized"
-        env:
-          AWS_REGION: ${{ env.AWS_REGION }}
-          CDK_ENVIRONMENT: pipeline
-          AWS_PIPELINE_ACCOUNT_ID: "123456789012" # Dummy account ID for validation
-
-      - name: Run Tests
-        run: |
-          echo "Running tests..."
-          yarn test:ci
-
-      - name: Generate Test Coverage Report
-        if: always()
-        run: |
-          echo "Generating test coverage report..."
-
-          # Generate coverage summary if tests ran
-          if [ -f "coverage/coverage-summary.json" ]; then
-            echo "## Test Coverage Summary" >> test-coverage-report.md
-            echo "" >> test-coverage-report.md
-            
-            # Extract coverage percentages using node
-            node -e "
-              const fs = require('fs');
-              try {
-                const coverage = JSON.parse(fs.readFileSync('coverage/coverage-summary.json', 'utf8'));
-                const total = coverage.total;
-                console.log(\`- **Lines**: \${total.lines.pct}%\`);
-                console.log(\`- **Functions**: \${total.functions.pct}%\`);
-                console.log(\`- **Branches**: \${total.branches.pct}%\`);
-                console.log(\`- **Statements**: \${total.statements.pct}%\`);
-              } catch (e) {
-                console.log('- Coverage data not available');
-              }
-            " >> test-coverage-report.md
-            echo "" >> test-coverage-report.md
-          else
-            echo "## Test Coverage Summary" >> test-coverage-report.md
-            echo "- Coverage data not available" >> test-coverage-report.md
-          fi
-
-      - name: Upload Test Results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results-${{ github.run_number }}
-          path: |
-            coverage/
-            test-results/
-            test-coverage-report.md
-          retention-days: 30
-
-      - name: Shell Script Linting
-        run: |
-          echo "Running shell script validation..."
-
-          # Install shellcheck
-          sudo apt-get update -qq
-          sudo apt-get install -y shellcheck
-
-          # Find and lint shell scripts
-          find scripts -name "*.sh" -type f | while read -r script; do
-            echo "Linting $script..."
-            shellcheck "$script" || echo "WARNING: Shellcheck issues found in $script"
-          done
-
-      - name: YAML/JSON Linting
-        run: |
-          echo "Running YAML/JSON validation..."
-
-          # Install yamllint
-          pip install yamllint
-
-          # Lint workflow files
-          find .github/workflows -name "*.yml" -o -name "*.yaml" | while read -r file; do
-            echo "Linting $file..."
-            yamllint "$file" || echo "WARNING: YAML issues found in $file"
-          done
-
-          # Validate JSON files
-          find . -name "*.json" -not -path "./node_modules/*" -not -path "./.turbo/*" | while read -r file; do
-            echo "Validating $file..."
-            python -m json.tool "$file" > /dev/null || echo "WARNING: JSON syntax error in $file"
-          done
-
-      - name: Documentation Linting
-        run: |
-          echo "Running documentation validation..."
-
-          # Check for required documentation files
-          required_docs=(
-            "README.md"
-            "docs/monitoring/PIPELINE_HEALTH_VALIDATION.md"
-            "docs/security/PIPELINE_SECURITY_GUIDE.md"
-          )
-
-          for doc in "${required_docs[@]}"; do
-            if [ -f "$doc" ]; then
-              echo "SUCCESS: Found required documentation: $doc"
-            else
-              echo "WARNING: Missing required documentation: $doc"
-            fi
-          done
-
-          # Check for broken links in markdown files (basic check)
-          find docs -name "*.md" | while read -r file; do
-            if grep -q "](.*\.md)" "$file"; then
-              echo "INFO: $file contains internal links - manual verification recommended"
-            fi
-          done
-
-      - name: Generate Linting Report
-        if: always()
-        run: |
-          echo "Generating comprehensive linting report..."
-
-          cat > linting-report.md << 'EOF'
-          # Code Quality & Linting Report
-
-          **Timestamp**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
-          **Branch**: ${{ github.ref_name }}
-          **Commit**: ${{ github.sha }}
-
-          ## Completed Checks
-
-          ### Code Quality
-          - **TypeScript Linting**: ESLint with security rules
-          - **Type Checking**: TypeScript compiler validation
-          - **Import Analysis**: Dependency and circular import checks
-
-          ### Infrastructure Validation
-          - **CDK Synthesis**: CloudFormation template generation
-          - **Monitoring Config**: Component configuration validation
-          - **Security Config**: Security best practices verification
-
-          ### Script & Configuration Validation
-          - **Shell Scripts**: Shellcheck validation
-          - **YAML Files**: Workflow and configuration syntax
-          - **JSON Files**: Package and configuration validation
-
-          ### Documentation
-          - **Required Files**: Documentation completeness check
-          - **Link Validation**: Internal reference verification
-
-          ## Security Validations
-          - No hardcoded secrets detected
-          - Security group configurations validated
-          - IAM role configurations checked
-          - Encryption settings verified
-
-          ## Recommendations
-          - Keep dependencies updated regularly
-          - Review and address any linting warnings
-          - Ensure all new code follows established patterns
-          - Maintain comprehensive documentation
-
-          ---
-          *Generated by automated linting pipeline*
-          EOF
-
-          echo "Linting report generated successfully"
-
-  # ============================================================================
-  # JOB 3: Build & Cache
-  # ============================================================================
-  build:
-    name: Build Infrastructure
-    needs: [determine-jobs, security-scan, lint-and-quality]
-    runs-on: ubuntu-latest
-    if: |
-      always() &&
-      needs.determine-jobs.outputs.run_build == 'true' &&
-      (needs.lint-and-quality.result == 'success' || needs.lint-and-quality.result == 'skipped')
     outputs:
       cache-key: ${{ steps.cache-key.outputs.key }}
 
@@ -394,231 +29,240 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Generate Cache Key
+      - name: Generate Dependency Cache Key
         id: cache-key
         run: |
-          HASH=$(find lib bin config tests -name "*.ts" -o -name "*.js" -o -name "*.json" 2>/dev/null | xargs cat 2>/dev/null | sha256sum | cut -d' ' -f1)
-          echo "key=build-${{ runner.os }}-$HASH" >> $GITHUB_OUTPUT
+          # Hash yarn.lock and package.json for cache key
+          HASH=$(cat infrastructure/yarn.lock infrastructure/package.json | sha256sum | cut -d' ' -f1)
+          echo "key=deps-${{ runner.os }}-node${{ env.NODE_VERSION }}-$HASH" >> $GITHUB_OUTPUT
 
-      - name: Setup Infrastructure Environment
+      - name: Setup Infrastructure
         uses: ./.github/actions/setup-infrastructure
         with:
           node-version: ${{ env.NODE_VERSION }}
-
-      - name: Cache Build Artifacts
-        uses: actions/cache@v4
-        with:
-          path: |
-            dist/**/*.js
-            dist/**/*.js.map
-            dist/**/*.d.ts
-            cdk.out
-            node_modules
-          key: ${{ steps.cache-key.outputs.key }}
-          restore-keys: |
-            build-${{ runner.os }}-
-
-      - name: Build TypeScript
-        run: |
-          echo "Building TypeScript code..."
-          yarn build
-
-          echo "Build Results:"
-          # TypeScript compiles to dist/ directory (as configured in tsconfig.json)
-          # Check for compiled JavaScript files in dist/ directory
-          JS_FILES=$(find dist -name "*.js" 2>/dev/null | wc -l)
-
-          if [ "$JS_FILES" -gt 0 ]; then
-            echo "Build successful: $JS_FILES JavaScript files created"
-            echo "Compiled files found in:"
-            find dist -name "*.js" 2>/dev/null | head -10
-          else
-            echo "WARNING: No compiled JavaScript files found"
-            echo "This may be expected if TypeScript compilation only validates types"
-            echo "Checking for TypeScript compilation errors..."
-            
-            # Verify build completed without errors by checking exit code
-            if [ $? -eq 0 ]; then
-              echo "TypeScript compilation completed successfully"
-              echo "Note: CDK uses ts-node and doesn't require compiled JavaScript files"
-            else
-              echo "Build failed: TypeScript compilation errors detected"
-              exit 1
-            fi
-          fi
-
-      - name: CDK Synth for Validation
-        run: |
-          # First list available stacks to debug
-          echo "Available CDK stacks:"
-          CDK_ENVIRONMENT=pipeline npx cdk list --context environment=pipeline
-          echo ""
-
-          # Synthesize NetworkingStack for build validation
-          echo "Synthesizing NetworkingStack..."
-          CDK_ENVIRONMENT=pipeline npx cdk synth NetworkingStack-pipeline --context environment=pipeline --quiet || echo "CDK synthesis completed with warnings (expected)"
-        env:
-          AWS_REGION: ${{ env.AWS_REGION }}
-          CDK_ENVIRONMENT: pipeline
-          AWS_PIPELINE_ACCOUNT_ID: "123456789012" # Dummy account ID for validation
-          AWS_ACCOUNT_ID_DEV: ${{ vars.AWS_ACCOUNT_ID_DEV || '123456789012' }} # Use actual dev account or dummy for validation
+          working-directory: infrastructure
 
   # ============================================================================
-  # JOB 4: Validation & Setup (Read-Only)
+  # Code Quality Jobs (Run in Parallel)
   # ============================================================================
-  validate-setup:
-    name: Validate & Setup
-    needs: [determine-jobs, security-scan, lint-and-quality]
+  lint:
+    name: Lint Code
+    needs: setup
     runs-on: ubuntu-latest
-    if: |
-      always() &&
-      needs.determine-jobs.outputs.run_validate_setup == 'true' &&
-      (needs.lint-and-quality.result == 'success' || needs.lint-and-quality.result == 'skipped')
-    # Use pipeline environment to access environment secrets
-    environment: pipeline
-    outputs:
-      pipeline_account_id: ${{ steps.setup.outputs.pipeline_account_id }}
-      dev_vpc_id: ${{ steps.dev-info.outputs.vpc_id || 'NOT_FOUND' }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Verify OIDC Configuration
-        run: |
-          echo "Verifying OIDC configuration..."
-          echo ""
-
-          # Check if AWS_OIDC_ROLE secret is available
-          if [ -z "${{ secrets.AWS_OIDC_ROLE }}" ]; then
-            echo "WARNING: AWS_OIDC_ROLE secret is empty or not found"
-            echo "Attempting to use DEPLOYMENT_ROLE as fallback..."
-            if [ -z "${{ secrets.DEPLOYMENT_ROLE }}" ]; then
-              echo "ERROR: Both AWS_OIDC_ROLE and DEPLOYMENT_ROLE secrets are missing"
-              echo ""
-              echo "Troubleshooting Steps:"
-              echo "  1. Verify the secret is configured in GitHub repository settings"
-              echo "  2. Check that the secret name matches exactly: AWS_OIDC_ROLE"
-              echo "  3. Ensure the secret is added to the 'pipeline' environment"
-              echo "  4. Verify the secret contains the full IAM role ARN (e.g., arn:aws:iam::123456789012:role/GitHubActionsRole)"
-              exit 1
-            else
-              echo "Using DEPLOYMENT_ROLE as fallback"
-            fi
-          else
-            echo "AWS_OIDC_ROLE secret is available"
-            echo "Role ARN format: ${{ secrets.AWS_OIDC_ROLE != '' && 'Present' || 'Missing' }}"
-          fi
-          echo ""
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Setup Infrastructure
+        uses: ./.github/actions/setup-infrastructure
         with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE || secrets.DEPLOYMENT_ROLE }}
-          aws-region: ${{ env.AWS_REGION }}
-          audience: sts.amazonaws.com
+          node-version: ${{ env.NODE_VERSION }}
+          working-directory: infrastructure
 
-      - name: Setup Environment Variables
-        id: setup
+      - name: Run ESLint
+        working-directory: infrastructure
         run: |
-          echo "Setting up pipeline environment variables..."
-          echo ""
+          echo "Running ESLint..."
+          npx eslint lib/ bin/ tests/ --max-warnings 0
 
-          # Get current account ID with error handling
-          echo "Retrieving AWS account information..."
-          if ! CURRENT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text 2>&1); then
-            echo "WARNING: Cannot retrieve AWS account information"
-            echo "AWS CLI Error: $CURRENT_ACCOUNT"
-            echo "This is non-fatal for CI - continuing with validation"
-            exit 0
+      - name: Check Formatting
+        working-directory: infrastructure
+        run: |
+          echo "Checking code formatting..."
+          yarn format:check
+
+  typecheck:
+    name: Type Check
+    needs: setup
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Infrastructure
+        uses: ./.github/actions/setup-infrastructure
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          working-directory: infrastructure
+
+      - name: Run TypeScript Compiler
+        working-directory: infrastructure
+        run: |
+          echo "Running TypeScript type checking..."
+          yarn typecheck
+
+  test:
+    name: Run Tests
+    needs: setup
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Infrastructure
+        uses: ./.github/actions/setup-infrastructure
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Run Tests with Coverage
+        run: |
+          echo "Running tests..."
+          yarn test:ci
+        env:
+          CDK_DOCKER_VERBOSE: "false"
+          CDK_DEBUG: "false"
+          CDK_ASSET_VERBOSE: "false"
+
+      - name: Upload Coverage Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: coverage/
+          retention-days: 30
+
+      - name: Coverage Summary
+        if: always()
+        run: |
+          if [ -f "coverage/coverage-summary.json" ]; then
+            echo "## Test Coverage" >> $GITHUB_STEP_SUMMARY
+            node -e "
+              const fs = require('fs');
+              const coverage = JSON.parse(fs.readFileSync('coverage/coverage-summary.json', 'utf8'));
+              const total = coverage.total;
+              console.log(\`- **Lines**: \${total.lines.pct}%\`);
+              console.log(\`- **Functions**: \${total.functions.pct}%\`);
+              console.log(\`- **Branches**: \${total.branches.pct}%\`);
+              console.log(\`- **Statements**: \${total.statements.pct}%\`);
+            " >> $GITHUB_STEP_SUMMARY
           fi
 
-          # Validate account ID format
-          if ! [[ "$CURRENT_ACCOUNT" =~ ^[0-9]{12}$ ]]; then
-            echo "WARNING: Invalid account ID format: '$CURRENT_ACCOUNT'"
-            echo "This is non-fatal for CI - continuing with validation"
-            exit 0
-          fi
+  # ============================================================================
+  # Build Job
+  # ============================================================================
+  build:
+    name: Build TypeScript
+    needs: setup
+    runs-on: ubuntu-latest
+    outputs:
+      build-cache-key: ${{ steps.build-cache.outputs.key }}
 
-          # Set outputs and environment variables
-          echo "pipeline_account_id=$CURRENT_ACCOUNT" >> $GITHUB_OUTPUT
-          echo "AWS_PIPELINE_ACCOUNT_ID=$CURRENT_ACCOUNT" >> $GITHUB_ENV
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-          echo "Successfully retrieved pipeline account information"
-          echo "Account ID: ***${CURRENT_ACCOUNT: -4} (last 4 digits)"
-          echo "Region: ${{ env.AWS_REGION }}"
-          echo ""
+      - name: Setup Infrastructure
+        uses: ./.github/actions/setup-infrastructure
+        with:
+          node-version: ${{ env.NODE_VERSION }}
 
-      - name: Get Dev Account VPC Info
-        id: dev-info
+      - name: Generate Build Cache Key
+        id: build-cache
         run: |
-          echo "Checking development account VPC configuration..."
-          echo ""
+          # Hash source files for build cache
+          HASH=$(find lib bin -type f \( -name "*.ts" -o -name "*.js" \) -exec sha256sum {} + | sha256sum | cut -d' ' -f1)
+          echo "key=build-${{ runner.os }}-$HASH" >> $GITHUB_OUTPUT
 
-          if [ "${{ vars.AWS_ACCOUNT_ID_DEV }}" != "" ]; then
-            DEV_ACCOUNT_ID="${{ vars.AWS_ACCOUNT_ID_DEV }}"
-            echo "Dev account configured: ***${DEV_ACCOUNT_ID: -4}"
-            echo "Attempting cross-account role assumption..."
-            
-            # Validate dev account ID format
-            if ! [[ "$DEV_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
-              echo "WARNING: Invalid dev account ID format"
-              echo "vpc_id=NOT_FOUND" >> $GITHUB_OUTPUT
-              exit 0  # Non-fatal error for CI
-            fi
-            
-            # Attempt role assumption (read-only for CI)
-            ROLE_ARN="arn:aws:iam::$DEV_ACCOUNT_ID:role/GitHubDeploymentRole"
-            echo "Assuming role: $ROLE_ARN"
-            
-            if ASSUME_ROLE_OUTPUT=$(aws sts assume-role \
-              --role-arn "$ROLE_ARN" \
-              --role-session-name "GetVpcInfo-$(date +%s)" \
-              --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
-              --output text 2>&1); then
-              
-              echo "Successfully assumed cross-account role"
-              
-              # Parse credentials
-              read access_key secret_key session_token <<< "$ASSUME_ROLE_OUTPUT"
-              
-              if [ -z "$access_key" ] || [ -z "$secret_key" ] || [ -z "$session_token" ]; then
-                echo "WARNING: Invalid credentials received"
-                echo "vpc_id=NOT_FOUND" >> $GITHUB_OUTPUT
-                exit 0
-              fi
-              
-              # Use temporary credentials to get VPC info (read-only)
-              echo "Querying development VPCs..."
-              if DEV_VPC=$(AWS_ACCESS_KEY_ID="$access_key" \
-                          AWS_SECRET_ACCESS_KEY="$secret_key" \
-                          AWS_SESSION_TOKEN="$session_token" \
-                          aws ec2 describe-vpcs \
-                            --filters "Name=tag:Environment,Values=development" \
-                            --query 'Vpcs[0].VpcId' \
-                            --output text 2>&1); then
-                
-                if [ "$DEV_VPC" != "None" ] && [ "$DEV_VPC" != "null" ] && [ -n "$DEV_VPC" ]; then
-                  echo "Found development VPC: ***${DEV_VPC: -8}"
-                  echo "vpc_id=$DEV_VPC" >> $GITHUB_OUTPUT
-                else
-                  echo "No development VPC found with Environment=development tag"
-                  echo "vpc_id=NOT_FOUND" >> $GITHUB_OUTPUT
-                fi
-              else
-                echo "WARNING: Cannot describe VPCs in development account"
-                echo "vpc_id=NOT_FOUND" >> $GITHUB_OUTPUT
-              fi
-              
-            else
-              echo "WARNING: Cannot assume role in development account"
-              echo "vpc_id=NOT_FOUND" >> $GITHUB_OUTPUT
-            fi
-            
+      - name: Cache Build Output
+        uses: actions/cache@v4
+        with:
+          path: |
+            dist
+            .turbo
+          key: ${{ steps.build-cache.outputs.key }}
+          restore-keys: build-${{ runner.os }}-
+
+      - name: Build TypeScript
+        run: |
+          echo "Building TypeScript..."
+          yarn build
+
+          # Verify build output
+          if [ -d "dist" ] && [ "$(find dist -name '*.js' | wc -l)" -gt 0 ]; then
+            echo "Build successful"
           else
-            echo "No development account configured"
-            echo "vpc_id=NOT_FOUND" >> $GITHUB_OUTPUT
+            echo "No JS files generated (may use ts-node)"
           fi
 
-          echo ""
-          echo "Development account VPC check completed"
+  # ============================================================================
+  # CDK Validation (Depends on Build)
+  # ============================================================================
+  validate-cdk:
+    name: Validate CDK Stacks
+    needs: [setup, build]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Infrastructure
+        uses: ./.github/actions/setup-infrastructure
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Restore Build Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            dist
+            .turbo
+          key: ${{ needs.build.outputs.build-cache-key }}
+          restore-keys: build-${{ runner.os }}-
+
+      - name: List Available Stacks
+        run: |
+          echo "Listing CDK stacks..."
+          CDK_ENVIRONMENT=pipeline npx cdk list --context environment=pipeline
+        env:
+          AWS_REGION: eu-west-1
+
+      - name: Synthesize CDK Stacks
+        run: |
+          echo "Synthesizing CDK stacks..."
+          CDK_ENVIRONMENT=pipeline npx cdk synth --context environment=pipeline --quiet
+
+          echo "CDK synthesis successful"
+        env:
+          AWS_REGION: eu-west-1
+          CDK_ENVIRONMENT: pipeline
+
+      - name: Upload CDK Outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdk-outputs
+          path: cdk.out/
+          retention-days: 7
+
+  # ============================================================================
+  # Summary Job (Optional - Shows Overall Status)
+  # ============================================================================
+  ci-success:
+    name: CI Complete
+    needs: [lint, typecheck, test, build, validate-cdk]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Check All Jobs Passed
+        run: |
+          echo "## CI Pipeline Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Lint: ${{ needs.lint.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Type Check: ${{ needs.typecheck.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Tests: ${{ needs.test.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Build: ${{ needs.build.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- CDK Validation: ${{ needs.validate-cdk.result }}" >> $GITHUB_STEP_SUMMARY
+
+          # Fail if any job failed
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "CI pipeline failed" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All CI checks passed" >> $GITHUB_STEP_SUMMARY
