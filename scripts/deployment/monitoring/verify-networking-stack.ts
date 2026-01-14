@@ -229,8 +229,14 @@ async function verifyNetworkingStack(
         ],
       });
       const listResponse = await listClient.send(listCommand);
-      const stackNames =
-        listResponse.StackSummaries?.map((s) => s.StackName) || [];
+      const stackSummaries = listResponse.StackSummaries || [];
+      const stackNames = stackSummaries
+        .map((s) => s.StackName)
+        .filter((name): name is string => !!name);
+
+      Logger.info("");
+      Logger.info(`Debug: Found ${stackSummaries.length} stack summary(ies)`);
+      Logger.info(`Debug: Extracted ${stackNames.length} stack name(s)`);
 
       if (stackNames.length > 0) {
         Logger.info("");
@@ -240,9 +246,9 @@ async function verifyNetworkingStack(
 
         // Always show ALL stacks (up to 10) for debugging
         stackNames.slice(0, 10).forEach((name) => {
-          const isNetworking = name?.toLowerCase().includes("networking");
+          const isNetworking = name.toLowerCase().includes("networking");
           const matchesExpected =
-            name?.toLowerCase() === stackName.toLowerCase();
+            name.toLowerCase() === stackName.toLowerCase();
 
           if (matchesExpected) {
             Logger.info(
