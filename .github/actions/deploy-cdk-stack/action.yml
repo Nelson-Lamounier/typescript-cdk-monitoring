@@ -60,11 +60,16 @@ runs:
     - name: Verify CDK Bootstrap
       shell: bash
       run: |
-        make verify-bootstrap \
-          AWS_ACCOUNT_ID="${{ inputs.aws-account-id }}" \
-          ENVIRONMENT="${{ inputs.environment }}" \
-          AWS_REGION="${{ inputs.aws-region }}" \
-          PROJECT_NAME="${{ inputs.project-name }}"
+        # Skip bootstrap verification if already done in workflow (for cross-account deployments)
+        if [ -z "${SKIP_BOOTSTRAP_VERIFICATION:-}" ]; then
+          make verify-bootstrap \
+            AWS_ACCOUNT_ID="${{ inputs.aws-account-id }}" \
+            ENVIRONMENT="${{ inputs.environment }}" \
+            AWS_REGION="${{ inputs.aws-region }}" \
+            PROJECT_NAME="${{ inputs.project-name }}"
+        else
+          echo "Bootstrap verification skipped (already verified in workflow with assumed role credentials)"
+        fi
 
     - name: Deploy Stack
       id: deploy

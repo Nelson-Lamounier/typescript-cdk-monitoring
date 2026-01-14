@@ -163,16 +163,6 @@ jobs:
             echo "role_assumed=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Verify CDK Bootstrap (with assumed role)
-        if: env.ENVIRONMENT == 'development' && steps.assume-role.outputs.role_assumed == 'true'
-        run: |
-          echo "Verifying CDK Bootstrap with assumed role credentials..."
-          make verify-bootstrap \
-            AWS_ACCOUNT_ID="${{ needs.setup.outputs.aws-account-id }}" \
-            ENVIRONMENT="${{ env.ENVIRONMENT }}" \
-            AWS_REGION="${{ env.AWS_REGION }}" \
-            PROJECT_NAME="${{ env.PROJECT_NAME }}"
-
       - name: Deploy Networking Stack
         id: deploy-networking
         uses: ./.github/actions/deploy-cdk-stack
@@ -277,6 +267,8 @@ jobs:
           aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
           aws-region: ${{ env.AWS_REGION }}
           additional-args: "--require-approval never"
+        env:
+          SKIP_BOOTSTRAP_VERIFICATION: "true"
 
       - name: Save Stack Outputs Artifact
         if: steps.deploy-efs.outputs.stack-outputs != ''
@@ -369,6 +361,8 @@ jobs:
           aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
           aws-region: ${{ env.AWS_REGION }}
           additional-args: "--require-approval never"
+        env:
+          SKIP_BOOTSTRAP_VERIFICATION: "true"
 
       - name: Save Stack Outputs Artifact
         if: steps.deploy-infra.outputs.stack-outputs != ''
@@ -461,6 +455,8 @@ jobs:
           aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
           aws-region: ${{ env.AWS_REGION }}
           additional-args: "--require-approval never"
+        env:
+          SKIP_BOOTSTRAP_VERIFICATION: "true"
 
       - name: Save Stack Outputs Artifact
         if: steps.deploy-service.outputs.stack-outputs != ''
