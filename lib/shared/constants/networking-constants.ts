@@ -487,7 +487,7 @@ export const VPC_CIDR_BLOCKS = {
   DEV: "10.0.0.0/16",
   STAGING: "10.1.0.0/16",
   PRODUCTION: "10.2.0.0/16",
-  PIPELINE: "10.10.0.0/16",
+  PIPELINE: "10.3.0.0/16",
 } as const;
 
 /**

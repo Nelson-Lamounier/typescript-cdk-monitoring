@@ -364,8 +364,18 @@ aws ssm get-parameter \
   --output text \
   > /mnt/efs/config/prometheus/prometheus.yml
 
+# Replace HOST_IP_PLACEHOLDER in Prometheus config with EC2 instance's private IP address
+# This is required because Prometheus (bridge networking) cannot access node-exporter (host networking) via localhost
+echo "  - Replacing HOST_IP_PLACEHOLDER in Prometheus config..."
+PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+if [ -z "$PRIVATE_IP" ]; then
+  echo "ERROR: Failed to retrieve private IP from EC2 metadata service"
+  exit 1
+fi
+sed -i "s/HOST_IP_PLACEHOLDER/$PRIVATE_IP/g" /mnt/efs/config/prometheus/prometheus.yml
+echo "    Replaced HOST_IP_PLACEHOLDER with $PRIVATE_IP in Prometheus config"
+
 # Grafana datasource config
-# NOTE: Contains HOST_IP_PLACEHOLDER which will be replaced at runtime
 echo "  - Grafana datasource config..."
 aws ssm get-parameter \
   --region ${region} \
@@ -373,6 +383,17 @@ aws ssm get-parameter \
   --query "Parameter.Value" \
   --output text \
   > /mnt/efs/config/grafana/provisioning/datasources/prometheus.yml
+
+# Replace HOST_IP_PLACEHOLDER with EC2 instance's private IP address
+# This is required because Grafana (bridge networking) cannot access Prometheus via localhost
+echo "  - Replacing HOST_IP_PLACEHOLDER with EC2 private IP..."
+PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+if [ -z "$PRIVATE_IP" ]; then
+  echo "ERROR: Failed to retrieve private IP from EC2 metadata service"
+  exit 1
+fi
+sed -i "s/HOST_IP_PLACEHOLDER/$PRIVATE_IP/g" /mnt/efs/config/grafana/provisioning/datasources/prometheus.yml
+echo "    Replaced HOST_IP_PLACEHOLDER with $PRIVATE_IP"
 
 # Grafana dashboard config
 echo "  - Grafana dashboard config..."
