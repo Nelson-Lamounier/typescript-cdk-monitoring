@@ -24,6 +24,7 @@ on:
 env:
   NODE_VERSION: "22"
   AWS_REGION: ${{ vars.AWS_REGION != '' && vars.AWS_REGION || 'eu-west-1' }}
+  AWS_ACCOUNT_ID_DEV: ${{ vars.AWS_ACCOUNT_ID_DEV }}
   ENVIRONMENT: "development"
   PROJECT_NAME: "monitoring"
 
@@ -56,12 +57,28 @@ jobs:
       - name: Get AWS Account ID
         id: account-id
         run: |
-          ACCOUNT_ID="${{ vars.AWS_ACCOUNT_ID_DEV }}"
-          if [ -z "$ACCOUNT_ID" ]; then
-            echo "ERROR: AWS_ACCOUNT_ID_DEV not configured in repository variables"
+          echo "Debug: Checking AWS_ACCOUNT_ID_DEV variable..."
+          echo "Variable value from env: '${{ env.AWS_ACCOUNT_ID_DEV }}'"
+          echo "Variable value from vars: '${{ vars.AWS_ACCOUNT_ID_DEV }}'"
+
+          # Try both env and vars contexts
+          ACCOUNT_ID="${{ env.AWS_ACCOUNT_ID_DEV }}"
+          if [ -z "$ACCOUNT_ID" ] || [ "$ACCOUNT_ID" == "" ]; then
+            ACCOUNT_ID="${{ vars.AWS_ACCOUNT_ID_DEV }}"
+          fi
+
+          if [ -z "$ACCOUNT_ID" ] || [ "$ACCOUNT_ID" == "" ]; then
+            echo "::error::AWS_ACCOUNT_ID_DEV not configured in repository variables"
+            echo "Please verify:"
+            echo "  1. Go to repository Settings > Secrets and variables > Actions > Variables"
+            echo "  2. Ensure variable name is exactly: AWS_ACCOUNT_ID_DEV"
+            echo "  3. Ensure variable value is: 771826808455"
+            echo "  4. Ensure variable is set at Repository level (not Organization level)"
             exit 1
           fi
+
           echo "account_id=$ACCOUNT_ID" >> $GITHUB_OUTPUT
+          echo "✓ Using AWS Account ID: $ACCOUNT_ID"
 
       - name: Setup Infrastructure
         uses: ./.github/actions/setup-infrastructure
