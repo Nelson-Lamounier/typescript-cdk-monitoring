@@ -213,6 +213,25 @@ test-unit: ## Run unit tests only
 	@echo "$(BLUE)Running unit tests...$(NC)"
 	yarn test tests/unit
 
+test-networking: ## Run networking stack tests
+	@echo "$(BLUE)Running networking stack tests...$(NC)"
+	yarn test tests/unit/stacks/foundation/networking-stack.test.ts
+
+test-monitoring-efs: ## Run monitoring EFS stack tests
+	@echo "$(BLUE)Running monitoring EFS stack tests...$(NC)"
+	yarn test tests/unit/stacks/monitoring/monitoring-efs-stack.test.ts
+
+test-monitoring-infra: ## Run monitoring infrastructure stack tests
+	@echo "$(BLUE)Running monitoring infrastructure stack tests...$(NC)"
+	yarn test tests/unit/stacks/monitoring/monitoring-infra-stack.test.ts
+
+test-monitoring-service: ## Run monitoring service stack tests
+	@echo "$(BLUE)Running monitoring service stack tests...$(NC)"
+	yarn test tests/unit/stacks/monitoring/monitoring-service-stack.test.ts
+
+test-stacks: test-networking test-monitoring-efs test-monitoring-infra test-monitoring-service ## Run all stack tests
+	@echo "$(BLUE)All stack tests completed$(NC)"
+
 lint: ## Run linter
 	@echo "$(BLUE)Running linter...$(NC)"
 	yarn lint
