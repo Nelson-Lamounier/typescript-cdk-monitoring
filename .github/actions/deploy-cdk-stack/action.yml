@@ -1,6 +1,6 @@
 # @format
 
-# .github/actions/deploy-cdk-stack/action.yml
+# .github/actions/deploy-cdk-stack/action.yml // test
 name: "Deploy CDK Stack"
 description: "Deploys a CDK stack with validation and error handling"
 
@@ -82,3 +82,4 @@ runs:
       env:
         # Set GitHub Actions output via script
         GITHUB_OUTPUT: ${{ github.output }}
+        GITHUB_ACTIONS: "true"
