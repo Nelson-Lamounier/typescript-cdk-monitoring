@@ -328,7 +328,10 @@ async function getSecurityGroup(
 
     const response = await ec2Client.send(command);
     return response.SecurityGroups?.[0];
-  } catch {
+  } catch (error: any) {
+    Logger.warning(
+      `DescribeSecurityGroups failed for ${securityGroupId}: ${error.message}`
+    );
     return null;
   }
 }
