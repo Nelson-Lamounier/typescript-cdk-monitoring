@@ -309,6 +309,82 @@ test-unit: ## Run unit tests only
 	@echo "$(BLUE)Running unit tests...$(NC)"
 	yarn test tests/unit
 
+test-integration: ## Run integration tests
+	@echo "$(BLUE)Running integration tests...$(NC)"
+	yarn test:integration
+
+test-integration-coverage: ## Run integration tests with coverage
+	@echo "$(BLUE)Running integration tests with coverage...$(NC)"
+	yarn test:integration:coverage
+
+test-integration-local: ## Run local integration tests (synthesise stacks)
+	@echo "$(BLUE)Running local integration tests...$(NC)"
+	yarn test:integration:local
+
+test-integration-local-save: ## Run local integration tests and save templates
+	@echo "$(BLUE)Running local integration tests and saving templates...$(NC)"
+	yarn test:integration:local:save
+
+test-integration-local-debug: ## Run local integration tests with detailed output
+	@echo "$(BLUE)Running local integration tests with debug output...$(NC)"
+	yarn test:integration:local:debug
+
+test-security: ## Run all security posture tests
+	@echo "$(BLUE)Running security posture tests...$(NC)"
+	yarn test:security
+
+test-security-network: ## Run network security tests
+	@echo "$(BLUE)Running network security tests...$(NC)"
+	yarn test:security:network
+
+test-security-instance: ## Run instance security tests
+	@echo "$(BLUE)Running instance security tests...$(NC)"
+	yarn test:security:instance
+
+test-security-storage: ## Run storage security tests
+	@echo "$(BLUE)Running storage security tests...$(NC)"
+	yarn test:security:storage
+
+test-security-iam: ## Run IAM security tests
+	@echo "$(BLUE)Running IAM security tests...$(NC)"
+	yarn test:security:iam
+
+test-security-monitoring: ## Run monitoring & logging security tests
+	@echo "$(BLUE)Running monitoring & logging security tests...$(NC)"
+	yarn test:security:monitoring
+
+test-security-application: ## Run application security tests
+	@echo "$(BLUE)Running application security tests...$(NC)"
+	yarn test:security:application
+
+test-security-compliance: ## Run compliance & governance tests
+	@echo "$(BLUE)Running compliance & governance tests...$(NC)"
+	yarn test:security:compliance
+
+test-security-posture: ## Run legacy security posture test file
+	@echo "$(BLUE)Running legacy security posture tests...$(NC)"
+	yarn test:security-posture
+
+test-connectivity: ## Run connectivity integration tests
+	@echo "$(BLUE)Running connectivity tests...$(NC)"
+	yarn test:connectivity
+
+test-connectivity-coverage: ## Run connectivity integration tests with coverage
+	@echo "$(BLUE)Running connectivity tests with coverage...$(NC)"
+	yarn test:connectivity:coverage
+
+test-network-connectivity: ## Run network connectivity tests
+	@echo "$(BLUE)Running network connectivity tests...$(NC)"
+	yarn test:network-connectivity
+
+test-service-connectivity: ## Run service connectivity tests
+	@echo "$(BLUE)Running service connectivity tests...$(NC)"
+	yarn test:service-connectivity
+
+test-cross-stack-connectivity: ## Run cross-stack connectivity tests
+	@echo "$(BLUE)Running cross-stack connectivity tests...$(NC)"
+	yarn test:cross-stack-connectivity
+
 test-networking: ## Run networking stack tests
 	@echo "$(BLUE)Running networking stack tests...$(NC)"
 	yarn test tests/unit/stacks/foundation/networking-stack.test.ts
