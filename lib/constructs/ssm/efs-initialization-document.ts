@@ -285,7 +285,14 @@ aws ssm get-parameter --region ''' + region + ''' --name "/monitoring/''' + envi
 
 # Replace HOST_IP_PLACEHOLDER in Prometheus config with EC2 instance's private IP address
 # This is required because Prometheus (bridge networking) cannot access node-exporter (host networking) via localhost
-PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \
+  -H "X-aws-ec2-metadata-token-ttl-seconds: 300" || true)
+if [ -z "$TOKEN" ]; then
+  echo "ERROR: Failed to retrieve IMDSv2 token"
+  exit 1
+fi
+PRIVATE_IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
+  "http://169.254.169.254/latest/meta-data/local-ipv4" || true)
 if [ -z "$PRIVATE_IP" ]; then
   echo "ERROR: Failed to retrieve private IP from EC2 metadata service"
   exit 1
@@ -298,7 +305,8 @@ aws ssm get-parameter --region ''' + region + ''' --name "/monitoring/''' + envi
 
 # Replace HOST_IP_PLACEHOLDER with EC2 instance's private IP address
 # This is required because Grafana (bridge networking) cannot access Prometheus via localhost
-PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+PRIVATE_IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
+  "http://169.254.169.254/latest/meta-data/local-ipv4" || true)
 if [ -z "$PRIVATE_IP" ]; then
   echo "ERROR: Failed to retrieve private IP from EC2 metadata service"
   exit 1
