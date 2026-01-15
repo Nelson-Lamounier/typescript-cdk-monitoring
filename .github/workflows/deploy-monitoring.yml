@@ -134,40 +134,47 @@ jobs:
           ls -la "$GITHUB_WORKSPACE/.deployment-outputs" || true
 
       - name: Save Stack Outputs Artifact
-        if: steps.deploy-networking.outputs.stack-outputs != ''
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ENVIRONMENT }}-Networking-outputs
-          path: .deployment-outputs/${{ env.ENVIRONMENT }}-Networking-*.json
+          path: ${{ github.workspace }}/.deployment-outputs/${{ env.ENVIRONMENT }}-Networking-*.json
           retention-days: 90
           if-no-files-found: ignore
 
     # =================================================================
   # Test Networking Stack
   # =================================================================
-  Test-Networking-Stack:
+  test-Networking-Stack:
     name: Test Networking Stack
     needs: [deploy-networking]
     runs-on: ubuntu-latest
     environment: development
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup CDK Deployment Environment
+        uses: ./.github/actions/setup-cdk-deployment
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          aws-role: ${{ secrets.AWS_OIDC_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          build-cache-key: ${{ needs.setup.outputs.cache-key }}
+          environment-name: ${{ env.ENVIRONMENT }}
 
       - name: Verify Networking Stack
         run: |
           echo "Verifying Networking Stack deployment..."
           make verify-networking \
-          ENVIRONMENT=${{ env.ENVIRONMENT }} \
-          AWS_REGION=${{ env.AWS_REGION }}
+            ENVIRONMENT=${{ env.ENVIRONMENT }} \
+            AWS_REGION=${{ env.AWS_REGION }}
 
   # =================================================================
   # Deploy EFS Stack
   # =================================================================
   deploy-efs:
     name: Deploy EFS Stack
-    needs: [setup, deploy-networking]
+    needs: [setup, deploy-networking, test-Networking-Stack]
     runs-on: ubuntu-latest
     environment: development
 
