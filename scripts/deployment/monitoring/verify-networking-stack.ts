@@ -13,7 +13,11 @@ import {
   DescribeVpcsCommand,
   DescribeSubnetsCommand,
 } from "@aws-sdk/client-ec2";
-import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
+import {
+  STSClient,
+  GetCallerIdentityCommand,
+  AssumeRoleCommand,
+} from "@aws-sdk/client-sts";
 
 import { Logger } from "../utils/logger.js";
 
@@ -142,11 +146,55 @@ async function verifySubnets(
   }
 }
 
-function createClients(config: VerifyNetworkingStackConfig): {
+function getEnvironmentAccountId(environment: string): string | undefined {
+  const envKeyMap: Record<string, string> = {
+    development: "AWS_ACCOUNT_ID_DEV",
+    staging: "AWS_ACCOUNT_ID_STAGING",
+    production: "AWS_ACCOUNT_ID_PROD",
+  };
+  const envVarName = envKeyMap[environment];
+  if (!envVarName) {
+    return undefined;
+  }
+  return process.env[envVarName];
+}
+
+function getAssumeRoleArn(
+  environment: string,
+  baseAccountId: string | null
+): { roleArn?: string; targetAccountId?: string } {
+  const explicitRoleArn = process.env.AWS_ASSUME_ROLE_ARN;
+  if (explicitRoleArn) {
+    return { roleArn: explicitRoleArn };
+  }
+
+  const targetAccountId =
+    process.env.AWS_TARGET_ACCOUNT_ID || getEnvironmentAccountId(environment);
+  if (!targetAccountId) {
+    return {};
+  }
+
+  if (baseAccountId && targetAccountId === baseAccountId) {
+    return {};
+  }
+
+  const roleName = process.env.AWS_ASSUME_ROLE_NAME || "GitHubDeploymentRole";
+  return {
+    roleArn: `arn:aws:iam::${targetAccountId}:role/${roleName}`,
+    targetAccountId,
+  };
+}
+
+async function createClients(
+  config: VerifyNetworkingStackConfig
+): Promise<{
   cfn: CloudFormationClient;
   ec2: EC2Client;
   sts: STSClient;
-} {
+  accountId: string | null;
+  baseAccountId: string | null;
+  assumedRoleArn?: string;
+}> {
   const clientConfig: { region: string } = {
     region: config.region,
   };
@@ -165,10 +213,62 @@ function createClients(config: VerifyNetworkingStackConfig): {
     Logger.info("Using OIDC credentials from environment variables");
   }
 
+  const baseSts = new STSClient(clientConfig);
+  const baseAccountId = await getAccountId(baseSts);
+  const { roleArn, targetAccountId } = getAssumeRoleArn(
+    config.environment,
+    baseAccountId
+  );
+
+  if (roleArn) {
+    Logger.info(
+      `Assuming role for verification: ${roleArn}${
+        targetAccountId ? ` (target account: ${targetAccountId})` : ""
+      }`
+    );
+
+    const assumeCommand = new AssumeRoleCommand({
+      RoleArn: roleArn,
+      RoleSessionName: `verify-networking-${Date.now()}`,
+    });
+
+    const assumeResponse = await baseSts.send(assumeCommand);
+    const assumedCredentials = assumeResponse.Credentials;
+
+    if (!assumedCredentials) {
+      throw new Error(
+        "Failed to assume role: no credentials returned from STS"
+      );
+    }
+
+    const assumedClientConfig = {
+      region: config.region,
+      credentials: {
+        accessKeyId: assumedCredentials.AccessKeyId ?? "",
+        secretAccessKey: assumedCredentials.SecretAccessKey ?? "",
+        sessionToken: assumedCredentials.SessionToken,
+      },
+    };
+
+    const assumedSts = new STSClient(assumedClientConfig);
+    const accountId = await getAccountId(assumedSts);
+
+    return {
+      cfn: new CloudFormationClient(assumedClientConfig),
+      ec2: new EC2Client(assumedClientConfig),
+      sts: assumedSts,
+      accountId,
+      baseAccountId,
+      assumedRoleArn: roleArn,
+    };
+  }
+
   return {
     cfn: new CloudFormationClient(clientConfig),
     ec2: new EC2Client(clientConfig),
-    sts: new STSClient(clientConfig),
+    sts: baseSts,
+    accountId: baseAccountId,
+    baseAccountId,
   };
 }
 
@@ -212,12 +312,18 @@ async function verifyNetworkingStack(
   }
   console.log("");
 
-  const { cfn, ec2, sts } = createClients(config);
-  const accountId = await getAccountId(sts);
+  const { cfn, ec2, accountId, baseAccountId, assumedRoleArn } =
+    await createClients(config);
+  if (assumedRoleArn) {
+    Logger.keyValue("Assumed Role ARN", assumedRoleArn);
+  }
+  if (baseAccountId && baseAccountId !== accountId) {
+    Logger.keyValue("Base Account ID", baseAccountId);
+  }
   if (accountId) {
     Logger.keyValue("AWS Account ID", accountId);
-    console.log("");
   }
+  console.log("");
 
   // Check 1: Stack exists and is in valid state
   summary.totalChecks++;
