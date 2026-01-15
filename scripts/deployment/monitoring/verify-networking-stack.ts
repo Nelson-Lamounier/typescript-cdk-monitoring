@@ -142,8 +142,27 @@ async function verifySubnets(
     });
 
     const response = await ec2Client.send(command);
-    return (response.Subnets?.length ?? 0) === subnetIds.length;
-  } catch {
+    const returnedSubnets = response.Subnets || [];
+    if (returnedSubnets.length === subnetIds.length) {
+      return true;
+    }
+
+    const returnedIds = new Set(
+      returnedSubnets.map((subnet) => subnet.SubnetId).filter(Boolean)
+    );
+    const missingIds = subnetIds.filter((id) => !returnedIds.has(id));
+
+    if (missingIds.length > 0) {
+      Logger.warning(
+        `Missing subnet IDs in DescribeSubnets response: ${missingIds.join(
+          ", "
+        )}`
+      );
+    }
+
+    return false;
+  } catch (error: any) {
+    Logger.warning(`DescribeSubnets failed: ${error.message}`);
     return false;
   }
 }

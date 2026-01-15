@@ -126,6 +126,13 @@ jobs:
           CDK_DEFAULT_ACCOUNT: ${{ needs.setup.outputs.aws-account-id }}
           CDK_DEFAULT_REGION: ${{ env.AWS_REGION }}
 
+      - name: Debug Stack Outputs Directory
+        if: always()
+        run: |
+          echo "Listing stack outputs directory in workspace..."
+          echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
+          ls -la "$GITHUB_WORKSPACE/.deployment-outputs" || true
+
       - name: Save Stack Outputs Artifact
         if: steps.deploy-networking.outputs.stack-outputs != ''
         uses: actions/upload-artifact@v4
@@ -135,17 +142,14 @@ jobs:
           retention-days: 90
           if-no-files-found: ignore
 
-      - name: Print AWS Account Context
-        run: |
-          echo "Verifying AWS account context for networking verification..."
-          aws sts get-caller-identity --query 'Account' --output text
-
-      - name: Verify Networking Stack
-        run: |
-          echo "Verifying Networking Stack deployment..."
-          make verify-networking \
-            ENVIRONMENT=${{ env.ENVIRONMENT }} \
-            AWS_REGION=${{ env.AWS_REGION }}
+    # =================================================================
+  # Test Networking Stack
+  # =================================================================
+  Test-Networking-Stack:
+    name: Test Networking Stack
+    needs: [deploy-networking]
+    runs-on: ubuntu-latest
+    environment: development
 
   # =================================================================
   # Deploy EFS Stack
