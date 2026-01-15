@@ -270,7 +270,7 @@ jobs:
   # =================================================================
   deploy-infra:
     name: Deploy Infrastructure Stack
-    needs: [setup, deploy-efs]
+    needs: [setup, deploy-efs, verify-efs]
     runs-on: ubuntu-latest
     environment: development
 
