@@ -151,6 +151,17 @@ jobs:
     runs-on: ubuntu-latest
     environment: development
 
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify Networking Stack
+        run: |
+          echo "Verifying Networking Stack deployment..."
+          make verify-networking \
+          ENVIRONMENT=${{ env.ENVIRONMENT }} \
+          AWS_REGION=${{ env.AWS_REGION }}
+
   # =================================================================
   # Deploy EFS Stack
   # =================================================================
