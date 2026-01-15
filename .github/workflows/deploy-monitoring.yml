@@ -135,6 +135,11 @@ jobs:
           retention-days: 90
           if-no-files-found: ignore
 
+      - name: Print AWS Account Context
+        run: |
+          echo "Verifying AWS account context for networking verification..."
+          aws sts get-caller-identity --query 'Account' --output text
+
       - name: Verify Networking Stack
         run: |
           echo "Verifying Networking Stack deployment..."

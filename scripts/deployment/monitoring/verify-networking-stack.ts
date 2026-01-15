@@ -13,6 +13,7 @@ import {
   DescribeVpcsCommand,
   DescribeSubnetsCommand,
 } from "@aws-sdk/client-ec2";
+import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
 
 import { Logger } from "../utils/logger.js";
 
@@ -144,6 +145,7 @@ async function verifySubnets(
 function createClients(config: VerifyNetworkingStackConfig): {
   cfn: CloudFormationClient;
   ec2: EC2Client;
+  sts: STSClient;
 } {
   const clientConfig: { region: string } = {
     region: config.region,
@@ -166,7 +168,19 @@ function createClients(config: VerifyNetworkingStackConfig): {
   return {
     cfn: new CloudFormationClient(clientConfig),
     ec2: new EC2Client(clientConfig),
+    sts: new STSClient(clientConfig),
   };
+}
+
+async function getAccountId(stsClient: STSClient): Promise<string | null> {
+  try {
+    const command = new GetCallerIdentityCommand({});
+    const response = await stsClient.send(command);
+    return response.Account ?? null;
+  } catch (error: any) {
+    Logger.warning(`Unable to determine AWS account ID: ${error.message}`);
+    return null;
+  }
 }
 
 async function verifyNetworkingStack(
@@ -198,7 +212,12 @@ async function verifyNetworkingStack(
   }
   console.log("");
 
-  const { cfn, ec2 } = createClients(config);
+  const { cfn, ec2, sts } = createClients(config);
+  const accountId = await getAccountId(sts);
+  if (accountId) {
+    Logger.keyValue("AWS Account ID", accountId);
+    console.log("");
+  }
 
   // Check 1: Stack exists and is in valid state
   summary.totalChecks++;
