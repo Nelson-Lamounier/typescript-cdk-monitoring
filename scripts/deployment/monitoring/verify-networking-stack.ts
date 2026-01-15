@@ -65,9 +65,11 @@ async function getStackStatus(
       if (output.OutputKey === "VpcId") {
         outputs.vpcId = output.OutputValue;
       } else if (output.OutputKey === "PrivateSubnetIds") {
-        outputs.privateSubnetIds = output.OutputValue?.split(",") || [];
+        outputs.privateSubnetIds =
+          output.OutputValue?.split(",").map((value) => value.trim()) || [];
       } else if (output.OutputKey === "PublicSubnetIds") {
-        outputs.publicSubnetIds = output.OutputValue?.split(",") || [];
+        outputs.publicSubnetIds =
+          output.OutputValue?.split(",").map((value) => value.trim()) || [];
       } else if (output.OutputKey === "SecurityGroupId") {
         outputs.securityGroupId = output.OutputValue;
       }

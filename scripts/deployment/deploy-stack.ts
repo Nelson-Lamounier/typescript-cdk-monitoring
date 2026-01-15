@@ -172,7 +172,8 @@ function saveOutputsSecurely(
   outputs: Record<string, string>,
   environment: string
 ): string {
-  const outputDir = path.join(process.cwd(), ".deployment-outputs");
+  const baseDir = process.env.GITHUB_WORKSPACE || process.cwd();
+  const outputDir = path.join(baseDir, ".deployment-outputs");
   if (!fs.existsSync(outputDir)) {
     fs.mkdirSync(outputDir, { recursive: true });
   }
