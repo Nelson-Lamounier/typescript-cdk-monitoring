@@ -16,6 +16,11 @@ import {
   DescribeAccessPointsCommand,
 } from "@aws-sdk/client-efs";
 import {
+  STSClient,
+  GetCallerIdentityCommand,
+  AssumeRoleCommand,
+} from "@aws-sdk/client-sts";
+import {
   SSMClient,
   DescribeDocumentCommand,
   GetParameterCommand,
@@ -75,6 +80,45 @@ const DISCOVERY_PARAMS_NEW = [
   "efs-sg-id",
   "efs-az",
 ];
+
+function getEnvironmentAccountId(environment: string): string | undefined {
+  const envKeyMap: Record<string, string> = {
+    development: "AWS_ACCOUNT_ID_DEV",
+    staging: "AWS_ACCOUNT_ID_STAGING",
+    production: "AWS_ACCOUNT_ID_PROD",
+  };
+  const envVarName = envKeyMap[environment];
+  if (!envVarName) {
+    return undefined;
+  }
+  return process.env[envVarName];
+}
+
+function getAssumeRoleArn(
+  environment: string,
+  baseAccountId: string | null
+): { roleArn?: string; targetAccountId?: string } {
+  const explicitRoleArn = process.env.AWS_ASSUME_ROLE_ARN;
+  if (explicitRoleArn) {
+    return { roleArn: explicitRoleArn };
+  }
+
+  const targetAccountId =
+    process.env.AWS_TARGET_ACCOUNT_ID || getEnvironmentAccountId(environment);
+  if (!targetAccountId) {
+    return {};
+  }
+
+  if (baseAccountId && targetAccountId === baseAccountId) {
+    return {};
+  }
+
+  const roleName = process.env.AWS_ASSUME_ROLE_NAME || "GitHubDeploymentRole";
+  return {
+    roleArn: `arn:aws:iam::${targetAccountId}:role/${roleName}`,
+    targetAccountId,
+  };
+}
 
 async function getStackStatus(
   cfnClient: CloudFormationClient,
@@ -275,6 +319,107 @@ async function getSecurityGroup(
   }
 }
 
+async function getAccountId(stsClient: STSClient): Promise<string | null> {
+  try {
+    const command = new GetCallerIdentityCommand({});
+    const response = await stsClient.send(command);
+    return response.Account ?? null;
+  } catch (error: any) {
+    Logger.warning(`Unable to determine AWS account ID: ${error.message}`);
+    return null;
+  }
+}
+
+async function createClients(
+  config: VerifyEfsStackConfig
+): Promise<{
+  cfn: CloudFormationClient;
+  ssm: SSMClient;
+  efs: EFSClient;
+  ec2: EC2Client;
+  accountId: string | null;
+  baseAccountId: string | null;
+  assumedRoleArn?: string;
+}> {
+  const clientConfig: { region: string } = {
+    region: config.region,
+  };
+
+  // In CI/CD (OIDC), use environment variables, not profiles
+  // If AWS_SESSION_TOKEN is set, we're using OIDC credentials
+  const isOidcAuth = !!process.env.AWS_SESSION_TOKEN;
+
+  if (config.profile && !isOidcAuth) {
+    // Only use profile for local development when not using OIDC
+    process.env.AWS_PROFILE = config.profile;
+    Logger.info(`Using AWS profile: ${config.profile}`);
+  } else if (isOidcAuth) {
+    // Clear AWS_PROFILE if set to ensure SDK uses OIDC credentials
+    delete process.env.AWS_PROFILE;
+    Logger.info("Using OIDC credentials from environment variables");
+  }
+
+  const baseSts = new STSClient(clientConfig);
+  const baseAccountId = await getAccountId(baseSts);
+  const { roleArn, targetAccountId } = getAssumeRoleArn(
+    config.environment,
+    baseAccountId
+  );
+
+  if (roleArn) {
+    Logger.info(
+      `Assuming role for verification: ${roleArn}${
+        targetAccountId ? ` (target account: ${targetAccountId})` : ""
+      }`
+    );
+
+    const assumeCommand = new AssumeRoleCommand({
+      RoleArn: roleArn,
+      RoleSessionName: `verify-efs-${Date.now()}`,
+    });
+
+    const assumeResponse = await baseSts.send(assumeCommand);
+    const assumedCredentials = assumeResponse.Credentials;
+
+    if (!assumedCredentials) {
+      throw new Error(
+        "Failed to assume role: no credentials returned from STS"
+      );
+    }
+
+    const assumedClientConfig = {
+      region: config.region,
+      credentials: {
+        accessKeyId: assumedCredentials.AccessKeyId ?? "",
+        secretAccessKey: assumedCredentials.SecretAccessKey ?? "",
+        sessionToken: assumedCredentials.SessionToken,
+      },
+    };
+
+    const assumedSts = new STSClient(assumedClientConfig);
+    const accountId = await getAccountId(assumedSts);
+
+    return {
+      cfn: new CloudFormationClient(assumedClientConfig),
+      ssm: new SSMClient(assumedClientConfig),
+      efs: new EFSClient(assumedClientConfig),
+      ec2: new EC2Client(assumedClientConfig),
+      accountId,
+      baseAccountId,
+      assumedRoleArn: roleArn,
+    };
+  }
+
+  return {
+    cfn: new CloudFormationClient(clientConfig),
+    ssm: new SSMClient(clientConfig),
+    efs: new EFSClient(clientConfig),
+    ec2: new EC2Client(clientConfig),
+    accountId: baseAccountId,
+    baseAccountId,
+  };
+}
+
 function formatTable(data: Array<{ Key: string; Value: string }>): void {
   if (data.length === 0) {
     console.log("  (no outputs)");
@@ -317,30 +462,47 @@ async function verifyEfsStack(
 ): Promise<VerificationSummary> {
   Logger.section(`EFS Stack Verification - ${config.environment}`);
 
-  Logger.keyValue("Profile", config.profile || "default");
-  Logger.keyValue("Region", config.region);
-  Logger.keyValue("Stack Name", `${config.environment}-MonitoringEfs`);
-  Logger.keyValue("Timestamp", new Date().toISOString());
-  console.log("");
-
-  // Configure AWS clients
-  const clientConfig: { region: string } = {
-    region: config.region,
-  };
-
-  if (config.profile) {
-    process.env.AWS_PROFILE = config.profile;
-    Logger.info(`Using AWS profile: ${config.profile}`);
-  }
-
-  const cfnClient = new CloudFormationClient(clientConfig);
-  const ssmClient = new SSMClient(clientConfig);
-  const efsClient = new EFSClient(clientConfig);
-  const ec2Client = new EC2Client(clientConfig);
-
   const stackName = `${config.environment}-MonitoringEfs`;
   const documentName = `${stackName}-${config.environment}-efs-init`;
   const paramPrefix = `/monitoring/${config.environment}`;
+
+  Logger.subsection("Configuration");
+  Logger.keyValue("Stack Name", stackName);
+  Logger.keyValue("Environment", config.environment);
+  Logger.keyValue("Region", config.region);
+
+  // Detect authentication method
+  const isOidcAuth = !!process.env.AWS_SESSION_TOKEN;
+  if (isOidcAuth) {
+    Logger.keyValue("Auth Method", "OIDC (environment variables)");
+  } else if (config.profile) {
+    Logger.keyValue("Auth Method", `AWS Profile: ${config.profile}`);
+  } else {
+    Logger.keyValue("Auth Method", "Default credentials");
+  }
+  console.log("");
+
+  const {
+    cfn: cfnClient,
+    ssm: ssmClient,
+    efs: efsClient,
+    ec2: ec2Client,
+    accountId,
+    baseAccountId,
+    assumedRoleArn,
+  } = await createClients(config);
+
+  if (assumedRoleArn) {
+    Logger.keyValue("Assumed Role ARN", assumedRoleArn);
+  }
+  if (baseAccountId && baseAccountId !== accountId) {
+    Logger.keyValue("Base Account ID", baseAccountId);
+  }
+  if (accountId) {
+    Logger.keyValue("AWS Account ID", accountId);
+  }
+  Logger.keyValue("Timestamp", new Date().toISOString());
+  console.log("");
 
   const summary: VerificationSummary = {
     checksPassed: 0,
