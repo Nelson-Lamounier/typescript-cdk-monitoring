@@ -1,6 +1,6 @@
 # @format
 
-# .github/workflows/deploy-monitoring-development.yml // testing
+# .github/workflows/deploy-monitoring-development.yml //
 name: Deploy Monitoring to Development
 
 on:
