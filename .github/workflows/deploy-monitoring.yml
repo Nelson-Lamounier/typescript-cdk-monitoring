@@ -7,13 +7,13 @@ on:
   push:
     branches:
       - develop
-    paths:
-      - "lib/stacks/**"
-      - "bin/**"
-      - "config/**"
-      - "scripts/deployment/**"
-      - "Makefile"
-      - ".github/workflows/deploy-monitoring.yml"
+    # paths:
+    #   - "lib/stacks/**"
+    #   - "bin/**"
+    #   - "config/**"
+    #   - "scripts/deployment/**"
+    #   - "Makefile"
+    #   - ".github/workflows/deploy-monitoring.yml"
   workflow_dispatch:
     inputs:
       skip_tests:
