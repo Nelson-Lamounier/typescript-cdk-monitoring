@@ -140,12 +140,13 @@ jobs:
           path: ${{ github.workspace }}/.deployment-outputs/${{ env.ENVIRONMENT }}-Networking-*.json
           retention-days: 90
           if-no-files-found: ignore
+          include-hidden-files: true
 
     # =================================================================
-  # Test Networking Stack
+  # Verify Networking Stack
   # =================================================================
-  test-Networking-Stack:
-    name: Test Networking Stack
+  verify-networking:
+    name: Verify Networking Stack
     needs: [deploy-networking]
     runs-on: ubuntu-latest
     environment: development
@@ -174,7 +175,7 @@ jobs:
   # =================================================================
   deploy-efs:
     name: Deploy EFS Stack
-    needs: [setup, deploy-networking, test-Networking-Stack]
+    needs: [setup, deploy-networking, verify-networking]
     runs-on: ubuntu-latest
     environment: development
 
