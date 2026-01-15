@@ -244,7 +244,7 @@ export class MonitoringInfraStack extends cdk.Stack {
     const desiredCapacity =
       props.desiredCapacity ?? capacityDefaults.desiredCapacity;
 
-    validateCapacityOrder(minCapacity, maxCapacity, desiredCapacity);
+    validateCapacityOrder(minCapacity, desiredCapacity, maxCapacity);
 
     const instanceType =
       props.instanceType ??
