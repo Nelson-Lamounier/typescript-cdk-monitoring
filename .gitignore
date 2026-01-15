@@ -52,5 +52,8 @@ yarn-error.log*
 coverage/
 .nyc_output
 
+# Integration test generated templates
+tests/integration/.generated-templates/
+
 # Deployment outputs (contains sensitive information)
 .deployment-outputs/
