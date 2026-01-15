@@ -12,6 +12,11 @@ import {
   CloudFormationClient,
   DescribeStacksCommand,
 } from "@aws-sdk/client-cloudformation";
+import {
+  STSClient,
+  GetCallerIdentityCommand,
+  AssumeRoleCommand,
+} from "@aws-sdk/client-sts";
 
 import { AWSHelpers } from "./utils/aws-helpers.js";
 import { ErrorMessages } from "./utils/error-messages.js";
@@ -33,9 +38,10 @@ function maskSensitiveValue(value: string): void {
  */
 async function getStackOutputs(
   stackName: string,
-  region: string
+  region: string,
+  environment: string
 ): Promise<Record<string, string>> {
-  const cfnClient = new CloudFormationClient({ region });
+  const cfnClient = await createCfnClientForOutputs(region, environment);
 
   try {
     const command = new DescribeStacksCommand({
@@ -61,6 +67,101 @@ async function getStackOutputs(
     Logger.warning(`Failed to retrieve stack outputs: ${error.message}`);
     return {};
   }
+}
+
+async function getAccountId(stsClient: STSClient): Promise<string | null> {
+  try {
+    const command = new GetCallerIdentityCommand({});
+    const response = await stsClient.send(command);
+    return response.Account ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function getEnvironmentAccountId(environment: string): string | undefined {
+  const envKeyMap: Record<string, string> = {
+    development: "AWS_ACCOUNT_ID_DEV",
+    staging: "AWS_ACCOUNT_ID_STAGING",
+    production: "AWS_ACCOUNT_ID_PROD",
+  };
+  const envVarName = envKeyMap[environment];
+  if (!envVarName) {
+    return undefined;
+  }
+  return process.env[envVarName];
+}
+
+function getAssumeRoleArn(
+  environment: string,
+  baseAccountId: string | null
+): { roleArn?: string; targetAccountId?: string } {
+  const explicitRoleArn = process.env.AWS_ASSUME_ROLE_ARN;
+  if (explicitRoleArn) {
+    return { roleArn: explicitRoleArn };
+  }
+
+  const targetAccountId =
+    process.env.AWS_TARGET_ACCOUNT_ID || getEnvironmentAccountId(environment);
+  if (!targetAccountId) {
+    return {};
+  }
+
+  if (baseAccountId && targetAccountId === baseAccountId) {
+    return {};
+  }
+
+  const roleName = process.env.AWS_ASSUME_ROLE_NAME || "GitHubDeploymentRole";
+  return {
+    roleArn: `arn:aws:iam::${targetAccountId}:role/${roleName}`,
+    targetAccountId,
+  };
+}
+
+async function createCfnClientForOutputs(
+  region: string,
+  environment: string
+): Promise<CloudFormationClient> {
+  const baseSts = new STSClient({ region });
+  const baseAccountId = await getAccountId(baseSts);
+  const { roleArn, targetAccountId } = getAssumeRoleArn(
+    environment,
+    baseAccountId
+  );
+
+  if (roleArn) {
+    Logger.info(
+      `Assuming role for stack outputs: ${roleArn}${
+        targetAccountId ? ` (target account: ${targetAccountId})` : ""
+      }`
+    );
+
+    const assumeCommand = new AssumeRoleCommand({
+      RoleArn: roleArn,
+      RoleSessionName: `deploy-stack-outputs-${Date.now()}`,
+    });
+    const assumeResponse = await baseSts.send(assumeCommand);
+    const assumedCredentials = assumeResponse.Credentials;
+
+    if (!assumedCredentials) {
+      throw new Error(
+        "Failed to assume role for stack outputs: no credentials returned"
+      );
+    }
+
+    const assumedClientConfig = {
+      region,
+      credentials: {
+        accessKeyId: assumedCredentials.AccessKeyId ?? "",
+        secretAccessKey: assumedCredentials.SecretAccessKey ?? "",
+        sessionToken: assumedCredentials.SessionToken,
+      },
+    };
+
+    return new CloudFormationClient(assumedClientConfig);
+  }
+
+  return new CloudFormationClient({ region });
 }
 
 /**
@@ -207,7 +308,8 @@ async function deployStack(
     Logger.subsection("Retrieving Stack Outputs");
     const stackOutputs = await getStackOutputs(
       config.stackName,
-      config.awsRegion
+      config.awsRegion,
+      config.environment
     );
 
     if (Object.keys(stackOutputs).length > 0) {
