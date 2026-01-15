@@ -265,8 +265,16 @@ async function getEfsFileSystem(
     });
 
     const response = await efsClient.send(command);
+    if (!response.FileSystems || response.FileSystems.length === 0) {
+      Logger.warning(
+        `DescribeFileSystems returned no results for ${fileSystemId}`
+      );
+    }
     return response.FileSystems?.[0];
-  } catch {
+  } catch (error: any) {
+    Logger.warning(
+      `DescribeFileSystems failed for ${fileSystemId}: ${error.message}`
+    );
     return null;
   }
 }
@@ -282,7 +290,10 @@ async function getMountTargets(
 
     const response = await efsClient.send(command);
     return response.MountTargets || [];
-  } catch {
+  } catch (error: any) {
+    Logger.warning(
+      `DescribeMountTargets failed for ${fileSystemId}: ${error.message}`
+    );
     return [];
   }
 }
@@ -298,7 +309,10 @@ async function getAccessPoint(
 
     const response = await efsClient.send(command);
     return response.AccessPoints?.[0];
-  } catch {
+  } catch (error: any) {
+    Logger.warning(
+      `DescribeAccessPoints failed for ${accessPointId}: ${error.message}`
+    );
     return null;
   }
 }

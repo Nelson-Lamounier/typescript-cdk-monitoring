@@ -224,9 +224,7 @@ async function getAccountId(stsClient: STSClient): Promise<string | null> {
   }
 }
 
-async function createClients(
-  config: VerifyInfraStackConfig
-): Promise<{
+async function createClients(config: VerifyInfraStackConfig): Promise<{
   cfn: CloudFormationClient;
   ecs: ECSClient;
   asg: AutoScalingClient;
