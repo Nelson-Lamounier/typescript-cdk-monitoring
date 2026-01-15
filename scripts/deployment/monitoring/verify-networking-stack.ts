@@ -185,9 +185,7 @@ function getAssumeRoleArn(
   };
 }
 
-async function createClients(
-  config: VerifyNetworkingStackConfig
-): Promise<{
+async function createClients(config: VerifyNetworkingStackConfig): Promise<{
   cfn: CloudFormationClient;
   ec2: EC2Client;
   sts: STSClient;

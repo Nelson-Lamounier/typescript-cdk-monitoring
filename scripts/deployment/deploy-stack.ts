@@ -145,7 +145,7 @@ async function deployStack(
   process.env.CDK_ENVIRONMENT = config.environment;
   process.env.PROJECT_NAME = config.projectName;
   process.env.AWS_REGION = config.awsRegion;
-  process.env.AWS_PIPELINE_ACCOUNT_ID = config.awsAccountId;
+  process.env.AWS_ACCOUNT_ID_DEV = config.awsAccountId;
 
   if (config.devVpcId) {
     process.env.DEV_VPC_ID = config.devVpcId;
