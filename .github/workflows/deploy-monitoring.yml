@@ -303,14 +303,49 @@ jobs:
           CDK_DEFAULT_ACCOUNT: ${{ needs.setup.outputs.aws-account-id }}
           CDK_DEFAULT_REGION: ${{ env.AWS_REGION }}
 
+      - name: Debug Stack Outputs Directory
+        if: always()
+        run: |
+          echo "Listing stack outputs directory in workspace..."
+          echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
+          ls -la "$GITHUB_WORKSPACE/.deployment-outputs" || true
+
       - name: Save Stack Outputs Artifact
-        if: steps.deploy-infra.outputs.stack-outputs != ''
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ENVIRONMENT }}-MonitoringInfra-outputs
-          path: .deployment-outputs/${{ env.ENVIRONMENT }}-MonitoringInfra-*.json
+          path: ${{ github.workspace }}/.deployment-outputs/${{ env.ENVIRONMENT }}-MonitoringInfra-*.json
           retention-days: 90
           if-no-files-found: ignore
+          include-hidden-files: true
+
+  # =================================================================
+  # Verify Infrastructure Stack
+  # =================================================================
+  verify-infra:
+    name: Verify Infrastructure Stack
+    needs: [deploy-infra]
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Infrastructure
+        uses: ./.github/actions/setup-infrastructure
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Verify Infrastructure Stack
         run: |
@@ -324,7 +359,7 @@ jobs:
   # =================================================================
   deploy-service:
     name: Deploy Service Stack
-    needs: [setup, deploy-infra]
+    needs: [setup, deploy-infra, verify-infra]
     runs-on: ubuntu-latest
     environment: development
 
@@ -357,14 +392,49 @@ jobs:
           CDK_DEFAULT_ACCOUNT: ${{ needs.setup.outputs.aws-account-id }}
           CDK_DEFAULT_REGION: ${{ env.AWS_REGION }}
 
+      - name: Debug Stack Outputs Directory
+        if: always()
+        run: |
+          echo "Listing stack outputs directory in workspace..."
+          echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
+          ls -la "$GITHUB_WORKSPACE/.deployment-outputs" || true
+
       - name: Save Stack Outputs Artifact
-        if: steps.deploy-service.outputs.stack-outputs != ''
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ENVIRONMENT }}-MonitoringService-outputs
-          path: .deployment-outputs/${{ env.ENVIRONMENT }}-MonitoringService-*.json
+          path: ${{ github.workspace }}/.deployment-outputs/${{ env.ENVIRONMENT }}-MonitoringService-*.json
           retention-days: 90
           if-no-files-found: ignore
+          include-hidden-files: true
+
+  # =================================================================
+  # Verify Service Stack
+  # =================================================================
+  verify-service:
+    name: Verify Service Stack
+    needs: [deploy-service]
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Infrastructure
+        uses: ./.github/actions/setup-infrastructure
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Verify Service Stack
         run: |
@@ -378,7 +448,14 @@ jobs:
   # =================================================================
   deployment-summary:
     name: Deployment Summary
-    needs: [deploy-networking, deploy-efs, deploy-infra, deploy-service]
+    needs:
+      [
+        deploy-networking,
+        deploy-efs,
+        deploy-infra,
+        deploy-service,
+        verify-service,
+      ]
     runs-on: ubuntu-latest
     environment: development
     if: always()

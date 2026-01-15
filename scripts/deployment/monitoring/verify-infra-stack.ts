@@ -29,6 +29,11 @@ import {
   DescribeTargetGroupsCommand,
 } from "@aws-sdk/client-elastic-load-balancing-v2";
 import {
+  STSClient,
+  GetCallerIdentityCommand,
+  AssumeRoleCommand,
+} from "@aws-sdk/client-sts";
+import {
   CloudWatchLogsClient,
   DescribeLogGroupsCommand,
 } from "@aws-sdk/client-cloudwatch-logs";
@@ -128,6 +133,45 @@ const CONFIG_PARAMS = [
   "grafana-dashboard-config-yaml",
 ];
 
+function getEnvironmentAccountId(environment: string): string | undefined {
+  const envKeyMap: Record<string, string> = {
+    development: "AWS_ACCOUNT_ID_DEV",
+    staging: "AWS_ACCOUNT_ID_STAGING",
+    production: "AWS_ACCOUNT_ID_PROD",
+  };
+  const envVarName = envKeyMap[environment];
+  if (!envVarName) {
+    return undefined;
+  }
+  return process.env[envVarName];
+}
+
+function getAssumeRoleArn(
+  environment: string,
+  baseAccountId: string | null
+): { roleArn?: string; targetAccountId?: string } {
+  const explicitRoleArn = process.env.AWS_ASSUME_ROLE_ARN;
+  if (explicitRoleArn) {
+    return { roleArn: explicitRoleArn };
+  }
+
+  const targetAccountId =
+    process.env.AWS_TARGET_ACCOUNT_ID || getEnvironmentAccountId(environment);
+  if (!targetAccountId) {
+    return {};
+  }
+
+  if (baseAccountId && targetAccountId === baseAccountId) {
+    return {};
+  }
+
+  const roleName = process.env.AWS_ASSUME_ROLE_NAME || "GitHubDeploymentRole";
+  return {
+    roleArn: `arn:aws:iam::${targetAccountId}:role/${roleName}`,
+    targetAccountId,
+  };
+}
+
 function sleep(seconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 }
@@ -167,6 +211,122 @@ function formatTable(data: Array<{ Key: string; Value: string }>): void {
   });
 
   console.log(separator);
+}
+
+async function getAccountId(stsClient: STSClient): Promise<string | null> {
+  try {
+    const command = new GetCallerIdentityCommand({});
+    const response = await stsClient.send(command);
+    return response.Account ?? null;
+  } catch (error: any) {
+    Logger.warning(`Unable to determine AWS account ID: ${error.message}`);
+    return null;
+  }
+}
+
+async function createClients(
+  config: VerifyInfraStackConfig
+): Promise<{
+  cfn: CloudFormationClient;
+  ecs: ECSClient;
+  asg: AutoScalingClient;
+  ec2: EC2Client;
+  elbv2: ElasticLoadBalancingV2Client;
+  logs: CloudWatchLogsClient;
+  efs: EFSClient;
+  ssm: SSMClient;
+  eventBridge: EventBridgeClient;
+  accountId: string | null;
+  baseAccountId: string | null;
+  assumedRoleArn?: string;
+}> {
+  const clientConfig: { region: string } = {
+    region: config.region,
+  };
+
+  // In CI/CD (OIDC), use environment variables, not profiles
+  // If AWS_SESSION_TOKEN is set, we're using OIDC credentials
+  const isOidcAuth = !!process.env.AWS_SESSION_TOKEN;
+
+  if (config.profile && !isOidcAuth) {
+    // Only use profile for local development when not using OIDC
+    process.env.AWS_PROFILE = config.profile;
+    Logger.info(`Using AWS profile: ${config.profile}`);
+  } else if (isOidcAuth) {
+    // Clear AWS_PROFILE if set to ensure SDK uses OIDC credentials
+    delete process.env.AWS_PROFILE;
+    Logger.info("Using OIDC credentials from environment variables");
+  }
+
+  const baseSts = new STSClient(clientConfig);
+  const baseAccountId = await getAccountId(baseSts);
+  const { roleArn, targetAccountId } = getAssumeRoleArn(
+    config.environment,
+    baseAccountId
+  );
+
+  if (roleArn) {
+    Logger.info(
+      `Assuming role for verification: ${roleArn}${
+        targetAccountId ? ` (target account: ${targetAccountId})` : ""
+      }`
+    );
+
+    const assumeCommand = new AssumeRoleCommand({
+      RoleArn: roleArn,
+      RoleSessionName: `verify-infra-${Date.now()}`,
+    });
+
+    const assumeResponse = await baseSts.send(assumeCommand);
+    const assumedCredentials = assumeResponse.Credentials;
+
+    if (!assumedCredentials) {
+      throw new Error(
+        "Failed to assume role: no credentials returned from STS"
+      );
+    }
+
+    const assumedClientConfig = {
+      region: config.region,
+      credentials: {
+        accessKeyId: assumedCredentials.AccessKeyId ?? "",
+        secretAccessKey: assumedCredentials.SecretAccessKey ?? "",
+        sessionToken: assumedCredentials.SessionToken,
+      },
+    };
+
+    const assumedSts = new STSClient(assumedClientConfig);
+    const accountId = await getAccountId(assumedSts);
+
+    return {
+      cfn: new CloudFormationClient(assumedClientConfig),
+      ecs: new ECSClient(assumedClientConfig),
+      asg: new AutoScalingClient(assumedClientConfig),
+      ec2: new EC2Client(assumedClientConfig),
+      elbv2: new ElasticLoadBalancingV2Client(assumedClientConfig),
+      logs: new CloudWatchLogsClient(assumedClientConfig),
+      efs: new EFSClient(assumedClientConfig),
+      ssm: new SSMClient(assumedClientConfig),
+      eventBridge: new EventBridgeClient(assumedClientConfig),
+      accountId,
+      baseAccountId,
+      assumedRoleArn: roleArn,
+    };
+  }
+
+  return {
+    cfn: new CloudFormationClient(clientConfig),
+    ecs: new ECSClient(clientConfig),
+    asg: new AutoScalingClient(clientConfig),
+    ec2: new EC2Client(clientConfig),
+    elbv2: new ElasticLoadBalancingV2Client(clientConfig),
+    logs: new CloudWatchLogsClient(clientConfig),
+    efs: new EFSClient(clientConfig),
+    ssm: new SSMClient(clientConfig),
+    eventBridge: new EventBridgeClient(clientConfig),
+    accountId: baseAccountId,
+    baseAccountId,
+  };
 }
 
 async function getStackStatus(
@@ -632,12 +792,6 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
 }> {
   Logger.section(`MonitoringInfra Stack Verification - ${config.environment}`);
 
-  Logger.keyValue("Profile", config.profile || "default");
-  Logger.keyValue("Region", config.region);
-  Logger.keyValue("Stack Name", `${config.environment}-MonitoringInfra`);
-  Logger.keyValue("Timestamp", new Date().toISOString());
-  console.log("");
-
   const checks: CheckCounts = {
     total: 0,
     passed: 0,
@@ -657,27 +811,51 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
     readinessIssues: 0,
   };
 
-  // Configure AWS clients
-  const clientConfig: { region: string } = {
-    region: config.region,
-  };
-
-  if (config.profile) {
-    process.env.AWS_PROFILE = config.profile;
-  }
-
-  const cfnClient = new CloudFormationClient(clientConfig);
-  const ecsClient = new ECSClient(clientConfig);
-  const asgClient = new AutoScalingClient(clientConfig);
-  const ec2Client = new EC2Client(clientConfig);
-  const elbv2Client = new ElasticLoadBalancingV2Client(clientConfig);
-  const logsClient = new CloudWatchLogsClient(clientConfig);
-  const efsClient = new EFSClient(clientConfig);
-  const ssmClient = new SSMClient(clientConfig);
-  const eventBridgeClient = new EventBridgeClient(clientConfig);
-
   const stackName = `${config.environment}-MonitoringInfra`;
   const paramPrefix = `/monitoring/${config.environment}`;
+
+  Logger.subsection("Configuration");
+  Logger.keyValue("Stack Name", stackName);
+  Logger.keyValue("Environment", config.environment);
+  Logger.keyValue("Region", config.region);
+
+  // Detect authentication method
+  const isOidcAuth = !!process.env.AWS_SESSION_TOKEN;
+  if (isOidcAuth) {
+    Logger.keyValue("Auth Method", "OIDC (environment variables)");
+  } else if (config.profile) {
+    Logger.keyValue("Auth Method", `AWS Profile: ${config.profile}`);
+  } else {
+    Logger.keyValue("Auth Method", "Default credentials");
+  }
+  console.log("");
+
+  const {
+    cfn: cfnClient,
+    ecs: ecsClient,
+    asg: asgClient,
+    ec2: ec2Client,
+    elbv2: elbv2Client,
+    logs: logsClient,
+    efs: efsClient,
+    ssm: ssmClient,
+    eventBridge: eventBridgeClient,
+    accountId,
+    baseAccountId,
+    assumedRoleArn,
+  } = await createClients(config);
+
+  if (assumedRoleArn) {
+    Logger.keyValue("Assumed Role ARN", assumedRoleArn);
+  }
+  if (baseAccountId && baseAccountId !== accountId) {
+    Logger.keyValue("Base Account ID", baseAccountId);
+  }
+  if (accountId) {
+    Logger.keyValue("AWS Account ID", accountId);
+  }
+  Logger.keyValue("Timestamp", new Date().toISOString());
+  console.log("");
 
   // 1. CloudFormation Stack
   Logger.subsection("1. CloudFormation Stack Status");

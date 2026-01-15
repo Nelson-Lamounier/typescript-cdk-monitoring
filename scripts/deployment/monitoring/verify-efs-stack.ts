@@ -330,9 +330,7 @@ async function getAccountId(stsClient: STSClient): Promise<string | null> {
   }
 }
 
-async function createClients(
-  config: VerifyEfsStackConfig
-): Promise<{
+async function createClients(config: VerifyEfsStackConfig): Promise<{
   cfn: CloudFormationClient;
   ssm: SSMClient;
   efs: EFSClient;
