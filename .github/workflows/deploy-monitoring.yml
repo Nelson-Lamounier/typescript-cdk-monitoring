@@ -154,14 +154,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup CDK Deployment Environment
-        uses: ./.github/actions/setup-cdk-deployment
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          aws-role: ${{ secrets.AWS_OIDC_ROLE }}
+
+      - name: Setup Infrastructure
+        uses: ./.github/actions/setup-infrastructure
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
-          build-cache-key: ${{ needs.setup.outputs.cache-key }}
-          environment-name: ${{ env.ENVIRONMENT }}
 
       - name: Verify Networking Stack
         run: |
