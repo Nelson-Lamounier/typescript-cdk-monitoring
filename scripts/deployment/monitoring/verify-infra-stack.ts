@@ -133,6 +133,23 @@ const CONFIG_PARAMS = [
   "grafana-dashboard-config-yaml",
 ];
 
+function logPermissionWarning(action: string, error: any): void {
+  if (!error) {
+    return;
+  }
+  const name = String(error.name || "");
+  const message = String(error.message || "");
+  const isDenied =
+    name.includes("AccessDenied") ||
+    name.includes("Unauthorized") ||
+    message.includes("AccessDenied") ||
+    message.includes("Unauthorized");
+
+  if (isDenied) {
+    Logger.warning(`Permission denied for ${action}: ${message}`);
+  }
+}
+
 function getEnvironmentAccountId(environment: string): string | undefined {
   const envKeyMap: Record<string, string> = {
     development: "AWS_ACCOUNT_ID_DEV",
@@ -378,6 +395,7 @@ async function getStackStatus(
     if (error.name === "ValidationError") {
       return null;
     }
+    logPermissionWarning("CloudFormation DescribeStacks", error);
     throw error;
   }
 }
@@ -393,7 +411,8 @@ async function getEcsCluster(
 
     const response = await ecsClient.send(command);
     return response.clusters?.[0];
-  } catch {
+  } catch (error: any) {
+    logPermissionWarning("ECS DescribeClusters", error);
     return null;
   }
 }
@@ -409,7 +428,8 @@ async function getAutoScalingGroup(
 
     const response = await asgClient.send(command);
     return response.AutoScalingGroups?.[0];
-  } catch {
+  } catch (error: any) {
+    logPermissionWarning("Auto Scaling DescribeAutoScalingGroups", error);
     return null;
   }
 }
@@ -442,7 +462,8 @@ async function getInstanceHealth(
     });
 
     return { healthy, unhealthy };
-  } catch {
+  } catch (error: any) {
+    logPermissionWarning("EC2 DescribeInstanceStatus", error);
     return { healthy: 0, unhealthy: instanceIds.length };
   }
 }
@@ -460,7 +481,8 @@ async function getLoadBalancer(
 
     const response = await elbv2Client.send(command);
     return response.LoadBalancers?.find((lb: any) => lb.DNSName === dnsName);
-  } catch {
+  } catch (error: any) {
+    logPermissionWarning("ELBv2 DescribeLoadBalancers", error);
     return null;
   }
 }
@@ -476,7 +498,8 @@ async function getListener(
 
     const response = await elbv2Client.send(command);
     return response.Listeners?.[0];
-  } catch {
+  } catch (error: any) {
+    logPermissionWarning("ELBv2 DescribeListeners", error);
     return null;
   }
 }
@@ -492,7 +515,8 @@ async function getTargetGroups(
 
     const response = await elbv2Client.send(command);
     return response.TargetGroups || [];
-  } catch {
+  } catch (error: any) {
+    logPermissionWarning("ELBv2 DescribeTargetGroups", error);
     return [];
   }
 }
@@ -531,7 +555,11 @@ async function getSecurityGroups(
 
     const sgResponse = await ec2Client.send(describeCommand);
     return sgResponse.SecurityGroups || [];
-  } catch {
+  } catch (error: any) {
+    logPermissionWarning(
+      "CloudFormation ListStackResources / EC2 DescribeSecurityGroups",
+      error
+    );
     return [];
   }
 }
@@ -547,7 +575,8 @@ async function getLogGroup(
 
     const response = await logsClient.send(command);
     return response.logGroups?.[0];
-  } catch {
+  } catch (error: any) {
+    logPermissionWarning("CloudWatchLogs DescribeLogGroups", error);
     return null;
   }
 }
@@ -571,7 +600,8 @@ async function getEfsFileSystemId(
       if (response.Parameter?.Value) {
         return response.Parameter.Value;
       }
-    } catch {
+    } catch (error: any) {
+      logPermissionWarning(`SSM GetParameter ${path}`, error);
       // Try next path
     }
   }
@@ -598,7 +628,8 @@ async function getEfsAvailabilityZone(
       if (response.Parameter?.Value) {
         return response.Parameter.Value;
       }
-    } catch {
+    } catch (error: any) {
+      logPermissionWarning(`SSM GetParameter ${path}`, error);
       // Try next path
     }
   }
@@ -617,7 +648,8 @@ async function getMountTargets(
 
     const response = await efsClient.send(command);
     return response.MountTargets || [];
-  } catch {
+  } catch (error: any) {
+    logPermissionWarning("EFS DescribeMountTargets", error);
     return [];
   }
 }
@@ -638,7 +670,8 @@ async function getSsmAssociations(
         assoc.AssociationName?.includes(stackName) ||
         assoc.AssociationName?.includes(environment)
     );
-  } catch {
+  } catch (error: any) {
+    logPermissionWarning("SSM ListAssociations", error);
     return [];
   }
 }
@@ -665,7 +698,8 @@ async function getAssociationExecutions(
 
     const response = await ssmClient.send(command);
     return response.AssociationExecutions || [];
-  } catch {
+  } catch (error: any) {
+    logPermissionWarning("SSM DescribeAssociationExecutions", error);
     return [];
   }
 }
@@ -688,6 +722,7 @@ async function checkSsmParameter(
     if (error.name === "ParameterNotFound") {
       return { exists: false };
     }
+    logPermissionWarning(`SSM GetParameter ${paramName}`, error);
     throw error;
   }
 }
@@ -755,7 +790,8 @@ async function verifyEfsMount(
       directoryStructureOk,
       output,
     };
-  } catch {
+  } catch (error: any) {
+    logPermissionWarning("SSM SendCommand/GetCommandInvocation", error);
     return { mounted: false, directoryStructureOk: false };
   }
 }
@@ -1704,7 +1740,8 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
       Logger.warning(`No EventBridge rules found for ${config.environment}`);
       checks.warnings++;
     }
-  } catch {
+  } catch (error: any) {
+    logPermissionWarning("EventBridge ListRules", error);
     Logger.warning("Could not retrieve EventBridge rules");
     checks.warnings++;
   }
@@ -1747,7 +1784,8 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
     } else {
       Logger.info("Bootstrap Metadata: None found (feature may be disabled)");
     }
-  } catch {
+  } catch (error: any) {
+    logPermissionWarning("SSM GetParametersByPath", error);
     Logger.info("Bootstrap Metadata: None found (feature may be disabled)");
   }
 
