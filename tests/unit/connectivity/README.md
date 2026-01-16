@@ -4,9 +4,425 @@
 
 This directory contains integration tests that validate network and service connectivity across the monitoring stack infrastructure.
 
+## Design Approach
+
+### Testing Philosophy
+
+The connectivity test suite follows a **layered validation approach** that mirrors the infrastructure stack hierarchy:
+
+1. **Layer 1: Network Foundation** - Validates VPC, subnets, routing, and network isolation
+2. **Layer 2: Storage Layer** - Validates EFS connectivity and security
+3. **Layer 3: Compute Layer** - Validates ECS cluster, ALB, and instance networking
+4. **Layer 4: Service Layer** - Validates application service connectivity and discovery
+
+Each layer depends on the previous layer, allowing tests to catch issues early in the dependency chain.
+
+### Why These Tests Are Critical
+
+**Prevent Production Outages:**
+
+- Detect misconfigured security groups before deployment
+- Catch routing table errors that would break connectivity
+- Validate cross-stack references to prevent deployment failures
+- Ensure services can communicate before they're deployed
+
+**Infrastructure as Code Validation:**
+
+- CloudFormation/CDK templates are validated before synthesis
+- Cross-stack dependencies are verified programmatically
+- Configuration drift is caught early
+- Refactoring is safe with comprehensive test coverage
+
+**Cost Optimisation:**
+
+- Detect unnecessary NAT Gateways or VPC Endpoints
+- Validate resource placement (AZ distribution)
+- Ensure efficient routing (no hairpinning)
+
+## What Connectivity Is Tested?
+
+### 1. Cross-Stack References
+
+**Tested Patterns:**
+
+- CloudFormation exports/imports between stacks
+- SSM Parameter Store for configuration sharing
+- Direct resource references (VPC ID, cluster ARN, etc.)
+- Dependency ordering and circular dependency prevention
+
+**Example:**
+
+```typescript
+// EFS stack references VPC from Networking stack
+const efsStack = new MonitoringEfsStack(app, "EfsStack", {
+  vpc: networkingStack.vpc, // Cross-stack reference
+});
+```
+
+**Validated:**
+
+- Networking → EFS (VPC ID)
+- Networking → Infra (VPC ID, Subnet IDs)
+- EFS → Infra (File System ID)
+- Infra → Service (Cluster ARN, ALB ARN)
+
+### 2. VPC Peering and Network Isolation
+
+**Tested Patterns:**
+
+- Public subnet isolation (Internet Gateway)
+- Private subnet isolation (NAT Gateway)
+- Subnet CIDR non-overlap
+- Multi-AZ distribution
+
+**Validated:**
+
+- Public subnets have routes to Internet Gateway
+- Private subnets have routes to NAT Gateway
+- Subnets span multiple availability zones (HA)
+- No cross-subnet routing without explicit rules
+
+### 3. Service-to-Service Communication
+
+**Tested Patterns:**
+
+- ALB → ECS tasks (HTTP/HTTPS)
+- ECS tasks → EFS (NFS port 2049)
+- Prometheus → Node Exporter (metrics port 9100)
+- Grafana → Prometheus (API port 9090)
+
+**Validated:**
+
+- Security group rules allow required traffic
+- Ports match between source and destination
+- Network mode compatibility (bridge/host/awsvpc)
+- Health checks can reach services
+
+### 4. Network Routing
+
+**Tested Patterns:**
+
+- Internet Gateway routes for public subnets
+- NAT Gateway routes for private subnets
+- VPC Endpoint routes (S3 gateway)
+- Route table associations
+
+**Validated:**
+
+- Default routes point to correct gateways
+- Route table associations are explicit
+- No conflicting routes
+- S3 VPC Endpoint bypasses NAT Gateway
+
+## Testing Approach
+
+### How Connectivity Is Validated
+
+#### 1. Template Assertion Pattern
+
+All tests use CDK's `Template` class to validate synthesised CloudFormation:
+
+```typescript
+describe("Connectivity Tests", () => {
+  let stacks: ConnectivityTestStacks;
+
+  beforeAll(() => {
+    // Create all stacks once for entire test suite
+    stacks = createConnectivityTestStacks();
+  });
+
+  test("validate security group rule", () => {
+    const template = Template.fromStack(stacks.infraStack);
+
+    // Assert specific resource properties
+    template.hasResourceProperties("AWS::EC2::SecurityGroupIngress", {
+      IpProtocol: "tcp",
+      FromPort: 9090,
+      ToPort: 9090,
+    });
+  });
+});
+```
+
+#### 2. Helper Function Pattern
+
+Reusable helpers eliminate duplication and improve readability:
+
+```typescript
+// Arrow function helper (defined in beforeAll context)
+const getTemplate = (stackName: keyof ConnectivityTestStacks) => {
+  return Template.fromStack(stacks[stackName]);
+};
+
+const validateServicePort = (
+  template: Template,
+  serviceName: string,
+  port: number
+) => {
+  // Reusable validation logic
+};
+```
+
+#### 3. Layered Validation
+
+Tests validate from bottom-up (infrastructure → application):
+
+1. **Network Layer** - VPC exists with correct CIDR
+2. **Security Layer** - Security groups allow required ports
+3. **Service Layer** - Services are configured with correct ports
+4. **Integration Layer** - End-to-end connectivity works
+
+### Assertions Used
+
+#### Resource Existence
+
+```typescript
+template.resourceCountIs("AWS::EC2::VPC", 1);
+template.hasResource("AWS::ECS::Cluster", Match.anyValue());
+```
+
+#### Property Validation
+
+```typescript
+template.hasResourceProperties("AWS::EC2::SecurityGroupIngress", {
+  IpProtocol: "tcp",
+  FromPort: 2049,
+  ToPort: 2049,
+});
+```
+
+#### Dynamic Validation
+
+```typescript
+const resources = template.findResources("AWS::EC2::Subnet");
+Object.values(resources).forEach((subnet) => {
+  expect(subnet.Properties.CidrBlock).toMatch(/^10\.0\.\d+\.0\/24$/);
+});
+```
+
+### Dependencies Between Tests
+
+**Independent Test Suites:**
+
+- Each test file can run independently
+- `beforeAll()` creates stack hierarchy once per file
+- No shared state between test files
+
+**Sequential Within Suite:**
+
+- Tests within a `describe` block share stack instances
+- Tests should not modify shared state
+- Use `beforeEach()` for test-specific setup if needed
+
+## Test Fixtures
+
+### Shared Test Configuration
+
+All tests use centralised configuration from `test-config.ts`:
+
+```typescript
+// AWS Configuration
+export const AWS_CONFIG = {
+  ACCOUNT: "123456789012",
+  REGION: "eu-west-1",
+};
+
+// Network Configuration
+export const NETWORK_CONFIG = {
+  VPC_CIDR: "10.0.0.0/16",
+  ALLOWED_CIDR: "10.0.0.0/8",
+  EXPECTED_SUBNETS: { PUBLIC: 2, PRIVATE: 2 },
+};
+
+// Port Configuration
+export const PORT_CONFIG = {
+  HTTP: 80,
+  NFS: 2049,
+  PROMETHEUS: 9090,
+  GRAFANA: 3000,
+};
+
+// Resource Types
+export const RESOURCE_TYPES = {
+  VPC: "AWS::EC2::VPC",
+  SECURITY_GROUP: "AWS::EC2::SecurityGroup",
+  // ... all CloudFormation resource types
+};
+```
+
+### Mock Resources
+
+Tests use real CDK stack synthesis (no mocks):
+
+```typescript
+export function createConnectivityTestStacks(): ConnectivityTestStacks {
+  const app = new cdk.App();
+  const env = { account: AWS_CONFIG.ACCOUNT, region: AWS_CONFIG.REGION };
+
+  // Create real stack instances
+  const networkingStack = new NetworkingStack(app, "TestNetworking", { env });
+  const efsStack = new MonitoringEfsStack(app, "TestEfs", {
+    env,
+    vpc: networkingStack.vpc,
+  });
+  // ... more stacks
+
+  return { app, networkingStack, efsStack, infraStack, serviceStack };
+}
+```
+
+### Test Data
+
+**Static Test Data:**
+
+- Defined in `test-config.ts` constants
+- Used for expected values (ports, CIDRs, counts)
+
+**Dynamic Test Data:**
+
+- Generated from synthesised templates
+- Extracted using `template.findResources()`
+
+## Common Patterns
+
+### How to Test Cross-Stack Exports
+
+```typescript
+test("Networking stack exports VPC ID", () => {
+  const template = Template.fromStack(stacks.networkingStack);
+
+  // Find all outputs
+  const outputs = template.findOutputs("*");
+
+  // Check for VPC export
+  const hasVpcExport = Object.values(outputs).some((output) => {
+    return JSON.stringify(output).toLowerCase().includes("vpc");
+  });
+
+  expect(hasVpcExport).toBe(true);
+});
+```
+
+### How to Validate Security Group Rules
+
+```typescript
+test("EFS security group allows NFS from ECS", () => {
+  const template = Template.fromStack(stacks.efsStack);
+
+  // Method 1: Using template assertions
+  template.hasResourceProperties("AWS::EC2::SecurityGroupIngress", {
+    IpProtocol: "tcp",
+    FromPort: PORT_CONFIG.NFS,
+    ToPort: PORT_CONFIG.NFS,
+    SourceSecurityGroupId: Match.anyValue(),
+  });
+
+  // Method 2: Using dynamic validation
+  const rules = template.findResources("AWS::EC2::SecurityGroupIngress");
+  Object.values(rules).forEach((rule) => {
+    const props = rule.Properties;
+    if (props.FromPort === PORT_CONFIG.NFS) {
+      expect(props.SourceSecurityGroupId).toBeDefined();
+    }
+  });
+});
+```
+
+### How to Test Route Table Configurations
+
+```typescript
+test("public subnets route to Internet Gateway", () => {
+  const template = Template.fromStack(stacks.networkingStack);
+
+  // Get all routes
+  const routes = template.findResources("AWS::EC2::Route");
+
+  // Find Internet Gateway route
+  const hasIgwRoute = Object.values(routes).some((route) => {
+    const props = route.Properties;
+    return props.GatewayId?.Ref?.includes("InternetGateway");
+  });
+
+  expect(hasIgwRoute).toBe(true);
+});
+```
+
+## How to Add New Connectivity Tests
+
+### Which File to Add To
+
+**File Selection Guide:**
+
+| Test Type                       | File                               | When to Use                    |
+| ------------------------------- | ---------------------------------- | ------------------------------ |
+| VPC, subnets, routing, gateways | `networking-connectivity.test.ts`  | Network infrastructure changes |
+| ALB, ECS, EFS, security groups  | `service-connectivity.test.ts`     | Application service changes    |
+| Stack exports, SSM parameters   | `cross-stack-connectivity.test.ts` | Cross-stack dependency changes |
+
+### Required Setup
+
+1. **Import dependencies:**
+
+```typescript
+import { Template } from "aws-cdk-lib/assertions";
+import { createConnectivityTestStacks } from "../utils/test-utils";
+import { ConnectivityTestStacks, RESOURCE_TYPES } from "./test-config";
+```
+
+2. **Initialize stacks:**
+
+```typescript
+describe("New Connectivity Tests", () => {
+  let stacks: ConnectivityTestStacks;
+
+  beforeAll(() => {
+    stacks = createConnectivityTestStacks();
+  });
+
+  // Helper functions (arrow functions)
+  const getTemplate = (stackName: keyof ConnectivityTestStacks) => {
+    return Template.fromStack(stacks[stackName]);
+  };
+});
+```
+
+### Example Test
+
+```typescript
+describe("New Service Connectivity", () => {
+  let stacks: ConnectivityTestStacks;
+
+  beforeAll(() => {
+    stacks = createConnectivityTestStacks();
+  });
+
+  test("new service uses correct port", () => {
+    // Arrange
+    const template = Template.fromStack(stacks.serviceStack);
+    const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+
+    // Act
+    const containers = Object.values(taskDefs)
+      .flatMap((td) => td.Properties.ContainerDefinitions)
+      .filter((c) => c.Name.includes("my-service"));
+
+    // Assert
+    expect(containers.length).toBeGreaterThan(0);
+    containers.forEach((container) => {
+      const hasCorrectPort = container.PortMappings.some(
+        (pm) => pm.ContainerPort === 8080
+      );
+      expect(hasCorrectPort).toBe(true);
+    });
+  });
+});
+```
+
 ## Test Files
 
-### 1. Network Connectivity Tests (`network-connectivity.test.ts`)
+### 1. Network Connectivity Tests (`networking-connectivity.test.ts`)
+
+**Lines:** 1,079 | **Test Cases:** 50+
 
 Validates core networking infrastructure and connectivity patterns.
 
@@ -33,6 +449,8 @@ Validates core networking infrastructure and connectivity patterns.
 
 ### 2. Service Connectivity Tests (`service-connectivity.test.ts`)
 
+**Lines:** 762 | **Test Cases:** 30+
+
 Validates connectivity between application services and infrastructure components.
 
 **Test Coverage:**
@@ -57,6 +475,8 @@ Validates connectivity between application services and infrastructure component
 
 ### 3. Cross-Stack Connectivity Tests (`cross-stack-connectivity.test.ts`)
 
+**Lines:** 568 | **Test Cases:** 25+
+
 Validates dependencies and data flow between CloudFormation stacks.
 
 **Test Coverage:**
@@ -77,144 +497,66 @@ Validates dependencies and data flow between CloudFormation stacks.
 - No circular dependencies exist
 - Configuration propagates across all stacks
 
-## Running Tests
+## Vulnerabilities and Limitations
 
-### Run All Connectivity Tests
+### Known Design Vulnerabilities
 
-```bash
-# Via npm
-npm test -- tests/integration/connectivity/
+**1. Template-Only Validation**
 
-# Via yarn
-yarn test tests/integration/connectivity/
+- **Risk:** Tests validate CloudFormation templates, not deployed infrastructure
+- **Impact:** Runtime issues (AWS service limits, actual network latency) not caught
+- **Mitigation:** Supplement with post-deployment smoke tests
 
-# Via Make
-make test-integration
-```
+**2. Shared Test State**
 
-### Run Specific Test File
+- **Risk:** Stack instances shared across tests in `beforeAll()`
+- **Impact:** One test failure might affect others (though tests are read-only)
+- **Mitigation:** Tests are designed to be read-only; no state mutation
 
-```bash
-# Network connectivity tests
-npm test -- tests/integration/connectivity/network-connectivity.test.ts
+**3. No Actual Network Traffic Testing**
 
-# Service connectivity tests
-npm test -- tests/integration/connectivity/service-connectivity.test.ts
+- **Risk:** Security group rules validated but not actual packet flow
+- **Impact:** Subtle routing issues or firewall rules not detected
+- **Mitigation:** Add integration tests that make actual HTTP requests post-deployment
 
-# Cross-stack connectivity tests
-npm test -- tests/integration/connectivity/cross-stack-connectivity.test.ts
-```
+**4. AWS Service Limit Blind Spots**
 
-### Run Specific Test Suite
+- **Risk:** Tests don't validate against AWS account limits
+- **Impact:** Deployment may fail due to VPC limit, EIP limit, etc.
+- **Mitigation:** Use AWS Service Quotas API in separate validation
 
-```bash
-# Run only VPC Configuration tests
-npm test -- tests/integration/connectivity/network-connectivity.test.ts -t "VPC Configuration"
+**5. Timing and Eventual Consistency**
 
-# Run only ALB connectivity tests
-npm test -- tests/integration/connectivity/service-connectivity.test.ts -t "ALB to ECS Connectivity"
+- **Risk:** Tests assume synchronous stack creation
+- **Impact:** Cross-stack references may not reflect deployment realities
+- **Mitigation:** Add retry logic in actual deployment scripts
 
-# Run only CloudFormation Outputs tests
-npm test -- tests/integration/connectivity/cross-stack-connectivity.test.ts -t "CloudFormation Outputs"
-```
+### Testing Limitations
 
-## Test Architecture
+**What These Tests DON'T Catch:**
 
-### Stack Creation Pattern
+1. **Runtime Configuration:**
 
-All connectivity tests use a consistent pattern for creating test stacks:
+   - Environment variables in running containers
+   - Secrets Manager values
+   - Dynamic service discovery registration
 
-```typescript
-function createServiceStacks(): ServiceStacks {
-  const app = new cdk.App();
+2. **Performance Issues:**
 
-  // Layer 1: Networking
-  const networkingStack = new NetworkingStack(app, "TestNetworkingStack", {
-    // ... config
-  });
+   - Network latency between services
+   - NAT Gateway bandwidth constraints
+   - ALB connection limits
 
-  // Layer 2: EFS
-  const efsStack = new MonitoringEfsStack(app, "TestEfsStack", {
-    vpc: networkingStack.vpc, // Cross-stack reference
-  });
+3. **DNS Resolution:**
 
-  // Layer 3: Infrastructure
-  const infraStack = new MonitoringInfraStack(app, "TestInfraStack", {
-    vpc: networkingStack.vpc,
-    fileSystem: efsStack.fileSystem, // Cross-stack reference
-  });
+   - Route53 record creation
+   - Service discovery DNS propagation
+   - External DNS resolution
 
-  // Layer 4: Services
-  const serviceStack = new MonitoringServiceStack(app, "TestServiceStack", {
-    cluster: infraStack.cluster, // Cross-stack reference
-  });
-
-  return { app, networkingStack, efsStack, infraStack, serviceStack };
-}
-```
-
-### Validation Patterns
-
-#### 1. Resource Existence
-
-```typescript
-test("VPC exists with correct CIDR block", () => {
-  template.hasResourceProperties("AWS::EC2::VPC", {
-    CidrBlock: "10.0.0.0/16",
-  });
-});
-```
-
-#### 2. Security Group Rules
-
-```typescript
-test("EFS security group allows NFS from ECS", () => {
-  template.hasResourceProperties("AWS::EC2::SecurityGroupIngress", {
-    IpProtocol: "tcp",
-    FromPort: 2049,
-    ToPort: 2049,
-    SourceSecurityGroupId: Match.anyValue(),
-  });
-});
-```
-
-#### 3. Cross-Stack References
-
-```typescript
-test("Service stack references cluster from Infra stack", () => {
-  const services = template.findResources("AWS::ECS::Service");
-
-  Object.values(services).forEach((service) => {
-    const properties = service.Properties;
-    expect(properties.Cluster).toBeDefined();
-  });
-});
-```
-
-## What These Tests Catch
-
-### Network Connectivity Issues
-
-- **Missing Internet Gateway**: Public subnets cannot reach internet
-- **Incorrect Route Tables**: Traffic not routed properly
-- **NAT Gateway Misconfiguration**: Private subnets cannot access internet
-- **Subnet CIDR Conflicts**: Overlapping IP ranges
-- **Missing VPC Flow Logs**: No network traffic visibility
-
-### Service Connectivity Issues
-
-- **Security Group Misconfiguration**: Services cannot communicate
-- **Wrong Ports**: Services listening on unexpected ports
-- **Missing Health Checks**: Unhealthy instances not detected
-- **EFS Mount Failures**: ECS tasks cannot mount EFS
-- **ALB Routing Issues**: Traffic not reaching correct targets
-
-### Cross-Stack Issues
-
-- **Missing Exports**: Dependent stacks cannot find required resources
-- **Circular Dependencies**: Stacks reference each other incorrectly
-- **Parameter Mismatches**: Configuration not propagating correctly
-- **Wrong Stack Order**: Stacks deployed in incorrect sequence
+4. **IAM Permissions:**
+   - Task role permissions
+   - Instance profile permissions
+   - Cross-account access
 
 ## Best Practices
 
@@ -225,7 +567,7 @@ Always test the full stack dependency chain:
 ```typescript
 beforeAll(() => {
   // Create all stacks together to validate dependencies
-  stacks = createServiceStacks();
+  stacks = createConnectivityTestStacks();
 });
 ```
 
@@ -257,102 +599,92 @@ test("subnets span multiple availability zones", () => {
 });
 ```
 
-### 4. Validate Port Consistency
+### 4. Use Helper Functions
 
-Ensure ports match across configurations:
-
-```typescript
-// Task definition
-test("Prometheus uses port 9090", () => {
-  expect(container.portMappings).toContain(9090);
-});
-
-// Target group
-test("Target group forwards to port 9090", () => {
-  expect(targetGroup.port).toBe(9090);
-});
-```
-
-## Common Issues and Solutions
-
-### Issue: "SecurityGroup not found"
-
-**Cause**: Security group not created or wrong stack reference
-
-**Solution**: Verify security group is created before it's referenced
+Extract common validation logic:
 
 ```typescript
-// Check security group exists
-const securityGroups = template.findResources("AWS::EC2::SecurityGroup");
-expect(Object.keys(securityGroups).length).toBeGreaterThan(0);
-```
+const validateServicePort = (
+  template: Template,
+  serviceName: string,
+  port: number
+) => {
+  const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+  // ... validation logic
+};
 
-### Issue: "VPC not accessible across stacks"
-
-**Cause**: VPC not passed correctly between stacks
-
-**Solution**: Verify VPC reference in stack props
-
-```typescript
-const efsStack = new MonitoringEfsStack(app, "EfsStack", {
-  vpc: networkingStack.vpc, // Correct reference
+// Use in tests
+test("Prometheus uses correct port", () => {
+  validateServicePort(getTemplate("serviceStack"), "prometheus", 9090);
 });
 ```
 
-### Issue: "Route table not associated with subnet"
+### 5. Never Access Template During Initialization
 
-**Cause**: Missing subnet route table association
-
-**Solution**: Verify associations exist
+**❌ Bad:**
 
 ```typescript
-const associations = template.findResources(
-  "AWS::EC2::SubnetRouteTableAssociation"
-);
-expect(Object.keys(associations).length).toBeGreaterThan(0);
-```
-
-### Issue: "Health checks failing"
-
-**Cause**: Incorrect health check path or port
-
-**Solution**: Verify health check configuration
-
-```typescript
-template.hasResourceProperties("AWS::ElasticLoadBalancingV2::TargetGroup", {
-  HealthCheckPath: "/health",
-  HealthCheckPort: "traffic-port", // Use same port as target
+describe("Tests", () => {
+  const count = countResourcesOfType(template, "AWS::EC2::VPC"); // Undefined!
 });
 ```
 
-## Integration with CI/CD
+**✅ Good:**
 
-### Pre-Deployment Validation
+```typescript
+describe("Tests", () => {
+  const getCount = () => countResourcesOfType(template, "AWS::EC2::VPC");
 
-Run connectivity tests before deploying to ensure:
-
-1. Network paths are correctly configured
-2. Security groups allow required traffic
-3. Cross-stack dependencies are resolved
-
-```yaml
-# GitHub Actions example
-- name: Validate Connectivity
-  run: |
-    npm test -- tests/integration/connectivity/
-
-- name: Deploy if Tests Pass
-  if: success()
-  run: |
-    make deploy-all
+  test("should have VPC", () => {
+    expect(getCount()).toBe(1);
+  });
+});
 ```
 
-### Post-Deployment Verification
+## Running Tests
 
-After deployment, run tests against synthesised templates to verify:
+### Run All Connectivity Tests
 
-1. Configuration matches expectations
-2. No drift from tested configuration
+```bash
+# Via yarn
+yarn test tests/unit/connectivity/
+
+# Via Make
+make test:connectivity
+```
+
+### Run Specific Test File
+
+```bash
+# Network connectivity tests
+yarn test tests/unit/connectivity/networking-connectivity.test.ts
+
+# Service connectivity tests
+yarn test tests/unit/connectivity/service-connectivity.test.ts
+
+# Cross-stack connectivity tests
+yarn test tests/unit/connectivity/cross-stack-connectivity.test.ts
+```
+
+### Run Specific Test Suite
+
+```bash
+# Run only VPC Configuration tests
+yarn test tests/unit/connectivity/networking-connectivity.test.ts -t "VPC Configuration"
+
+# Run only ALB connectivity tests
+yarn test tests/unit/connectivity/service-connectivity.test.ts -t "ALB to ECS Connectivity"
+```
+
+### Watch Mode (Development)
+
+```bash
+# Run tests in watch mode
+yarn test:watch tests/unit/connectivity/
+
+# Run specific file in watch mode
+yarn test:watch tests/unit/connectivity/service-connectivity.test.ts
+```
 
 ## Performance Considerations
 
@@ -363,20 +695,50 @@ Connectivity tests synthesise multiple stacks, which can be slow:
 - **Network tests**: ~5-10 seconds
 - **Service tests**: ~10-15 seconds (full stack)
 - **Cross-stack tests**: ~10-15 seconds (full stack)
+- **Total suite**: ~30-40 seconds
 
 ### Optimisation Strategies
 
 1. **Share stack instances** across tests using `beforeAll()`
 2. **Group related tests** in the same describe block
 3. **Use specific test patterns** with `-t` flag during development
-4. **Run in parallel** when possible (be careful with shared resources)
+4. **Run in parallel** when possible (tests are independent)
+
+```bash
+# Run tests in parallel (Jest default)
+yarn test tests/unit/connectivity/ --maxWorkers=4
+
+# Run specific pattern during development
+yarn test tests/unit/connectivity/ -t "Security Group"
+```
+
+## Integration with CI/CD
+
+### Pre-Deployment Validation
+
+```yaml
+# GitHub Actions example
+- name: Validate Connectivity
+  run: yarn test tests/unit/connectivity/
+
+- name: Deploy if Tests Pass
+  if: success()
+  run: make deploy-all
+```
+
+### Post-Deployment Verification
+
+```bash
+# Verify deployed infrastructure matches tests
+yarn test:integration:deployed
+```
 
 ## Troubleshooting
 
 ### Enable Verbose Output
 
 ```bash
-VERBOSE_TESTS=1 npm test -- tests/integration/connectivity/ --verbose
+VERBOSE_TESTS=1 yarn test tests/unit/connectivity/ --verbose
 ```
 
 ### Debug Stack Synthesis
@@ -388,17 +750,12 @@ test("debug stack output", () => {
 });
 ```
 
-### Check Specific Resources
+### Common Test Failures
 
-```typescript
-const resources = template.findResources("AWS::EC2::SecurityGroup");
-console.log(JSON.stringify(resources, null, 2));
-```
+See [TROUBLESHOOTING_CONSOLIDATED.md](../../docs/TROUBLESHOOTING_CONSOLIDATED.md) for comprehensive error resolution.
 
 ## Related Documentation
 
-- [Integration Tests Overview](../README.md)
-- [Security Posture Tests](../security-posture.test.ts)
 - [AWS VPC Documentation](https://docs.aws.amazon.com/vpc/latest/userguide/what-is-amazon-vpc.html)
 - [AWS ECS Networking](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/networking.html)
 - [CDK Testing Guide](https://docs.aws.amazon.com/cdk/v2/guide/testing.html)
@@ -408,7 +765,9 @@ console.log(JSON.stringify(resources, null, 2));
 When adding new connectivity tests:
 
 1. Follow the existing pattern and structure
-2. Test both positive (works) and negative (doesn't work) cases
-3. Include descriptive test names that explain what is being validated
-4. Add documentation for complex connectivity patterns
-5. Update this README with new test categories
+2. Use helper functions to eliminate duplication
+3. Test both positive (works) and negative (doesn't work) cases
+4. Include descriptive test names that explain what is being validated
+5. Add documentation for complex connectivity patterns
+6. Update this README with new test categories
+7. Ensure tests follow [unit test best practices](../../prompts.txt)

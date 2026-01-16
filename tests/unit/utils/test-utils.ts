@@ -20,14 +20,14 @@ import type {
   ConnectivityTestStacks,
   ResolvedTestConfig,
   SubnetCidrs,
-  ResourceProperties,
 } from "../connectivity/test-config";
+import type { ResourceProperties } from "../types/test-types";
+import { resolveTestConfig, createCdkEnv } from "../connectivity/test-config";
 import {
-  resolveTestConfig,
-  createCdkEnv,
   TAG_KEYS,
   SUBNET_TYPES,
-} from "../connectivity/test-config";
+  ENVIRONMENT_CONFIG,
+} from "../shared/constants";
 
 // ============================================================================
 // STACK CREATION UTILITIES
@@ -447,3 +447,101 @@ export function validateStackDependencies(
 
   return true;
 }
+
+// ============================================================================
+// SECURITY TEST STACK CREATION (Consolidated from test-fixtures.ts)
+// ============================================================================
+
+/**
+ * Create complete monitoring stack hierarchy for security testing
+ *
+ * Uses the same flexible configuration system as connectivity tests
+ * but with simplified defaults for security test scenarios.
+ *
+ * @param environment - Environment name (development or production)
+ * @param configOptions - Optional additional configuration overrides
+ * @returns Complete stack hierarchy
+ */
+export function createSecurityTestStacks(
+  environment: string = ENVIRONMENT_CONFIG.DEVELOPMENT,
+  configOptions: Partial<ResolvedTestConfig> = {}
+): ConnectivityTestStacks {
+  const config = resolveTestConfig({
+    ...configOptions,
+    environment,
+  });
+
+  return createConnectivityTestStacks(config);
+}
+
+/**
+ * Singleton fixture cache to reuse stacks across tests
+ *
+ * Provides cached stack instances for development and production environments
+ * to improve test performance by avoiding redundant stack synthesis.
+ */
+class TestStackCache {
+  private static instance: TestStackCache;
+  private developmentStacks?: ConnectivityTestStacks;
+  private productionStacks?: ConnectivityTestStacks;
+
+  private constructor() {}
+
+  static getInstance(): TestStackCache {
+    if (!TestStackCache.instance) {
+      TestStackCache.instance = new TestStackCache();
+    }
+    return TestStackCache.instance;
+  }
+
+  /**
+   * Get development environment stacks (cached)
+   *
+   * @returns Development stack hierarchy
+   */
+  getDevelopmentStacks(): ConnectivityTestStacks {
+    if (!this.developmentStacks) {
+      this.developmentStacks = createSecurityTestStacks(
+        ENVIRONMENT_CONFIG.DEVELOPMENT
+      );
+    }
+    return this.developmentStacks;
+  }
+
+  /**
+   * Get production environment stacks (cached)
+   *
+   * @returns Production stack hierarchy
+   */
+  getProductionStacks(): ConnectivityTestStacks {
+    if (!this.productionStacks) {
+      this.productionStacks = createSecurityTestStacks(
+        ENVIRONMENT_CONFIG.PRODUCTION
+      );
+    }
+    return this.productionStacks;
+  }
+
+  /**
+   * Clear cached stacks (useful for test cleanup)
+   */
+  clear(): void {
+    this.developmentStacks = undefined;
+    this.productionStacks = undefined;
+  }
+}
+
+/**
+ * Exported singleton instance for test fixtures
+ *
+ * Usage:
+ * ```typescript
+ * import { TestStacks } from "../utils/test-utils";
+ *
+ * const stacks = TestStacks.getDevelopmentStacks();
+ * ```
+ */
+export const TestStacks = TestStackCache.getInstance();
+
+// Backward compatibility alias for security tests
+export const SecurityTestFixtures = TestStackCache.getInstance();

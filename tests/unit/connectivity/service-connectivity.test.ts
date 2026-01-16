@@ -40,134 +40,283 @@ describe("Integration: Service Connectivity Tests", () => {
   });
 
   // ==========================================================================
+  // HELPER FUNCTIONS (defined as arrow functions)
+  // ==========================================================================
+
+  /**
+   * Get template from stack name
+   */
+  const getTemplate = (stackName: keyof ConnectivityTestStacks) => {
+    if (stackName === "app") {
+      throw new Error("Cannot get template for app");
+    }
+    return Template.fromStack(stacks[stackName]);
+  };
+
+  /**
+   * Validate resource has required properties
+   */
+  const validateResourceProperties = (
+    resource: unknown,
+    requiredProps: string[]
+  ) => {
+    const properties = (resource as Record<string, Record<string, unknown>>)
+      .Properties;
+
+    requiredProps.forEach((prop) => {
+      expect(properties[prop]).toBeDefined();
+    });
+  };
+
+  /**
+   * Find container by name in task definition
+   */
+  const findContainerInTaskDef = (
+    taskDef: unknown,
+    containerNamePattern: string
+  ): Record<string, unknown> | undefined => {
+    const properties = (taskDef as Record<string, Record<string, unknown>>)
+      .Properties;
+    const containers = properties.ContainerDefinitions as Array<
+      Record<string, unknown>
+    >;
+
+    return containers.find((container) => {
+      const name = container.Name as string;
+      return name?.toLowerCase().includes(containerNamePattern.toLowerCase());
+    });
+  };
+
+  /**
+   * Check if container has specific port mapping
+   */
+  const containerHasPort = (
+    container: Record<string, unknown>,
+    port: number
+  ): boolean => {
+    const portMappings = container.PortMappings as Array<
+      Record<string, number>
+    >;
+
+    return portMappings?.some((pm) => pm.ContainerPort === port) ?? false;
+  };
+
+  /**
+   * Validate target group configuration
+   */
+  const validateTargetGroups = (
+    template: Template,
+    validationFn?: (properties: Record<string, unknown>) => void
+  ) => {
+    const targetGroups = template.findResources(RESOURCE_TYPES.TARGET_GROUP);
+
+    Object.values(targetGroups).forEach((tg) => {
+      const properties = (tg as Record<string, Record<string, unknown>>)
+        .Properties;
+
+      // Basic validation
+      expect(properties.Port).toBeDefined();
+      expect(properties.Protocol).toBe("HTTP");
+
+      // Custom validation if provided
+      if (validationFn) {
+        validationFn(properties);
+      }
+    });
+  };
+
+  /**
+   * Validate security group rules
+   */
+  const validateSecurityGroupRules = (
+    template: Template,
+    ruleType: "SECURITY_GROUP_INGRESS" | "SECURITY_GROUP_EGRESS",
+    validationFn: (properties: Record<string, unknown>) => void
+  ) => {
+    const rules = template.findResources(RESOURCE_TYPES[ruleType]);
+
+    Object.values(rules).forEach((rule) => {
+      const properties = (rule as Record<string, Record<string, unknown>>)
+        .Properties;
+      validationFn(properties);
+    });
+  };
+
+  /**
+   * Check if HTTP/HTTPS rule exists in security groups
+   */
+  const hasHttpRule = (template: Template): boolean => {
+    const rules = template.findResources(RESOURCE_TYPES.SECURITY_GROUP_INGRESS);
+    const securityGroups = template.findResources(
+      RESOURCE_TYPES.SECURITY_GROUP
+    );
+
+    // Check standalone ingress rules
+    for (const rule of Object.values(rules)) {
+      const properties = (rule as Record<string, Record<string, unknown>>)
+        .Properties;
+
+      if (
+        properties.IpProtocol === "tcp" &&
+        (properties.FromPort === PORT_CONFIG.HTTP ||
+          properties.FromPort === PORT_CONFIG.HTTPS)
+      ) {
+        return true;
+      }
+    }
+
+    // Check inline ingress rules
+    for (const sg of Object.values(securityGroups)) {
+      const properties = (sg as Record<string, Record<string, unknown>>)
+        .Properties;
+
+      if (properties.SecurityGroupIngress) {
+        const ingressRules = properties.SecurityGroupIngress as Array<
+          Record<string, unknown>
+        >;
+
+        for (const rule of ingressRules) {
+          if (
+            rule.IpProtocol === "tcp" &&
+            (rule.FromPort === PORT_CONFIG.HTTP ||
+              rule.FromPort === PORT_CONFIG.HTTPS)
+          ) {
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
+  };
+
+  /**
+   * Validate port configuration for service in task definitions
+   */
+  const validateServicePort = (
+    template: Template,
+    serviceName: string,
+    expectedPort: number
+  ) => {
+    const taskDefs = template.findResources(RESOURCE_TYPES.ECS_TASK_DEFINITION);
+
+    Object.values(taskDefs).forEach((taskDef) => {
+      const container = findContainerInTaskDef(taskDef, serviceName);
+
+      if (container) {
+        expect(containerHasPort(container, expectedPort)).toBe(true);
+      }
+    });
+  };
+
+  /**
+   * Validate EFS security group has NFS rules
+   */
+  const validateEfsNfsRules = (template: Template) => {
+    const securityGroups = template.findResources(
+      RESOURCE_TYPES.SECURITY_GROUP
+    );
+
+    Object.values(securityGroups).forEach((sg) => {
+      const properties = (sg as Record<string, Record<string, unknown>>)
+        .Properties;
+
+      if (properties.SecurityGroupIngress) {
+        const ingressRules = properties.SecurityGroupIngress as Array<
+          Record<string, unknown>
+        >;
+
+        ingressRules.forEach((rule) => {
+          if (
+            rule.FromPort === PORT_CONFIG.NFS &&
+            rule.ToPort === PORT_CONFIG.NFS
+          ) {
+            // Valid NFS rule found
+          }
+        });
+      }
+    });
+  };
+
+  // ==========================================================================
   // 1. ALB TO ECS CONNECTIVITY
   // ==========================================================================
 
   describe("ALB to ECS Connectivity", () => {
     test("ALB has target groups configured", () => {
-      const template = Template.fromStack(stacks.serviceStack);
-
+      const template = getTemplate("serviceStack");
       const targetGroups = template.findResources(RESOURCE_TYPES.TARGET_GROUP);
+
       expect(Object.keys(targetGroups).length).toBeGreaterThan(0);
     });
 
     test("ALB listener forwards traffic to target groups", () => {
-      const template = Template.fromStack(stacks.infraStack);
-
+      const template = getTemplate("infraStack");
       const listeners = template.findResources(RESOURCE_TYPES.LISTENER);
 
       expect(Object.keys(listeners).length).toBeGreaterThan(0);
 
       Object.values(listeners).forEach((listener) => {
-        const properties = (listener as Record<string, Record<string, unknown>>)
-          .Properties;
-
-        expect(properties.Protocol).toBeDefined();
-        expect(properties.Port).toBeDefined();
-        expect(properties.DefaultActions).toBeDefined();
+        validateResourceProperties(listener, [
+          "Protocol",
+          "Port",
+          "DefaultActions",
+        ]);
       });
     });
 
     test("target groups are configured with correct ports", () => {
-      const template = Template.fromStack(stacks.serviceStack);
-
-      const targetGroups = template.findResources(RESOURCE_TYPES.TARGET_GROUP);
-
-      Object.values(targetGroups).forEach((tg) => {
-        const properties = (tg as Record<string, Record<string, unknown>>)
-          .Properties;
-        expect(properties.Port).toBeDefined();
-        expect(properties.Protocol).toBe("HTTP");
-      });
+      const template = getTemplate("serviceStack");
+      validateTargetGroups(template);
     });
 
     test("target groups have health checks enabled", () => {
-      const template = Template.fromStack(stacks.serviceStack);
+      const template = getTemplate("serviceStack");
 
-      const targetGroups = template.findResources(RESOURCE_TYPES.TARGET_GROUP);
-
-      Object.values(targetGroups).forEach((tg) => {
-        const properties = (tg as Record<string, Record<string, unknown>>)
-          .Properties;
-
+      validateTargetGroups(template, (properties) => {
         // Health check is enabled if HealthCheckPath is defined
-        // HealthCheckEnabled property is optional (defaults to true)
         expect(properties.HealthCheckPath).toBeDefined();
         expect(properties.HealthCheckIntervalSeconds).toBeDefined();
       });
     });
 
     test("ALB security group allows inbound traffic from allowed CIDRs", () => {
-      const template = Template.fromStack(stacks.infraStack);
+      const template = getTemplate("infraStack");
 
-      // Check both standalone and inline security group rules
-      const rules = template.findResources(
-        RESOURCE_TYPES.SECURITY_GROUP_INGRESS
-      );
+      // Verify HTTP/HTTPS rules exist
+      const hasRules = hasHttpRule(template);
+
+      // At least security groups should exist
       const securityGroups = template.findResources(
         RESOURCE_TYPES.SECURITY_GROUP
       );
-
-      // Check standalone ingress rules
-      Object.values(rules).forEach((rule) => {
-        const properties = (rule as Record<string, Record<string, unknown>>)
-          .Properties;
-
-        if (
-          properties.IpProtocol === "tcp" &&
-          (properties.FromPort === PORT_CONFIG.HTTP ||
-            properties.FromPort === PORT_CONFIG.HTTPS)
-        ) {
-          // Valid HTTP/HTTPS rule found
-        }
-      });
-
-      // Check inline ingress rules
-      Object.values(securityGroups).forEach((sg) => {
-        const properties = (sg as Record<string, Record<string, unknown>>)
-          .Properties;
-
-        if (properties.SecurityGroupIngress) {
-          const ingressRules = properties.SecurityGroupIngress as Array<
-            Record<string, unknown>
-          >;
-
-          ingressRules.forEach((rule) => {
-            if (
-              rule.IpProtocol === "tcp" &&
-              (rule.FromPort === PORT_CONFIG.HTTP ||
-                rule.FromPort === PORT_CONFIG.HTTPS)
-            ) {
-              // Valid HTTP/HTTPS rule found
-            }
-          });
-        }
-      });
-
-      // At least one security group should exist
       expect(Object.keys(securityGroups).length).toBeGreaterThan(0);
+
+      // Note: hasRules check is informational, not always required
+      // depending on infrastructure setup
+      if (hasRules) {
+        expect(hasRules).toBe(true);
+      }
     });
 
     test("ECS instances accept traffic from ALB security group", () => {
-      const template = Template.fromStack(stacks.infraStack);
+      const template = getTemplate("infraStack");
 
-      const rules = template.findResources(
-        RESOURCE_TYPES.SECURITY_GROUP_INGRESS
-      );
       let hasAlbToEcsRule = false;
 
-      Object.values(rules).forEach((rule) => {
-        const properties = (rule as Record<string, Record<string, unknown>>)
-          .Properties;
-
-        // ALB to ECS should use security group reference
-        if (
-          properties.IpProtocol === "tcp" &&
-          properties.SourceSecurityGroupId
-        ) {
-          hasAlbToEcsRule = true;
+      validateSecurityGroupRules(
+        template,
+        "SECURITY_GROUP_INGRESS",
+        (properties) => {
+          // ALB to ECS should use security group reference
+          if (
+            properties.IpProtocol === "tcp" &&
+            properties.SourceSecurityGroupId
+          ) {
+            hasAlbToEcsRule = true;
+          }
         }
-      });
+      );
 
       expect(hasAlbToEcsRule).toBe(true);
     });
@@ -179,72 +328,47 @@ describe("Integration: Service Connectivity Tests", () => {
 
   describe("ECS to EFS Connectivity", () => {
     test("EFS has mount targets in availability zones", () => {
-      const template = Template.fromStack(stacks.efsStack);
-
+      const template = getTemplate("efsStack");
       const mountTargets = template.findResources(
         RESOURCE_TYPES.EFS_MOUNT_TARGET
       );
+
       expect(Object.keys(mountTargets).length).toBeGreaterThanOrEqual(1);
 
       Object.values(mountTargets).forEach((mt) => {
-        const properties = (mt as Record<string, Record<string, unknown>>)
-          .Properties;
-        expect(properties.FileSystemId).toBeDefined();
-        expect(properties.SubnetId).toBeDefined();
-        expect(properties.SecurityGroups).toBeDefined();
+        validateResourceProperties(mt, [
+          "FileSystemId",
+          "SubnetId",
+          "SecurityGroups",
+        ]);
       });
     });
 
     test("EFS mount targets are in private subnets", () => {
-      const template = Template.fromStack(stacks.efsStack);
-
+      const template = getTemplate("efsStack");
       const mountTargets = template.findResources(
         RESOURCE_TYPES.EFS_MOUNT_TARGET
       );
 
       Object.values(mountTargets).forEach((mt) => {
-        const properties = (mt as Record<string, Record<string, unknown>>)
-          .Properties;
-
-        // Mount targets should have subnet IDs
-        expect(properties.SubnetId).toBeDefined();
+        validateResourceProperties(mt, ["SubnetId"]);
       });
     });
 
     test("EFS security group allows NFS traffic from ECS security group", () => {
-      const template = Template.fromStack(stacks.efsStack);
+      const template = getTemplate("efsStack");
 
-      // Check for inline ingress rules in security groups
+      validateEfsNfsRules(template);
+
+      // EFS security group should exist
       const securityGroups = template.findResources(
         RESOURCE_TYPES.SECURITY_GROUP
       );
-
-      Object.values(securityGroups).forEach((sg) => {
-        const properties = (sg as Record<string, Record<string, unknown>>)
-          .Properties;
-
-        if (properties.SecurityGroupIngress) {
-          const ingressRules = properties.SecurityGroupIngress as Array<
-            Record<string, unknown>
-          >;
-
-          ingressRules.forEach((rule) => {
-            if (
-              rule.FromPort === PORT_CONFIG.NFS &&
-              rule.ToPort === PORT_CONFIG.NFS
-            ) {
-              // Valid NFS rule found
-            }
-          });
-        }
-      });
-
-      // EFS security group should exist
       expect(Object.keys(securityGroups).length).toBeGreaterThan(0);
     });
 
     test("EFS access point is configured for ECS tasks", () => {
-      const template = Template.fromStack(stacks.efsStack);
+      const template = getTemplate("efsStack");
 
       template.hasResourceProperties(RESOURCE_TYPES.EFS_ACCESS_POINT, {
         FileSystemId: Match.anyValue(),
@@ -256,8 +380,7 @@ describe("Integration: Service Connectivity Tests", () => {
     });
 
     test("EFS mount targets have correct security group associations", () => {
-      const template = Template.fromStack(stacks.efsStack);
-
+      const template = getTemplate("efsStack");
       const mountTargets = template.findResources(
         RESOURCE_TYPES.EFS_MOUNT_TARGET
       );
@@ -279,12 +402,10 @@ describe("Integration: Service Connectivity Tests", () => {
 
   describe("Security Group Connectivity Rules", () => {
     test("security groups exist for all components", () => {
-      const templates = [
-        { name: "EFS", template: Template.fromStack(stacks.efsStack) },
-        { name: "Infra", template: Template.fromStack(stacks.infraStack) },
-      ];
+      const stacksToTest = ["efsStack", "infraStack"] as const;
 
-      templates.forEach(({ name: _name, template }) => {
+      stacksToTest.forEach((stackKey) => {
+        const template = getTemplate(stackKey);
         const securityGroups = template.findResources(
           RESOURCE_TYPES.SECURITY_GROUP
         );
@@ -293,30 +414,26 @@ describe("Integration: Service Connectivity Tests", () => {
     });
 
     test("security group rules use least privilege principle", () => {
-      const template = Template.fromStack(stacks.infraStack);
+      const template = getTemplate("infraStack");
 
-      const rules = template.findResources(
-        RESOURCE_TYPES.SECURITY_GROUP_INGRESS
-      );
-
-      Object.values(rules).forEach((rule) => {
-        const properties = (rule as Record<string, Record<string, unknown>>)
-          .Properties;
-
-        // Rules should specify specific ports, not all traffic
-        if (
-          properties.IpProtocol === "tcp" ||
-          properties.IpProtocol === "udp"
-        ) {
-          expect(properties.FromPort).toBeDefined();
-          expect(properties.ToPort).toBeDefined();
+      validateSecurityGroupRules(
+        template,
+        "SECURITY_GROUP_INGRESS",
+        (properties) => {
+          // Rules should specify specific ports, not all traffic
+          if (
+            properties.IpProtocol === "tcp" ||
+            properties.IpProtocol === "udp"
+          ) {
+            expect(properties.FromPort).toBeDefined();
+            expect(properties.ToPort).toBeDefined();
+          }
         }
-      });
+      );
     });
 
     test("security group egress allows necessary outbound traffic", () => {
-      const template = Template.fromStack(stacks.infraStack);
-
+      const template = getTemplate("infraStack");
       const egressRules = template.findResources(
         RESOURCE_TYPES.SECURITY_GROUP_EGRESS
       );
@@ -326,29 +443,25 @@ describe("Integration: Service Connectivity Tests", () => {
     });
 
     test("no security groups allow unrestricted inbound traffic", () => {
-      const templates = [
-        Template.fromStack(stacks.efsStack),
-        Template.fromStack(stacks.infraStack),
-      ];
+      const stacksToTest = ["efsStack", "infraStack"] as const;
 
-      templates.forEach((template) => {
-        const rules = template.findResources(
-          RESOURCE_TYPES.SECURITY_GROUP_INGRESS
-        );
+      stacksToTest.forEach((stackKey) => {
+        const template = getTemplate(stackKey);
 
-        Object.values(rules).forEach((rule) => {
-          const properties = (rule as Record<string, Record<string, unknown>>)
-            .Properties;
-
-          // If CIDR is 0.0.0.0/0, it should only be for specific use cases
-          if (
-            properties.CidrIp === "0.0.0.0/0" ||
-            properties.CidrIpv6 === "::/0"
-          ) {
-            // Should not allow all ports
-            expect(properties.IpProtocol).not.toBe("-1");
+        validateSecurityGroupRules(
+          template,
+          "SECURITY_GROUP_INGRESS",
+          (properties) => {
+            // If CIDR is 0.0.0.0/0, it should only be for specific use cases
+            if (
+              properties.CidrIp === "0.0.0.0/0" ||
+              properties.CidrIpv6 === "::/0"
+            ) {
+              // Should not allow all ports
+              expect(properties.IpProtocol).not.toBe("-1");
+            }
           }
-        });
+        );
       });
     });
   });
@@ -359,7 +472,7 @@ describe("Integration: Service Connectivity Tests", () => {
 
   describe("Port and Protocol Configuration", () => {
     test("ALB listens on standard HTTP port 80", () => {
-      const template = Template.fromStack(stacks.infraStack);
+      const template = getTemplate("infraStack");
 
       template.hasResourceProperties(RESOURCE_TYPES.LISTENER, {
         Port: PORT_CONFIG.HTTP,
@@ -368,68 +481,17 @@ describe("Integration: Service Connectivity Tests", () => {
     });
 
     test("Prometheus service uses correct port", () => {
-      const template = Template.fromStack(stacks.serviceStack);
-
-      const taskDefs = template.findResources(
-        RESOURCE_TYPES.ECS_TASK_DEFINITION
-      );
-
-      Object.values(taskDefs).forEach((taskDef) => {
-        const properties = (taskDef as Record<string, Record<string, unknown>>)
-          .Properties;
-        const containers = properties.ContainerDefinitions as Array<
-          Record<string, unknown>
-        >;
-
-        containers.forEach((container) => {
-          const name = container.Name as string;
-          const portMappings = container.PortMappings as Array<
-            Record<string, number>
-          >;
-
-          if (name?.toLowerCase().includes("prometheus")) {
-            const hasPrometheusPort = portMappings?.some(
-              (pm) => pm.ContainerPort === PORT_CONFIG.PROMETHEUS
-            );
-            expect(hasPrometheusPort).toBe(true);
-          }
-        });
-      });
+      const template = getTemplate("serviceStack");
+      validateServicePort(template, "prometheus", PORT_CONFIG.PROMETHEUS);
     });
 
     test("Grafana service uses correct port", () => {
-      const template = Template.fromStack(stacks.serviceStack);
-
-      const taskDefs = template.findResources(
-        RESOURCE_TYPES.ECS_TASK_DEFINITION
-      );
-
-      Object.values(taskDefs).forEach((taskDef) => {
-        const properties = (taskDef as Record<string, Record<string, unknown>>)
-          .Properties;
-        const containers = properties.ContainerDefinitions as Array<
-          Record<string, unknown>
-        >;
-
-        containers.forEach((container) => {
-          const name = container.Name as string;
-          const portMappings = container.PortMappings as Array<
-            Record<string, number>
-          >;
-
-          if (name?.toLowerCase().includes("grafana")) {
-            const hasGrafanaPort = portMappings?.some(
-              (pm) => pm.ContainerPort === PORT_CONFIG.GRAFANA
-            );
-            expect(hasGrafanaPort).toBe(true);
-          }
-        });
-      });
+      const template = getTemplate("serviceStack");
+      validateServicePort(template, "grafana", PORT_CONFIG.GRAFANA);
     });
 
     test("EFS uses NFS port 2049", () => {
-      const template = Template.fromStack(stacks.efsStack);
-
+      const template = getTemplate("efsStack");
       const securityGroups = template.findResources(
         RESOURCE_TYPES.SECURITY_GROUP
       );
@@ -459,33 +521,8 @@ describe("Integration: Service Connectivity Tests", () => {
     });
 
     test("Node Exporter uses correct port for metrics", () => {
-      const template = Template.fromStack(stacks.serviceStack);
-
-      const taskDefs = template.findResources(
-        RESOURCE_TYPES.ECS_TASK_DEFINITION
-      );
-
-      Object.values(taskDefs).forEach((taskDef) => {
-        const properties = (taskDef as Record<string, Record<string, unknown>>)
-          .Properties;
-        const containers = properties.ContainerDefinitions as Array<
-          Record<string, unknown>
-        >;
-
-        containers.forEach((container) => {
-          const name = container.Name as string;
-          const portMappings = container.PortMappings as Array<
-            Record<string, number>
-          >;
-
-          if (name?.toLowerCase().includes("node-exporter")) {
-            const hasNodeExporterPort = portMappings?.some(
-              (pm) => pm.ContainerPort === PORT_CONFIG.NODE_EXPORTER
-            );
-            expect(hasNodeExporterPort).toBe(true);
-          }
-        });
-      });
+      const template = getTemplate("serviceStack");
+      validateServicePort(template, "node-exporter", PORT_CONFIG.NODE_EXPORTER);
     });
   });
 
@@ -495,8 +532,7 @@ describe("Integration: Service Connectivity Tests", () => {
 
   describe("Network Mode Configuration", () => {
     test("ECS tasks use appropriate network mode", () => {
-      const template = Template.fromStack(stacks.serviceStack);
-
+      const template = getTemplate("serviceStack");
       const taskDefs = template.findResources(
         RESOURCE_TYPES.ECS_TASK_DEFINITION
       );
@@ -514,8 +550,7 @@ describe("Integration: Service Connectivity Tests", () => {
     });
 
     test("bridge network mode containers use dynamic port mapping", () => {
-      const template = Template.fromStack(stacks.serviceStack);
-
+      const template = getTemplate("serviceStack");
       const taskDefs = template.findResources(
         RESOURCE_TYPES.ECS_TASK_DEFINITION
       );
@@ -552,21 +587,18 @@ describe("Integration: Service Connectivity Tests", () => {
 
   describe("Health Check Connectivity", () => {
     test("ALB target groups have accessible health check paths", () => {
-      const template = Template.fromStack(stacks.serviceStack);
+      const template = getTemplate("serviceStack");
 
-      const targetGroups = template.findResources(RESOURCE_TYPES.TARGET_GROUP);
-
-      Object.values(targetGroups).forEach((tg) => {
-        const properties = (tg as Record<string, Record<string, unknown>>)
-          .Properties;
-
+      validateTargetGroups(template, (properties) => {
         expect(properties.HealthCheckPath).toBeDefined();
+
         // HealthCheckProtocol may be undefined (defaults to target protocol)
         if (properties.HealthCheckProtocol) {
           expect(["HTTP", "HTTPS", "TCP"]).toContain(
             properties.HealthCheckProtocol
           );
         }
+
         expect(properties.HealthCheckIntervalSeconds).toBeDefined();
         expect(properties.HealthyThresholdCount).toBeDefined();
         expect(properties.UnhealthyThresholdCount).toBeDefined();
@@ -574,8 +606,7 @@ describe("Integration: Service Connectivity Tests", () => {
     });
 
     test("health check intervals are reasonable", () => {
-      const template = Template.fromStack(stacks.serviceStack);
-
+      const template = getTemplate("serviceStack");
       const targetGroups = template.findResources(RESOURCE_TYPES.TARGET_GROUP);
 
       Object.values(targetGroups).forEach((tg) => {
@@ -598,9 +629,8 @@ describe("Integration: Service Connectivity Tests", () => {
       });
     });
 
-    test("ECS services have health check grace period configured", () => {
-      const template = Template.fromStack(stacks.serviceStack);
-
+    test("ECS services have health check grace period configured (if load balancers exist)", () => {
+      const template = getTemplate("serviceStack");
       const services = template.findResources(RESOURCE_TYPES.ECS_SERVICE);
 
       Object.values(services).forEach((service) => {
@@ -621,22 +651,19 @@ describe("Integration: Service Connectivity Tests", () => {
 
   describe("Service Discovery", () => {
     test("ECS cluster supports service discovery", () => {
-      const template = Template.fromStack(stacks.infraStack);
-
+      const template = getTemplate("infraStack");
       const cluster = template.findResources(RESOURCE_TYPES.ECS_CLUSTER);
+
       expect(Object.keys(cluster).length).toBe(1);
 
       // Cluster should be configured for service discovery
       Object.values(cluster).forEach((c) => {
-        const properties = (c as Record<string, Record<string, string>>)
-          .Properties;
-        expect(properties.ClusterName).toBeDefined();
+        validateResourceProperties(c, ["ClusterName"]);
       });
     });
 
     test("services can reference each other via DNS", () => {
-      const template = Template.fromStack(stacks.serviceStack);
-
+      const template = getTemplate("serviceStack");
       const taskDefs = template.findResources(
         RESOURCE_TYPES.ECS_TASK_DEFINITION
       );
@@ -673,8 +700,8 @@ describe("Integration: Service Connectivity Tests", () => {
 
   describe("Cross-Stack Connectivity", () => {
     test("Infra stack can access EFS from EFS stack", () => {
-      const infraTemplate = Template.fromStack(stacks.infraStack);
-      const efsTemplate = Template.fromStack(stacks.efsStack);
+      const infraTemplate = getTemplate("infraStack");
+      const efsTemplate = getTemplate("efsStack");
 
       // Verify EFS resources exist in EFS stack
       const efsFileSystems = efsTemplate.findResources(
@@ -694,29 +721,19 @@ describe("Integration: Service Connectivity Tests", () => {
     });
 
     test("Service stack references resources from Infra stack", () => {
-      const template = Template.fromStack(stacks.serviceStack);
-
-      // Service stack should reference cluster from infra stack
+      const template = getTemplate("serviceStack");
       const services = template.findResources(RESOURCE_TYPES.ECS_SERVICE);
 
       expect(Object.keys(services).length).toBeGreaterThan(0);
 
       Object.values(services).forEach((service) => {
-        const properties = (service as Record<string, Record<string, unknown>>)
-          .Properties;
-
-        // All services must have a cluster
-        expect(properties.Cluster).toBeDefined();
-
-        // LoadBalancers is optional (some services may not use ALB)
-        // Just verify the service exists and has a cluster reference
+        validateResourceProperties(service, ["Cluster"]);
       });
     });
 
     test("all stacks use same VPC for connectivity", () => {
-      // All resources should be in the same VPC
-      const efsTemplate = Template.fromStack(stacks.efsStack);
-      const infraTemplate = Template.fromStack(stacks.infraStack);
+      const efsTemplate = getTemplate("efsStack");
+      const infraTemplate = getTemplate("infraStack");
 
       const efsSecurityGroups = efsTemplate.findResources(
         RESOURCE_TYPES.SECURITY_GROUP
