@@ -732,56 +732,73 @@ describe("Network Connectivity Tests", () => {
   // ============================================================================
 
   describe("VPC Endpoints", () => {
-    const endpoints = () => template.findResources("AWS::EC2::VPCEndpoint");
-
     describe("when configuring S3 endpoint for cost optimization", () => {
       it("should create S3 gateway endpoint if endpoints are enabled", () => {
         // Arrange
-        const allEndpoints = endpoints();
+        const allEndpoints = template.findResources("AWS::EC2::VPCEndpoint");
+
+        // Skip test if no endpoints configured
+        if (Object.keys(allEndpoints).length === 0) {
+          return;
+        }
 
         // Act - Check if any endpoint is for S3
-        if (Object.keys(allEndpoints).length > 0) {
-          const hasS3Endpoint = Object.values(allEndpoints).some((endpoint) => {
-            const props = endpoint.Properties as Record<string, unknown>;
-            return (
-              props.ServiceName &&
-              JSON.stringify(props.ServiceName).includes("s3")
-            );
-          });
-
-          // Assert
-          expect(hasS3Endpoint).toBe(true);
-        }
-      });
-
-      it("should use Gateway type for S3 endpoint (no cost)", () => {
-        // Arrange
-        const allEndpoints = endpoints();
-
-        // Act & Assert
-        Object.values(allEndpoints).forEach((endpoint) => {
+        const hasS3Endpoint = Object.values(allEndpoints).some((endpoint) => {
           const props = endpoint.Properties as Record<string, unknown>;
-          if (
+          return (
             props.ServiceName &&
             JSON.stringify(props.ServiceName).includes("s3")
-          ) {
-            expect(props.VpcEndpointType).toBe("Gateway");
-          }
+          );
+        });
+
+        // Assert
+        expect(hasS3Endpoint).toBe(true);
+      });
+
+      it("should use Gateway type for S3 endpoint (no cost) (if S3 endpoint exists)", () => {
+        // Arrange
+        const allEndpoints = template.findResources("AWS::EC2::VPCEndpoint");
+        const s3Endpoints = Object.values(allEndpoints).filter((endpoint) => {
+          const props = endpoint.Properties as Record<string, unknown>;
+          return (
+            props.ServiceName &&
+            JSON.stringify(props.ServiceName).includes("s3")
+          );
+        });
+
+        // Skip test if no S3 endpoints
+        if (s3Endpoints.length === 0) {
+          return;
+        }
+
+        // Act & Assert
+        s3Endpoints.forEach((endpoint) => {
+          const props = endpoint.Properties as Record<string, unknown>;
+          expect(props.VpcEndpointType).toBe("Gateway");
         });
       });
     });
 
     describe("when associating gateway endpoints", () => {
-      it("should associate gateway endpoints with route tables", () => {
+      it("should associate gateway endpoints with route tables (if gateway endpoints exist)", () => {
         // Arrange
-        const allEndpoints = endpoints();
+        const allEndpoints = template.findResources("AWS::EC2::VPCEndpoint");
+        const gatewayEndpoints = Object.values(allEndpoints).filter(
+          (endpoint) => {
+            const props = endpoint.Properties as Record<string, unknown>;
+            return props.VpcEndpointType === "Gateway";
+          }
+        );
+
+        // Skip test if no gateway endpoints
+        if (gatewayEndpoints.length === 0) {
+          return;
+        }
 
         // Act & Assert
-        Object.values(allEndpoints).forEach((endpoint) => {
+        gatewayEndpoints.forEach((endpoint) => {
           const props = endpoint.Properties as Record<string, unknown>;
-          if (props.VpcEndpointType === "Gateway") {
-            expect(props.RouteTableIds).toBeDefined();
-          }
+          expect(props.RouteTableIds).toBeDefined();
         });
       });
     });
@@ -798,6 +815,9 @@ describe("Network Connectivity Tests", () => {
         const { publicSubnets, privateSubnets } = extractSubnetCidrs(template);
 
         // Act & Assert
+        expect(publicSubnets.length).toBeGreaterThan(0);
+        expect(privateSubnets.length).toBeGreaterThan(0);
+
         publicSubnets.forEach((publicCidr) => {
           expect(privateSubnets).not.toContain(publicCidr);
         });
@@ -810,6 +830,9 @@ describe("Network Connectivity Tests", () => {
         );
         const { publicSubnets } = getSubnetsByType(template);
         const subnets = template.findResources(RESOURCE_TYPES.SUBNET);
+
+        expect(associations).toBeDefined();
+        expect(Object.keys(associations).length).toBeGreaterThan(0);
 
         const publicSubnetIds = new Set(
           Object.entries(subnets)
@@ -840,6 +863,8 @@ describe("Network Connectivity Tests", () => {
         });
 
         // Assert - Each route table should not mix public and private subnets
+        expect(routeTables.size).toBeGreaterThan(0);
+
         routeTables.forEach((subnetsInRt) => {
           const hasPublic = Array.from(subnetsInRt).some((s) =>
             Array.from(publicSubnetIds).some((ps) => s.includes(ps))
@@ -847,9 +872,7 @@ describe("Network Connectivity Tests", () => {
           const hasPrivate = subnetsInRt.size > 0 && !hasPublic;
 
           // If route table has both types, this is a configuration error
-          if (hasPublic && hasPrivate) {
-            fail("Route table associates both public and private subnets");
-          }
+          expect(hasPublic && hasPrivate).toBe(false);
         });
       });
     });
@@ -885,13 +908,22 @@ describe("Network Connectivity Tests", () => {
       it("should have IAM role for CloudWatch Logs delivery", () => {
         // Arrange
         const flowLogs = template.findResources("AWS::EC2::FlowLog");
+        const cloudWatchFlowLogs = Object.values(flowLogs).filter(
+          (flowLog) => {
+            const props = flowLog.Properties as Record<string, unknown>;
+            return props.LogDestinationType === "cloud-watch-logs";
+          }
+        );
+
+        // Skip test if no CloudWatch flow logs
+        if (cloudWatchFlowLogs.length === 0) {
+          return;
+        }
 
         // Act & Assert
-        Object.values(flowLogs).forEach((flowLog) => {
+        cloudWatchFlowLogs.forEach((flowLog) => {
           const props = flowLog.Properties as Record<string, unknown>;
-          if (props.LogDestinationType === "cloud-watch-logs") {
-            expect(props.DeliverLogsPermissionArn).toBeDefined();
-          }
+          expect(props.DeliverLogsPermissionArn).toBeDefined();
         });
       });
 

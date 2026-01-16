@@ -9,7 +9,7 @@ import { program } from "commander";
 import {
   CloudFormationClient,
   DescribeStacksCommand,
-  ListStackResourcesCommand,
+  paginateListStackResources,
 } from "@aws-sdk/client-cloudformation";
 import {
   AutoScalingClient,
@@ -527,23 +527,27 @@ async function getSecurityGroups(
   stackName: string
 ): Promise<any[]> {
   try {
-    const command = new ListStackResourcesCommand({
-      StackName: stackName,
-    });
+    const allResources: any[] = [];
+    for await (const page of paginateListStackResources(
+      { client: cfnClient },
+      { StackName: stackName }
+    )) {
+      if (page.StackResourceSummaries) {
+        allResources.push(...page.StackResourceSummaries);
+      }
+    }
 
-    const response = await cfnClient.send(command);
-    const sgResources =
-      response.StackResourceSummaries?.filter(
-        (r) => r.ResourceType === "AWS::EC2::SecurityGroup"
-      ) || [];
+    const sgResources = allResources.filter(
+      (r: any) => r.ResourceType === "AWS::EC2::SecurityGroup"
+    );
 
     if (sgResources.length === 0) {
       return [];
     }
 
     const sgIds = sgResources
-      .map((r) => r.PhysicalResourceId)
-      .filter((id): id is string => !!id);
+      .map((r: any) => r.PhysicalResourceId)
+      .filter((id: any): id is string => !!id);
 
     if (sgIds.length === 0) {
       return [];
@@ -1195,14 +1199,172 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
     Logger.success(`Security Groups: ${securityGroups.length}`);
     checks.passed++;
 
-    if (config.verbose) {
-      securityGroups.forEach((sg) => {
-        const ingressRules = sg.IpPermissions?.length || 0;
-        Logger.info(
-          `Security Group: ${sg.GroupName} (${sg.GroupId}) - ${ingressRules} ingress rules`
+    securityGroups.forEach((sg) => {
+      console.log("");
+      Logger.info(`Security Group: ${sg.GroupName || "N/A"} (${sg.GroupId})`);
+      Logger.info(`Description: ${sg.Description || "N/A"}`);
+      Logger.info(`VPC ID: ${sg.VpcId || "N/A"}`);
+
+      // Inbound Rules
+      console.log("");
+      console.log("  Inbound Rules:");
+      const ingressRules = sg.IpPermissions || [];
+      if (ingressRules.length === 0) {
+        Logger.info("    (no inbound rules)");
+      } else {
+        ingressRules.forEach((rule: any, index: number) => {
+          const protocol = rule.IpProtocol === "-1" ? "All" : rule.IpProtocol;
+          const fromPort = rule.FromPort !== undefined ? rule.FromPort : "All";
+          const toPort = rule.ToPort !== undefined ? rule.ToPort : "All";
+          const portRange =
+            fromPort === toPort ? `${fromPort}` : `${fromPort}-${toPort}`;
+
+          // Get sources
+          const sources: string[] = [];
+          if (rule.IpRanges && rule.IpRanges.length > 0) {
+            rule.IpRanges.forEach((range: any) => {
+              sources.push(range.CidrIp || range.CidrIpv6 || "N/A");
+            });
+          }
+          if (rule.UserIdGroupPairs && rule.UserIdGroupPairs.length > 0) {
+            rule.UserIdGroupPairs.forEach((pair: any) => {
+              sources.push(
+                `sg-${pair.GroupId}${
+                  pair.GroupName ? ` (${pair.GroupName})` : ""
+                }`
+              );
+            });
+          }
+          if (rule.PrefixListIds && rule.PrefixListIds.length > 0) {
+            rule.PrefixListIds.forEach((prefix: any) => {
+              sources.push(`pl-${prefix.PrefixListId}`);
+            });
+          }
+
+          const sourceStr = sources.length > 0 ? sources.join(", ") : "N/A";
+
+          Logger.info(
+            `    ${
+              index + 1
+            }. Protocol: ${protocol}, Port: ${portRange}, Source: ${sourceStr}`
+          );
+
+          if (rule.Description) {
+            Logger.info(`       Description: ${rule.Description}`);
+          }
+        });
+      }
+
+      // Outbound Rules
+      console.log("");
+      console.log("  Outbound Rules:");
+      const egressRules = sg.IpPermissionsEgress || [];
+      if (egressRules.length === 0) {
+        Logger.info("    (no outbound rules)");
+      } else {
+        egressRules.forEach((rule: any, index: number) => {
+          const protocol = rule.IpProtocol === "-1" ? "All" : rule.IpProtocol;
+          const fromPort = rule.FromPort !== undefined ? rule.FromPort : "All";
+          const toPort = rule.ToPort !== undefined ? rule.ToPort : "All";
+          const portRange =
+            fromPort === toPort ? `${fromPort}` : `${fromPort}-${toPort}`;
+
+          // Get destinations
+          const destinations: string[] = [];
+          if (rule.IpRanges && rule.IpRanges.length > 0) {
+            rule.IpRanges.forEach((range: any) => {
+              destinations.push(range.CidrIp || range.CidrIpv6 || "N/A");
+            });
+          }
+          if (rule.UserIdGroupPairs && rule.UserIdGroupPairs.length > 0) {
+            rule.UserIdGroupPairs.forEach((pair: any) => {
+              destinations.push(
+                `sg-${pair.GroupId}${
+                  pair.GroupName ? ` (${pair.GroupName})` : ""
+                }`
+              );
+            });
+          }
+          if (rule.PrefixListIds && rule.PrefixListIds.length > 0) {
+            rule.PrefixListIds.forEach((prefix: any) => {
+              destinations.push(`pl-${prefix.PrefixListId}`);
+            });
+          }
+
+          const destStr =
+            destinations.length > 0 ? destinations.join(", ") : "N/A";
+
+          Logger.info(
+            `    ${
+              index + 1
+            }. Protocol: ${protocol}, Port: ${portRange}, Destination: ${destStr}`
+          );
+
+          if (rule.Description) {
+            Logger.info(`       Description: ${rule.Description}`);
+          }
+        });
+      }
+
+      // Security checks
+      console.log("");
+      const hasUnrestrictedIngress = ingressRules.some(
+        (rule: any) =>
+          rule.IpProtocol === "-1" &&
+          rule.IpRanges?.some((range: any) => range.CidrIp === "0.0.0.0/0")
+      );
+      const hasUnrestrictedEgress = egressRules.some(
+        (rule: any) =>
+          rule.IpProtocol === "-1" &&
+          rule.IpRanges?.some((range: any) => range.CidrIp === "0.0.0.0/0")
+      );
+
+      if (hasUnrestrictedIngress) {
+        Logger.warning(
+          "    ⚠️  Security Group allows unrestricted inbound traffic (0.0.0.0/0)"
         );
-      });
-    }
+        checks.warnings++;
+      }
+
+      if (hasUnrestrictedEgress) {
+        Logger.info(
+          "    ℹ️  Security Group allows unrestricted outbound traffic (0.0.0.0/0) - normal for internet access"
+        );
+      }
+
+      // Check for common ports
+      const hasHttp = ingressRules.some(
+        (rule: any) =>
+          rule.IpProtocol === "tcp" && rule.FromPort <= 80 && rule.ToPort >= 80
+      );
+      const hasHttps = ingressRules.some(
+        (rule: any) =>
+          rule.IpProtocol === "tcp" &&
+          rule.FromPort <= 443 &&
+          rule.ToPort >= 443
+      );
+      const hasSsh = ingressRules.some(
+        (rule: any) =>
+          rule.IpProtocol === "tcp" && rule.FromPort <= 22 && rule.ToPort >= 22
+      );
+
+      if (hasHttp || hasHttps) {
+        Logger.info(
+          `    ✓ HTTP${
+            hasHttp && hasHttps ? "/HTTPS" : hasHttp ? "" : "/HTTPS"
+          } access configured`
+        );
+      }
+
+      if (hasSsh) {
+        Logger.warning(
+          "    ⚠️  SSH (port 22) access detected - ensure source is restricted"
+        );
+        checks.warnings++;
+      }
+    });
+
+    console.log("");
   } else {
     Logger.warning("No security groups found in stack");
     checks.warnings++;

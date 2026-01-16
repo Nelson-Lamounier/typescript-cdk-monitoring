@@ -200,13 +200,20 @@ describe("Security Posture: Application Security", () => {
       const template = getTemplate("infraStack");
       const albs = getResources(template, RESOURCE_TYPES.ALB);
 
-      albs.forEach((alb) => {
+      const albsWithAccessLogs = albs.filter((alb) => {
         const accessLogsAttr = findAlbAttribute(alb, "access_logs.s3.enabled");
+        return accessLogsAttr !== undefined;
+      });
 
-        // If access logs are configured, value should be valid
-        if (accessLogsAttr) {
-          expect(["false", "true"]).toContain(accessLogsAttr.Value);
-        }
+      // Skip test if no ALBs have access logs configured
+      if (albsWithAccessLogs.length === 0) {
+        return;
+      }
+
+      albsWithAccessLogs.forEach((alb) => {
+        const accessLogsAttr = findAlbAttribute(alb, "access_logs.s3.enabled");
+        expect(accessLogsAttr).toBeDefined();
+        expect(["false", "true"]).toContain(accessLogsAttr?.Value);
       });
     });
   });
@@ -260,17 +267,28 @@ describe("Security Posture: Application Security", () => {
       const template = getTemplate("serviceStack");
       const targetGroups = getResources(template, RESOURCE_TYPES.TARGET_GROUP);
 
-      targetGroups.forEach((targetGroup) => {
+      const targetGroupsWithDelay = targetGroups.filter((targetGroup) => {
         const deregDelayAttr = findTargetGroupAttribute(
           targetGroup,
           "deregistration_delay.timeout_seconds"
         );
+        return deregDelayAttr !== undefined;
+      });
 
-        if (deregDelayAttr) {
-          const delaySeconds = parseInt(deregDelayAttr.Value);
-          expect(delaySeconds).toBeGreaterThanOrEqual(0);
-          expect(delaySeconds).toBeLessThanOrEqual(300);
-        }
+      // Skip test if no target groups have deregistration delay configured
+      if (targetGroupsWithDelay.length === 0) {
+        return;
+      }
+
+      targetGroupsWithDelay.forEach((targetGroup) => {
+        const deregDelayAttr = findTargetGroupAttribute(
+          targetGroup,
+          "deregistration_delay.timeout_seconds"
+        );
+        expect(deregDelayAttr).toBeDefined();
+        const delaySeconds = parseInt(deregDelayAttr?.Value || "0");
+        expect(delaySeconds).toBeGreaterThanOrEqual(0);
+        expect(delaySeconds).toBeLessThanOrEqual(300);
       });
     });
   });
@@ -325,18 +343,22 @@ describe("Security Posture: Application Security", () => {
         RESOURCE_TYPES.ECS_TASK_DEFINITION
       );
 
-      taskDefs.forEach((taskDef) => {
+      const containersWithUser = taskDefs.flatMap((taskDef) => {
         const containers = getContainersFromTaskDef(taskDef);
+        return containers.filter((container) => container.User !== undefined);
+      });
 
-        containers.forEach((container) => {
-          const user = container.User;
+      // Skip test if no containers have user specified
+      if (containersWithUser.length === 0) {
+        return;
+      }
 
-          if (user !== undefined) {
-            const userStr = String(user);
-            expect(userStr).not.toBe("0");
-            expect(userStr).not.toBe("root");
-          }
-        });
+      containersWithUser.forEach((container) => {
+        const user = container.User;
+        expect(user).toBeDefined();
+        const userStr = String(user);
+        expect(userStr).not.toBe("0");
+        expect(userStr).not.toBe("root");
       });
     });
 
@@ -371,14 +393,23 @@ describe("Security Posture: Application Security", () => {
         RESOURCE_TYPES.ECS_TASK_DEFINITION
       );
 
-      taskDefs.forEach((taskDef) => {
+      const taskDefsWithNetworkMode = taskDefs.filter((taskDef) => {
+        const properties = (taskDef as Record<string, Record<string, string>>)
+          .Properties;
+        return properties.NetworkMode !== undefined;
+      });
+
+      // Skip test if no task definitions have network mode specified
+      if (taskDefsWithNetworkMode.length === 0) {
+        return;
+      }
+
+      taskDefsWithNetworkMode.forEach((taskDef) => {
         const properties = (taskDef as Record<string, Record<string, string>>)
           .Properties;
         const networkMode = properties.NetworkMode;
-
-        if (networkMode) {
-          expect(["awsvpc", "bridge", "host", "none"]).toContain(networkMode);
-        }
+        expect(networkMode).toBeDefined();
+        expect(["awsvpc", "bridge", "host", "none"]).toContain(networkMode);
       });
     });
   });
@@ -427,15 +458,20 @@ describe("Security Posture: Application Security", () => {
       taskDefs.forEach((taskDef) => {
         // Should not have hardcoded secrets
         expect(hasHardcodedSecrets(taskDef)).toBe(false);
+      });
 
-        // If password-related fields exist, should use Secrets Manager
+      // Test password-related fields use Secrets Manager
+      const taskDefsWithPassword = taskDefs.filter((taskDef) => {
         const taskDefStr = JSON.stringify(taskDef);
-        if (
+        return (
           taskDefStr.includes("ADMIN_PASSWORD") ||
           taskDefStr.includes("password")
-        ) {
-          expect(usesSecretsManager(taskDef)).toBe(true);
-        }
+        );
+      });
+
+      // If password-related fields exist, should use Secrets Manager
+      taskDefsWithPassword.forEach((taskDef) => {
+        expect(usesSecretsManager(taskDef)).toBe(true);
       });
     });
   });
@@ -483,21 +519,31 @@ describe("Security Posture: Application Security", () => {
         RESOURCE_TYPES.SSM_ASSOCIATION
       );
 
-      associations.forEach((association) => {
+      const associationsWithSeverity = associations.filter((association) => {
+        const properties = (
+          association as Record<string, Record<string, string>>
+        ).Properties;
+        return properties.ComplianceSeverity !== undefined;
+      });
+
+      // Skip test if no associations have compliance severity configured
+      if (associationsWithSeverity.length === 0) {
+        return;
+      }
+
+      associationsWithSeverity.forEach((association) => {
         const properties = (
           association as Record<string, Record<string, string>>
         ).Properties;
         const complianceSeverity = properties.ComplianceSeverity;
-
-        if (complianceSeverity) {
-          expect([
-            "CRITICAL",
-            "HIGH",
-            "MEDIUM",
-            "LOW",
-            "UNSPECIFIED",
-          ]).toContain(complianceSeverity);
-        }
+        expect(complianceSeverity).toBeDefined();
+        expect([
+          "CRITICAL",
+          "HIGH",
+          "MEDIUM",
+          "LOW",
+          "UNSPECIFIED",
+        ]).toContain(complianceSeverity);
       });
     });
   });

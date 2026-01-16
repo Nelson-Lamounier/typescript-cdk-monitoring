@@ -190,7 +190,7 @@ export default [
       "jest/valid-title": [
         "error",
         {
-          mustNotMatch: /template\./, // Flag if "template." in test name
+          mustNotMatch: "template\\.",
         },
       ],
       "jest/no-done-callback": "error",
