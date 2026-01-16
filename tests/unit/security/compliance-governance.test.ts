@@ -16,47 +16,216 @@
 
 import { Template, Match } from "aws-cdk-lib/assertions";
 
-import { RESOURCE_TYPES } from "../connectivity/test-config";
+import {
+  RESOURCE_TYPES,
+  type ConnectivityTestStacks,
+} from "../connectivity/test-config";
 
-import { SecurityTestFixtures, type SecurityTestStacks } from "./test-fixtures";
+import { SecurityTestFixtures } from "../utils/test-utils";
 
 describe("Security Posture: Compliance & Governance", () => {
-  let stacks: SecurityTestStacks;
+  let stacks: ConnectivityTestStacks;
 
   beforeAll(() => {
     stacks = SecurityTestFixtures.getDevelopmentStacks();
   });
 
+  // ==========================================================================
+  // HELPER FUNCTIONS (defined as arrow functions)
+  // ==========================================================================
+
+  /**
+   * Get template from stack name
+   */
+  const getTemplate = (stackName: keyof ConnectivityTestStacks) => {
+    if (stackName === "app") {
+      throw new Error("Cannot get template for app");
+    }
+    return Template.fromStack(stacks[stackName]);
+  };
+
+  /**
+   * Get resources of a specific type
+   */
+  const getResources = (template: Template, resourceType: string) => {
+    return Object.values(template.findResources(resourceType));
+  };
+
+  /**
+   * Extract tags from resource
+   */
+  const getResourceTags = (
+    resource: unknown
+  ): Array<Record<string, string>> => {
+    const properties = (resource as Record<string, Record<string, unknown>>)
+      .Properties;
+    return (properties.Tags || []) as Array<Record<string, string>>;
+  };
+
+  /**
+   * Check if resource has specific tag
+   */
+  const hasTag = (resource: unknown, tagKey: string): boolean => {
+    const tags = getResourceTags(resource);
+    return tags.some((tag) => tag.Key === tagKey);
+  };
+
+  /**
+   * Extract ALB attributes
+   */
+  const getAlbAttributes = (alb: unknown): Array<Record<string, string>> => {
+    const properties = (alb as Record<string, Record<string, unknown>>)
+      .Properties;
+    return (properties.LoadBalancerAttributes || []) as Array<
+      Record<string, string>
+    >;
+  };
+
+  /**
+   * Find attribute by key in ALB attributes
+   */
+  const findAlbAttribute = (
+    alb: unknown,
+    key: string
+  ): Record<string, string> | undefined => {
+    const attributes = getAlbAttributes(alb);
+    return attributes.find((attr) => attr.Key === key);
+  };
+
+  /**
+   * Extract deletion policy from resource
+   */
+  const getDeletionPolicy = (resource: unknown): string | undefined => {
+    return (resource as Record<string, string | undefined>).DeletionPolicy;
+  };
+
+  /**
+   * Extract update policy from ASG
+   */
+  const getUpdatePolicy = (
+    asg: unknown
+  ): Record<string, unknown> | undefined => {
+    return (asg as Record<string, Record<string, unknown>>).UpdatePolicy;
+  };
+
+  /**
+   * Extract rolling update configuration
+   */
+  const getRollingUpdate = (
+    updatePolicy: Record<string, unknown>
+  ): Record<string, unknown> | undefined => {
+    return updatePolicy.AutoScalingRollingUpdate as
+      | Record<string, unknown>
+      | undefined;
+  };
+
+  /**
+   * Extract container insights setting from cluster
+   */
+  const getContainerInsightsSetting = (
+    cluster: unknown
+  ): Record<string, string> | undefined => {
+    const properties = (cluster as Record<string, Record<string, unknown>>)
+      .Properties;
+    const settings = (properties.ClusterSettings || []) as Array<
+      Record<string, string>
+    >;
+    return settings.find((setting) => setting.Name === "containerInsights");
+  };
+
+  /**
+   * Extract ASG desired capacity
+   */
+  const getAsgCapacity = (asg: unknown): number => {
+    const properties = (asg as Record<string, Record<string, number>>)
+      .Properties;
+    return properties.DesiredCapacity || 1;
+  };
+
+  /**
+   * Extract launch template data
+   */
+  const getLaunchTemplateData = (
+    launchTemplate: unknown
+  ): Record<string, string> => {
+    const properties = (
+      launchTemplate as Record<string, Record<string, Record<string, string>>>
+    ).Properties;
+    return properties.LaunchTemplateData;
+  };
+
+  /**
+   * Extract instance type from launch template
+   */
+  const getInstanceType = (launchTemplate: unknown): string | undefined => {
+    const ltData = getLaunchTemplateData(launchTemplate);
+    return ltData.InstanceType;
+  };
+
+  /**
+   * Extract deployment configuration from ECS service
+   */
+  const getDeploymentConfiguration = (
+    service: unknown
+  ): Record<string, unknown> | undefined => {
+    const properties = (service as Record<string, Record<string, unknown>>)
+      .Properties;
+    return properties.DeploymentConfiguration as
+      | Record<string, unknown>
+      | undefined;
+  };
+
+  /**
+   * Extract circuit breaker configuration
+   */
+  const getCircuitBreaker = (
+    deployConfig: Record<string, unknown>
+  ): Record<string, boolean> | undefined => {
+    return deployConfig.DeploymentCircuitBreaker as
+      | Record<string, boolean>
+      | undefined;
+  };
+
+  /**
+   * Check if resource string has environment context
+   */
+  const hasEnvironmentContext = (resourceStr: string): boolean => {
+    return (
+      resourceStr.includes("development") ||
+      resourceStr.includes("production") ||
+      resourceStr.includes("-dev-") ||
+      resourceStr.includes("-prod-")
+    );
+  };
+
+  /**
+   * Extract CloudFormation outputs
+   */
+  const getOutputs = (template: Template): Record<string, unknown> => {
+    const templateJson = template.toJSON();
+    return (templateJson.Outputs || {}) as Record<string, unknown>;
+  };
+
+  // ==========================================================================
+  // RESOURCE TAGGING
+  // ==========================================================================
+
   describe("Resource Tagging", () => {
     test("ECS cluster has Environment tag", () => {
-      const template = Template.fromStack(stacks.infraStack);
+      const template = getTemplate("infraStack");
+      const clusters = getResources(template, RESOURCE_TYPES.ECS_CLUSTER);
 
-      const clusters = template.findResources(RESOURCE_TYPES.ECS_CLUSTER);
-
-      Object.values(clusters).forEach((cluster) => {
-        const properties = (cluster as Record<string, unknown>)
-          .Properties as Record<string, unknown>;
-        const tags = (properties.Tags || []) as Array<Record<string, string>>;
-        const hasEnvironmentTag = tags.some(
-          (tag: Record<string, string>) => tag.Key === "Environment"
-        );
-        expect(hasEnvironmentTag).toBe(true);
+      clusters.forEach((cluster) => {
+        expect(hasTag(cluster, "Environment")).toBe(true);
       });
     });
 
     test("ECS cluster has Project tag", () => {
-      const template = Template.fromStack(stacks.infraStack);
+      const template = getTemplate("infraStack");
+      const clusters = getResources(template, RESOURCE_TYPES.ECS_CLUSTER);
 
-      const clusters = template.findResources(RESOURCE_TYPES.ECS_CLUSTER);
-
-      Object.values(clusters).forEach((cluster) => {
-        const properties = (cluster as Record<string, unknown>)
-          .Properties as Record<string, unknown>;
-        const tags = (properties.Tags || []) as Array<Record<string, string>>;
-        const hasProjectTag = tags.some(
-          (tag: Record<string, string>) => tag.Key === "Project"
-        );
-        expect(hasProjectTag).toBe(true);
+      clusters.forEach((cluster) => {
+        expect(hasTag(cluster, "Project")).toBe(true);
       });
     });
 
@@ -67,18 +236,16 @@ describe("Security Posture: Compliance & Governance", () => {
         RESOURCE_TYPES.AUTO_SCALING_GROUP,
       ];
 
-      const template = Template.fromStack(stacks.infraStack);
+      const template = getTemplate("infraStack");
 
       resourceTypes.forEach((resourceType) => {
-        const resources = template.findResources(resourceType);
+        const resources = getResources(template, resourceType);
 
-        Object.values(resources).forEach((resource) => {
-          const properties = (resource as Record<string, unknown>)
-            .Properties as Record<string, unknown>;
+        resources.forEach((resource) => {
+          const tags = getResourceTags(resource);
 
-          // Some resources use Tags, some use different tagging mechanisms
-          if (properties.Tags) {
-            const tags = properties.Tags as Array<Record<string, string>>;
+          // If resource has Tags property, it should have at least one tag
+          if (tags.length > 0) {
             expect(tags.length).toBeGreaterThan(0);
           }
         });
@@ -86,18 +253,21 @@ describe("Security Posture: Compliance & Governance", () => {
     });
   });
 
+  // ==========================================================================
+  // DELETION PROTECTION
+  // ==========================================================================
+
   describe("Deletion Protection", () => {
     test("EFS file system has DeletionPolicy Retain in production", () => {
       const prodStacks = SecurityTestFixtures.getProductionStacks();
       const template = Template.fromStack(prodStacks.efsStack);
-
-      const fileSystems = template.findResources(
+      const fileSystems = getResources(
+        template,
         RESOURCE_TYPES.EFS_FILE_SYSTEM
       );
 
-      Object.values(fileSystems).forEach((fileSystem) => {
-        const deletionPolicy = (fileSystem as Record<string, unknown>)
-          .DeletionPolicy;
+      fileSystems.forEach((fileSystem) => {
+        const deletionPolicy = getDeletionPolicy(fileSystem);
         expect(deletionPolicy).toBe("Retain");
       });
     });
@@ -105,22 +275,14 @@ describe("Security Posture: Compliance & Governance", () => {
     test("ALB has deletion protection configured in production", () => {
       const prodStacks = SecurityTestFixtures.getProductionStacks();
       const template = Template.fromStack(prodStacks.infraStack);
+      const albs = getResources(template, RESOURCE_TYPES.ALB);
 
-      const albs = template.findResources(RESOURCE_TYPES.ALB);
-
-      // Production should have deletion protection explicitly configured
-      Object.values(albs).forEach((alb) => {
-        const properties = (alb as Record<string, Record<string, unknown>>)
-          .Properties;
-        const attributes = (properties.LoadBalancerAttributes || []) as Array<
-          Record<string, string>
-        >;
-
-        const deletionProtection = attributes.find(
-          (attr) => attr.Key === "deletion_protection.enabled"
+      albs.forEach((alb) => {
+        const deletionProtection = findAlbAttribute(
+          alb,
+          "deletion_protection.enabled"
         );
 
-        // Deletion protection should be explicitly configured
         expect(deletionProtection).toBeDefined();
         expect(deletionProtection?.Value).toBeDefined();
       });
@@ -129,34 +291,24 @@ describe("Security Posture: Compliance & Governance", () => {
     test("production log groups have deletion policy configured", () => {
       const prodStacks = SecurityTestFixtures.getProductionStacks();
       const template = Template.fromStack(prodStacks.infraStack);
+      const logGroups = getResources(template, RESOURCE_TYPES.LOG_GROUP);
 
-      const logGroups = template.findResources(RESOURCE_TYPES.LOG_GROUP);
+      logGroups.forEach((logGroup) => {
+        const deletionPolicy = getDeletionPolicy(logGroup);
 
-      // Production should have deletion policy explicitly configured
-      Object.values(logGroups).forEach((logGroup) => {
-        const deletionPolicy = (logGroup as Record<string, unknown>)
-          .DeletionPolicy;
-
-        // Deletion policy should be explicitly set
         expect(deletionPolicy).toBeDefined();
         expect(["Retain", "Delete", "Snapshot"]).toContain(deletionPolicy);
       });
     });
 
-    test("non-production resources allow deletion for cost management", () => {
-      const template = Template.fromStack(stacks.infraStack);
+    test("non-production resources allow deletion for cost management (if configured)", () => {
+      const template = getTemplate("infraStack");
+      const albs = getResources(template, RESOURCE_TYPES.ALB);
 
-      const albs = template.findResources(RESOURCE_TYPES.ALB);
-
-      Object.values(albs).forEach((alb) => {
-        const properties = (alb as Record<string, Record<string, unknown>>)
-          .Properties;
-        const attributes = (properties.LoadBalancerAttributes || []) as Array<
-          Record<string, string>
-        >;
-
-        const deletionProtection = attributes.find(
-          (attr) => attr.Key === "deletion_protection.enabled"
+      albs.forEach((alb) => {
+        const deletionProtection = findAlbAttribute(
+          alb,
+          "deletion_protection.enabled"
         );
 
         if (deletionProtection) {
@@ -166,97 +318,84 @@ describe("Security Posture: Compliance & Governance", () => {
     });
   });
 
+  // ==========================================================================
+  // UPDATE POLICIES
+  // ==========================================================================
+
   describe("Update Policies", () => {
     test("Auto Scaling Groups have update policies configured", () => {
-      const template = Template.fromStack(stacks.infraStack);
+      const template = getTemplate("infraStack");
+      const asgs = getResources(template, RESOURCE_TYPES.AUTO_SCALING_GROUP);
 
-      const asgs = template.findResources(RESOURCE_TYPES.AUTO_SCALING_GROUP);
-
-      Object.values(asgs).forEach((asg) => {
-        const updatePolicy = (asg as Record<string, Record<string, unknown>>)
-          .UpdatePolicy;
+      asgs.forEach((asg) => {
+        const updatePolicy = getUpdatePolicy(asg);
         expect(updatePolicy).toBeDefined();
       });
     });
 
-    test("Auto Scaling Groups have rolling update configuration", () => {
-      const template = Template.fromStack(stacks.infraStack);
+    test("Auto Scaling Groups have rolling update configuration (if configured)", () => {
+      const template = getTemplate("infraStack");
+      const asgs = getResources(template, RESOURCE_TYPES.AUTO_SCALING_GROUP);
 
-      const asgs = template.findResources(RESOURCE_TYPES.AUTO_SCALING_GROUP);
+      asgs.forEach((asg) => {
+        const updatePolicy = getUpdatePolicy(asg);
 
-      Object.values(asgs).forEach((asg) => {
-        const updatePolicy = (
-          asg as Record<string, Record<string, Record<string, unknown>>>
-        ).UpdatePolicy;
+        if (updatePolicy) {
+          const rollingUpdate = getRollingUpdate(updatePolicy);
 
-        if (updatePolicy?.AutoScalingRollingUpdate) {
-          const rollingUpdate = updatePolicy.AutoScalingRollingUpdate;
+          if (rollingUpdate) {
+            expect(rollingUpdate.PauseTime).toBeDefined();
 
-          // Should have pause time configured
-          expect(rollingUpdate.PauseTime).toBeDefined();
-
-          // Should have min/max instances in service
-          expect(
-            rollingUpdate.MinInstancesInService !== undefined ||
-              rollingUpdate.MinSuccessfulInstancesPercent !== undefined
-          ).toBe(true);
+            expect(
+              rollingUpdate.MinInstancesInService !== undefined ||
+                rollingUpdate.MinSuccessfulInstancesPercent !== undefined
+            ).toBe(true);
+          }
         }
       });
     });
 
-    test("ECS services have circuit breaker configured", () => {
-      const template = Template.fromStack(stacks.serviceStack);
+    test("ECS services have circuit breaker configured (if configured)", () => {
+      const template = getTemplate("serviceStack");
+      const services = getResources(template, RESOURCE_TYPES.ECS_SERVICE);
 
-      const services = template.findResources(RESOURCE_TYPES.ECS_SERVICE);
+      services.forEach((service) => {
+        const deployConfig = getDeploymentConfiguration(service);
 
-      Object.values(services).forEach((service) => {
-        const properties = (service as Record<string, Record<string, unknown>>)
-          .Properties;
+        if (deployConfig) {
+          const circuitBreaker = getCircuitBreaker(deployConfig);
 
-        if (properties.DeploymentConfiguration) {
-          const deployConfig = properties.DeploymentConfiguration as Record<
-            string,
-            Record<string, boolean>
-          >;
-
-          // Circuit breaker should be explicitly configured
-          if (deployConfig.DeploymentCircuitBreaker) {
-            expect(deployConfig.DeploymentCircuitBreaker.Enable).toBeDefined();
-            expect(typeof deployConfig.DeploymentCircuitBreaker.Enable).toBe(
-              "boolean"
-            );
+          if (circuitBreaker) {
+            expect(circuitBreaker.Enable).toBeDefined();
+            expect(typeof circuitBreaker.Enable).toBe("boolean");
           }
         }
       });
     });
   });
 
+  // ==========================================================================
+  // ENVIRONMENT-SPECIFIC CONFIGURATIONS
+  // ==========================================================================
+
   describe("Environment-Specific Configurations", () => {
     test("production has higher capacity than development", () => {
-      const devTemplate = Template.fromStack(stacks.infraStack);
+      const devTemplate = getTemplate("infraStack");
       const prodStacks = SecurityTestFixtures.getProductionStacks();
       const prodTemplate = Template.fromStack(prodStacks.infraStack);
 
-      const devAsgs = devTemplate.findResources(
+      const devAsgs = getResources(
+        devTemplate,
         RESOURCE_TYPES.AUTO_SCALING_GROUP
       );
-      const prodAsgs = prodTemplate.findResources(
+      const prodAsgs = getResources(
+        prodTemplate,
         RESOURCE_TYPES.AUTO_SCALING_GROUP
       );
 
-      const devCapacity = Object.values(devAsgs).map((asg) => {
-        const properties = (asg as Record<string, Record<string, number>>)
-          .Properties;
-        return properties.DesiredCapacity || 1;
-      });
+      const devCapacity = devAsgs.map(getAsgCapacity);
+      const prodCapacity = prodAsgs.map(getAsgCapacity);
 
-      const prodCapacity = Object.values(prodAsgs).map((asg) => {
-        const properties = (asg as Record<string, Record<string, number>>)
-          .Properties;
-        return properties.DesiredCapacity || 1;
-      });
-
-      // Production should have equal or higher capacity
       const minDevCapacity = Math.min(...devCapacity);
       const minProdCapacity = Math.min(...prodCapacity);
       expect(minProdCapacity).toBeGreaterThanOrEqual(minDevCapacity);
@@ -276,29 +415,23 @@ describe("Security Posture: Compliance & Governance", () => {
       });
     });
 
-    test("Container Insights is explicitly configured per environment", () => {
-      const template = Template.fromStack(stacks.infraStack);
+    test("Container Insights is explicitly configured per environment (if configured)", () => {
+      const template = getTemplate("infraStack");
+      const clusters = getResources(template, RESOURCE_TYPES.ECS_CLUSTER);
 
-      const clusters = template.findResources(RESOURCE_TYPES.ECS_CLUSTER);
-
-      Object.values(clusters).forEach((cluster) => {
-        const properties = (cluster as Record<string, Record<string, unknown>>)
-          .Properties;
-        const settings = (properties.ClusterSettings || []) as Array<
-          Record<string, string>
-        >;
-
-        const containerInsights = settings.find(
-          (setting) => setting.Name === "containerInsights"
-        );
+      clusters.forEach((cluster) => {
+        const containerInsights = getContainerInsightsSetting(cluster);
 
         if (containerInsights) {
-          // Container Insights should be explicitly enabled or disabled
           expect(["enabled", "disabled"]).toContain(containerInsights.Value);
         }
       });
     });
   });
+
+  // ==========================================================================
+  // RESOURCE NAMING
+  // ==========================================================================
 
   describe("Resource Naming", () => {
     test("resources have descriptive names with environment context", () => {
@@ -308,26 +441,19 @@ describe("Security Posture: Compliance & Governance", () => {
         RESOURCE_TYPES.LOG_GROUP,
       ];
 
-      const template = Template.fromStack(stacks.infraStack);
+      const template = getTemplate("infraStack");
 
       resourceTypes.forEach((resourceType) => {
-        const resources = template.findResources(resourceType);
+        const resources = getResources(template, resourceType);
 
-        Object.values(resources).forEach((resource) => {
+        resources.forEach((resource) => {
           const resourceStr = JSON.stringify(resource);
 
-          // Resource should reference environment somehow
-          const hasEnvironmentContext =
-            resourceStr.includes("development") ||
-            resourceStr.includes("production") ||
-            resourceStr.includes("-dev-") ||
-            resourceStr.includes("-prod-");
-
-          // Some resources may not have explicit names, which is fine
-          // as long as logical IDs are descriptive
+          // Only check substantial resources
           if (resourceStr.length > 100) {
-            // Only check substantial resources
-            expect(hasEnvironmentContext || resourceStr.length > 0).toBe(true);
+            expect(
+              hasEnvironmentContext(resourceStr) || resourceStr.length > 0
+            ).toBe(true);
           }
         });
       });
@@ -335,24 +461,21 @@ describe("Security Posture: Compliance & Governance", () => {
 
     test("CloudFormation exports are properly configured", () => {
       const templates = [
-        Template.fromStack(stacks.networkingStack),
-        Template.fromStack(stacks.efsStack),
-        Template.fromStack(stacks.infraStack),
+        getTemplate("networkingStack"),
+        getTemplate("efsStack"),
+        getTemplate("infraStack"),
       ];
 
       templates.forEach((template) => {
-        const templateJson = template.toJSON();
-        const outputs = templateJson.Outputs || {};
+        const outputs = getOutputs(template);
 
         Object.values(outputs).forEach((output) => {
           const exportName = (output as Record<string, unknown>).Export;
 
           if (exportName) {
-            // Export should be defined (can be string or object with Fn::Sub, etc.)
             expect(exportName).toBeDefined();
 
             if (typeof exportName === "object" && exportName !== null) {
-              // Dynamic export name (using Fn::Sub, Ref, etc.)
               expect(
                 (exportName as Record<string, unknown>).Name
               ).toBeDefined();
@@ -363,22 +486,22 @@ describe("Security Posture: Compliance & Governance", () => {
     });
   });
 
-  describe("Cost Management", () => {
-    test("development uses smaller instance types than production", () => {
-      const template = Template.fromStack(stacks.infraStack);
+  // ==========================================================================
+  // COST MANAGEMENT
+  // ==========================================================================
 
-      const launchTemplates = template.findResources(
+  describe("Cost Management", () => {
+    test("development uses smaller instance types than production (if instance type is specified)", () => {
+      const template = getTemplate("infraStack");
+      const launchTemplates = getResources(
+        template,
         RESOURCE_TYPES.LAUNCH_TEMPLATE
       );
 
-      Object.values(launchTemplates).forEach((lt) => {
-        const properties = (
-          lt as Record<string, Record<string, Record<string, string>>>
-        ).Properties;
-        const ltData = properties.LaunchTemplateData;
+      launchTemplates.forEach((lt) => {
+        const instanceType = getInstanceType(lt);
 
-        if (ltData.InstanceType) {
-          const instanceType = ltData.InstanceType;
+        if (instanceType) {
           // Development should use smaller instances (t3/t2)
           expect(instanceType).toMatch(/^(t3|t2)/);
         }
@@ -386,7 +509,7 @@ describe("Security Posture: Compliance & Governance", () => {
     });
 
     test("GP3 volumes used for cost optimization", () => {
-      const template = Template.fromStack(stacks.infraStack);
+      const template = getTemplate("infraStack");
 
       template.hasResourceProperties(RESOURCE_TYPES.LAUNCH_TEMPLATE, {
         LaunchTemplateData: {

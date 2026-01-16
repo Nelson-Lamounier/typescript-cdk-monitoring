@@ -1,13 +1,13 @@
 /** @format */
 
 /**
- * Centralized Configuration and Types for Connectivity Integration Tests
+ * Centralised Configuration and Types for Connectivity Integration Tests
  *
  * This module provides shared configuration, types, and utilities for all
  * connectivity integration tests to eliminate code duplication and ensure
  * consistency across test suites.
  *
- * @module tests/integration/connectivity/test-config
+ * @module tests/unit/connectivity/test-config
  */
 
 import * as cdk from "aws-cdk-lib";
@@ -18,122 +18,30 @@ import { MonitoringEfsStack } from "../../../lib/stacks/monitoring/efs-stack";
 import { MonitoringInfraStack } from "../../../lib/stacks/monitoring/infra-stack";
 import { MonitoringServiceStack } from "../../../lib/stacks/monitoring/service-stack";
 
-// ============================================================================
-// CONSTANTS
-// ============================================================================
+import type { ResourceProperties } from "../types/test-types";
 
-/**
- * Default AWS configuration for connectivity tests
- */
-export const AWS_CONFIG = {
-  ACCOUNT: "123456789012",
-  REGION: "eu-west-1",
-} as const;
+// Import constants for use in this file
+import {
+  AWS_CONFIG,
+  ENVIRONMENT_CONFIG,
+  PROJECT_CONFIG,
+  NETWORK_CONFIG,
+  CAPACITY_CONFIG,
+  RESOURCE_TYPES,
+} from "../shared/constants";
 
-/**
- * Network configuration constants
- */
-export const NETWORK_CONFIG = {
-  VPC_CIDR: "10.0.0.0/16",
-  ALLOWED_CIDR: "10.0.0.0/8",
-  EXPECTED_SUBNETS: {
-    PUBLIC: 2,
-    PRIVATE: 2,
-    TOTAL: 4,
-  },
-  EXPECTED_AZS: 2,
-} as const;
-
-/**
- * Environment configuration
- */
-export const ENVIRONMENT_CONFIG = {
-  DEVELOPMENT: "development",
-  PRODUCTION: "production",
-  STAGING: "staging",
-} as const;
-
-/**
- * Project configuration
- */
-export const PROJECT_CONFIG = {
-  NAME: "monitoring",
-  FLOW_LOG_RETENTION: logs.RetentionDays.ONE_WEEK,
-} as const;
-
-/**
- * Capacity configuration for ECS
- */
-export const CAPACITY_CONFIG = {
-  MIN: 1,
-  DESIRED: 1,
-  MAX: 2,
-} as const;
-
-/**
- * Port configuration for services
- */
-export const PORT_CONFIG = {
-  HTTP: 80,
-  HTTPS: 443,
-  NFS: 2049,
-  PROMETHEUS: 9090,
-  GRAFANA: 3000,
-  NODE_EXPORTER: 9100,
-} as const;
-
-/**
- * Resource type constants
- */
-export const RESOURCE_TYPES = {
-  VPC: "AWS::EC2::VPC",
-  SUBNET: "AWS::EC2::Subnet",
-  ROUTE_TABLE: "AWS::EC2::RouteTable",
-  ROUTE: "AWS::EC2::Route",
-  IGW: "AWS::EC2::InternetGateway",
-  NAT_GATEWAY: "AWS::EC2::NatGateway",
-  EIP: "AWS::EC2::EIP",
-  SECURITY_GROUP: "AWS::EC2::SecurityGroup",
-  SECURITY_GROUP_INGRESS: "AWS::EC2::SecurityGroupIngress",
-  SECURITY_GROUP_EGRESS: "AWS::EC2::SecurityGroupEgress",
-  EFS_FILE_SYSTEM: "AWS::EFS::FileSystem",
-  EFS_MOUNT_TARGET: "AWS::EFS::MountTarget",
-  EFS_ACCESS_POINT: "AWS::EFS::AccessPoint",
-  ECS_CLUSTER: "AWS::ECS::Cluster",
-  ECS_SERVICE: "AWS::ECS::Service",
-  ECS_TASK_DEFINITION: "AWS::ECS::TaskDefinition",
-  ALB: "AWS::ElasticLoadBalancingV2::LoadBalancer",
-  TARGET_GROUP: "AWS::ElasticLoadBalancingV2::TargetGroup",
-  LISTENER: "AWS::ElasticLoadBalancingV2::Listener",
-  LISTENER_RULE: "AWS::ElasticLoadBalancingV2::ListenerRule",
-  ASG: "AWS::AutoScaling::AutoScalingGroup",
-  AUTO_SCALING_GROUP: "AWS::AutoScaling::AutoScalingGroup",
-  LAUNCH_TEMPLATE: "AWS::EC2::LaunchTemplate",
-  LOG_GROUP: "AWS::Logs::LogGroup",
-  SSM_ASSOCIATION: "AWS::SSM::Association",
-} as const;
-
-/**
- * Tag keys used across stacks
- */
-export const TAG_KEYS = {
-  ENVIRONMENT: "Environment",
-  PROJECT: "Project",
-  LAYER: "Layer",
-  MANAGED_BY: "ManagedBy",
-  STACK_NAME: "StackName",
-  SUBNET_TYPE: "aws-cdk:subnet-type",
-  NAME: "Name",
-} as const;
-
-/**
- * Subnet types
- */
-export const SUBNET_TYPES = {
-  PUBLIC: "Public",
-  PRIVATE: "Private",
-  ISOLATED: "Isolated",
-} as const;
+// Re-export all constants from shared constants file for backward compatibility
+export {
+  AWS_CONFIG,
+  NETWORK_CONFIG,
+  ENVIRONMENT_CONFIG,
+  PROJECT_CONFIG,
+  CAPACITY_CONFIG,
+  PORT_CONFIG,
+  RESOURCE_TYPES,
+  TAG_KEYS,
+  SUBNET_TYPES,
+} from "../shared/constants";
 
 // ============================================================================
 // TYPES
@@ -192,10 +100,8 @@ export interface SubnetCidrs {
   privateSubnets: string[];
 }
 
-/**
- * Resource properties type
- */
-export type ResourceProperties = Record<string, Record<string, unknown>>;
+// Note: Additional shared types are now defined in ../types/test-types.ts
+// Import from there for SubnetProperties, RouteProperties, etc.
 
 // ============================================================================
 // DEFAULT CONFIGURATION

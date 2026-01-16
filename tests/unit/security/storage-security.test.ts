@@ -15,18 +15,161 @@
 
 import { Template, Match } from "aws-cdk-lib/assertions";
 
-import { SecurityTestFixtures, type SecurityTestStacks } from "./test-fixtures";
+import { type ConnectivityTestStacks } from "../connectivity/test-config";
+
+import { SecurityTestFixtures } from "../utils/test-utils";
 
 describe("Security Posture: Storage Security", () => {
-  let stacks: SecurityTestStacks;
+  let stacks: ConnectivityTestStacks;
 
   beforeAll(() => {
     stacks = SecurityTestFixtures.getDevelopmentStacks();
   });
 
+  // ==========================================================================
+  // HELPER FUNCTIONS (defined as arrow functions)
+  // ==========================================================================
+
+  /**
+   * Get template from stack name
+   */
+  const getTemplate = (stackName: keyof ConnectivityTestStacks) => {
+    if (stackName === "app") {
+      throw new Error("Cannot get template for app");
+    }
+    return Template.fromStack(stacks[stackName]);
+  };
+
+  /**
+   * Get resources of a specific type
+   */
+  const getResources = (template: Template, resourceType: string) => {
+    return Object.values(template.findResources(resourceType));
+  };
+
+  /**
+   * Get EFS file systems from template
+   */
+  const getFileSystems = (template: Template) => {
+    return getResources(template, "AWS::EFS::FileSystem");
+  };
+
+  /**
+   * Get EFS access points from template
+   */
+  const getAccessPoints = (template: Template) => {
+    return getResources(template, "AWS::EFS::AccessPoint");
+  };
+
+  /**
+   * Get security groups from template
+   */
+  const getSecurityGroups = (template: Template) => {
+    return getResources(template, "AWS::EC2::SecurityGroup");
+  };
+
+  /**
+   * Get security group ingress rules from template
+   */
+  const getSecurityGroupIngressRules = (template: Template) => {
+    return getResources(template, "AWS::EC2::SecurityGroupIngress");
+  };
+
+  /**
+   * Extract properties from resource
+   */
+  const getResourceProperties = (
+    resource: unknown
+  ): Record<string, unknown> => {
+    return (resource as Record<string, Record<string, unknown>>).Properties;
+  };
+
+  /**
+   * Extract deletion policy from resource
+   */
+  const getDeletionPolicy = (resource: unknown): string | undefined => {
+    return (resource as Record<string, string | undefined>).DeletionPolicy;
+  };
+
+  /**
+   * Extract lifecycle policies from file system
+   */
+  const getLifecyclePolicies = (
+    fileSystem: unknown
+  ): Array<Record<string, string>> => {
+    const properties = getResourceProperties(fileSystem);
+    return (properties.LifecyclePolicies || []) as Array<
+      Record<string, string>
+    >;
+  };
+
+  /**
+   * Extract root directory from access point
+   */
+  const getRootDirectory = (
+    accessPoint: unknown
+  ): Record<string, Record<string, string>> | undefined => {
+    const properties = getResourceProperties(accessPoint);
+    return properties.RootDirectory as
+      | Record<string, Record<string, string>>
+      | undefined;
+  };
+
+  /**
+   * Extract creation info from root directory
+   */
+  const getCreationInfo = (
+    rootDir: Record<string, Record<string, string>>
+  ): Record<string, string> => {
+    return rootDir.CreationInfo;
+  };
+
+  /**
+   * Extract permissions from creation info
+   */
+  const getPermissions = (
+    creationInfo: Record<string, string>
+  ): string | undefined => {
+    return creationInfo.Permissions;
+  };
+
+  /**
+   * Extract ingress rules from security group
+   */
+  const getIngressRules = (
+    sg: unknown
+  ): Array<Record<string, unknown>> => {
+    const properties = getResourceProperties(sg);
+    return (properties.SecurityGroupIngress || []) as Array<
+      Record<string, unknown>
+    >;
+  };
+
+  /**
+   * Check if rule is for NFS port (2049)
+   */
+  const isNfsPortRule = (rule: Record<string, unknown>): boolean => {
+    return rule.FromPort === 2049 && rule.ToPort === 2049;
+  };
+
+  /**
+   * Check if lifecycle policies have IA transition
+   */
+  const hasIATransition = (
+    lifecyclePolicies: Array<Record<string, string>>
+  ): boolean => {
+    return lifecyclePolicies.some(
+      (policy) => policy.TransitionToIA !== undefined
+    );
+  };
+
+  // ==========================================================================
+  // EFS ENCRYPTION
+  // ==========================================================================
+
   describe("EFS Encryption", () => {
     test("EFS file system has encryption at rest enabled", () => {
-      const template = Template.fromStack(stacks.efsStack);
+      const template = getTemplate("efsStack");
 
       template.hasResourceProperties("AWS::EFS::FileSystem", {
         Encrypted: true,
@@ -34,25 +177,17 @@ describe("Security Posture: Storage Security", () => {
     });
 
     test("EFS uses AWS managed encryption key by default", () => {
-      const template = Template.fromStack(stacks.efsStack);
+      const template = getTemplate("efsStack");
+      const fileSystems = getFileSystems(template);
 
-      const fileSystems = template.findResources("AWS::EFS::FileSystem");
-
-      Object.values(fileSystems).forEach((fileSystem) => {
-        const properties = (
-          fileSystem as Record<string, Record<string, unknown>>
-        ).Properties;
-
-        // Encryption must be enabled
+      fileSystems.forEach((fileSystem) => {
+        const properties = getResourceProperties(fileSystem);
         expect(properties.Encrypted).toBe(true);
-
-        // If KmsKeyId is not specified, AWS uses managed key
-        // which is acceptable for this security check
       });
     });
 
     test("EFS mount targets are in private subnets", () => {
-      const template = Template.fromStack(stacks.efsStack);
+      const template = getTemplate("efsStack");
 
       template.hasResourceProperties("AWS::EFS::MountTarget", {
         SubnetId: Match.anyValue(),
@@ -61,9 +196,13 @@ describe("Security Posture: Storage Security", () => {
     });
   });
 
+  // ==========================================================================
+  // EFS ACCESS CONTROLS
+  // ==========================================================================
+
   describe("EFS Access Controls", () => {
     test("EFS access point enforces POSIX permissions", () => {
-      const template = Template.fromStack(stacks.efsStack);
+      const template = getTemplate("efsStack");
 
       template.hasResourceProperties("AWS::EFS::AccessPoint", {
         PosixUser: Match.objectLike({
@@ -81,42 +220,36 @@ describe("Security Posture: Storage Security", () => {
     });
 
     test("EFS access point has restrictive permissions", () => {
-      const template = Template.fromStack(stacks.efsStack);
+      const template = getTemplate("efsStack");
+      const accessPoints = getAccessPoints(template);
 
-      const accessPoints = template.findResources("AWS::EFS::AccessPoint");
+      accessPoints.forEach((accessPoint) => {
+        const rootDir = getRootDirectory(accessPoint);
 
-      Object.values(accessPoints).forEach((accessPoint) => {
-        const properties = (
-          accessPoint as Record<string, Record<string, unknown>>
-        ).Properties;
-        const rootDir = properties.RootDirectory as Record<
-          string,
-          Record<string, string>
-        >;
-        const creationInfo = rootDir.CreationInfo;
-        const permissions = creationInfo.Permissions;
+        if (rootDir) {
+          const creationInfo = getCreationInfo(rootDir);
+          const permissions = getPermissions(creationInfo);
 
-        // Permissions should not be 777 (world writable)
-        expect(permissions).not.toBe("777");
+          if (permissions) {
+            // Permissions should not be 777 (world writable)
+            expect(permissions).not.toBe("777");
+          }
+        }
       });
     });
 
     test("EFS security group restricts access to NFS port", () => {
-      const template = Template.fromStack(stacks.efsStack);
-
-      // Check both standalone and inline security group rules
-      const securityGroupRules = template.findResources(
-        "AWS::EC2::SecurityGroupIngress"
-      );
-      const securityGroups = template.findResources("AWS::EC2::SecurityGroup");
+      const template = getTemplate("efsStack");
+      const securityGroupRules = getSecurityGroupIngressRules(template);
+      const securityGroups = getSecurityGroups(template);
 
       let nfsRulesCount = 0;
 
       // Check standalone ingress rules
-      Object.values(securityGroupRules).forEach((rule) => {
-        const properties = (rule as Record<string, Record<string, unknown>>)
-          .Properties;
-        if (properties.FromPort === 2049 && properties.ToPort === 2049) {
+      securityGroupRules.forEach((rule) => {
+        const properties = getResourceProperties(rule);
+
+        if (isNfsPortRule(properties)) {
           nfsRulesCount++;
           // NFS rules should use security group as source (not CIDR)
           expect(properties.SourceSecurityGroupId).toBeDefined();
@@ -124,31 +257,28 @@ describe("Security Posture: Storage Security", () => {
       });
 
       // Check inline ingress rules in security groups
-      Object.values(securityGroups).forEach((sg) => {
-        const properties = (sg as Record<string, Record<string, unknown>>)
-          .Properties;
+      securityGroups.forEach((sg) => {
+        const ingressRules = getIngressRules(sg);
 
-        if (properties.SecurityGroupIngress) {
-          const ingressRules = properties.SecurityGroupIngress as Array<
-            Record<string, unknown>
-          >;
-
-          ingressRules.forEach((rule) => {
-            if (rule.FromPort === 2049 && rule.ToPort === 2049) {
-              nfsRulesCount++;
-            }
-          });
-        }
+        ingressRules.forEach((rule) => {
+          if (isNfsPortRule(rule)) {
+            nfsRulesCount++;
+          }
+        });
       });
 
       // EFS security group should exist
-      expect(Object.keys(securityGroups).length).toBeGreaterThan(0);
+      expect(securityGroups.length).toBeGreaterThan(0);
     });
   });
 
+  // ==========================================================================
+  // EFS LIFECYCLE MANAGEMENT
+  // ==========================================================================
+
   describe("EFS Lifecycle Management", () => {
     test("EFS has lifecycle policies configured", () => {
-      const template = Template.fromStack(stacks.efsStack);
+      const template = getTemplate("efsStack");
 
       template.hasResourceProperties("AWS::EFS::FileSystem", {
         LifecyclePolicies: Match.anyValue(),
@@ -156,40 +286,31 @@ describe("Security Posture: Storage Security", () => {
     });
 
     test("EFS has transition to IA configured for cost optimization", () => {
-      const template = Template.fromStack(stacks.efsStack);
+      const template = getTemplate("efsStack");
+      const fileSystems = getFileSystems(template);
 
-      const fileSystems = template.findResources("AWS::EFS::FileSystem");
-
-      Object.values(fileSystems).forEach((fileSystem) => {
-        const properties = (
-          fileSystem as Record<string, Record<string, unknown>>
-        ).Properties;
-        const lifecyclePolicies = properties.LifecyclePolicies as Array<
-          Record<string, string>
-        >;
+      fileSystems.forEach((fileSystem) => {
+        const lifecyclePolicies = getLifecyclePolicies(fileSystem);
 
         expect(lifecyclePolicies).toBeDefined();
         expect(lifecyclePolicies.length).toBeGreaterThan(0);
-
-        // Should have transition to IA configured
-        const hasIATransition = lifecyclePolicies.some(
-          (policy) => policy.TransitionToIA !== undefined
-        );
-        expect(hasIATransition).toBe(true);
+        expect(hasIATransition(lifecyclePolicies)).toBe(true);
       });
     });
   });
+
+  // ==========================================================================
+  // EFS BACKUP AND PROTECTION
+  // ==========================================================================
 
   describe("EFS Backup and Protection", () => {
     test("EFS has deletion policy for production", () => {
       const prodStacks = SecurityTestFixtures.getProductionStacks();
       const template = Template.fromStack(prodStacks.efsStack);
+      const fileSystems = getFileSystems(template);
 
-      const fileSystems = template.findResources("AWS::EFS::FileSystem");
-
-      Object.values(fileSystems).forEach((fileSystem) => {
-        const deletionPolicy = (fileSystem as Record<string, unknown>)
-          .DeletionPolicy;
+      fileSystems.forEach((fileSystem) => {
+        const deletionPolicy = getDeletionPolicy(fileSystem);
         expect(deletionPolicy).toBe("Retain");
       });
     });

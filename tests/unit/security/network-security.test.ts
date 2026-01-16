@@ -15,18 +15,154 @@
 
 import { Template, Match } from "aws-cdk-lib/assertions";
 
-import { SecurityTestFixtures, type SecurityTestStacks } from "./test-fixtures";
+import { type ConnectivityTestStacks } from "../connectivity/test-config";
+
+import { SecurityTestFixtures } from "../utils/test-utils";
 
 describe("Security Posture: Network Security", () => {
-  let stacks: SecurityTestStacks;
+  let stacks: ConnectivityTestStacks;
 
   beforeAll(() => {
     stacks = SecurityTestFixtures.getDevelopmentStacks();
   });
 
+  // ==========================================================================
+  // HELPER FUNCTIONS (defined as arrow functions)
+  // ==========================================================================
+
+  /**
+   * Get template from stack name
+   */
+  const getTemplate = (stackName: keyof ConnectivityTestStacks) => {
+    if (stackName === "app") {
+      throw new Error("Cannot get template for app");
+    }
+    return Template.fromStack(stacks[stackName]);
+  };
+
+  /**
+   * Get all templates from multiple stacks
+   */
+  const getTemplates = (
+    stackNames: Array<keyof ConnectivityTestStacks>
+  ): Template[] => {
+    return stackNames.map((name) => getTemplate(name));
+  };
+
+  /**
+   * Get resources of a specific type
+   */
+  const getResources = (template: Template, resourceType: string) => {
+    return Object.values(template.findResources(resourceType));
+  };
+
+  /**
+   * Get security group ingress rules from template
+   */
+  const getSecurityGroupIngressRules = (template: Template) => {
+    return getResources(template, "AWS::EC2::SecurityGroupIngress");
+  };
+
+  /**
+   * Get security groups from template
+   */
+  const getSecurityGroups = (template: Template) => {
+    return getResources(template, "AWS::EC2::SecurityGroup");
+  };
+
+  /**
+   * Get subnets from template
+   */
+  const getSubnets = (template: Template) => {
+    return getResources(template, "AWS::EC2::Subnet");
+  };
+
+  /**
+   * Get NAT gateways from template
+   */
+  const getNatGateways = (template: Template) => {
+    return getResources(template, "AWS::EC2::NatGateway");
+  };
+
+  /**
+   * Extract properties from resource
+   */
+  const getResourceProperties = (
+    resource: unknown
+  ): Record<string, unknown> => {
+    return (resource as Record<string, Record<string, unknown>>).Properties;
+  };
+
+  /**
+   * Extract security group properties
+   */
+  const getSecurityGroupProperties = (sg: unknown): Record<string, unknown> => {
+    return getResourceProperties(sg);
+  };
+
+  /**
+   * Extract ingress rules from security group
+   */
+  const getIngressRules = (sg: unknown): Array<Record<string, unknown>> => {
+    const properties = getSecurityGroupProperties(sg);
+    return (properties.SecurityGroupIngress || []) as Array<
+      Record<string, unknown>
+    >;
+  };
+
+  /**
+   * Check if rule is for specific port
+   */
+  const isPortRule = (rule: Record<string, unknown>, port: number): boolean => {
+    return rule.FromPort === port && rule.ToPort === port;
+  };
+
+  /**
+   * Check if rule allows unrestricted access
+   */
+  const isUnrestrictedAccess = (rule: Record<string, unknown>): boolean => {
+    return rule.CidrIp === "0.0.0.0/0" || rule.CidrIpv6 === "::/0";
+  };
+
+  /**
+   * Check if rule allows all protocols
+   */
+  const isAllProtocols = (rule: Record<string, unknown>): boolean => {
+    return rule.IpProtocol === "-1";
+  };
+
+  /**
+   * Extract subnet tags
+   */
+  const getSubnetTags = (subnet: unknown): Array<Record<string, string>> => {
+    const properties = getResourceProperties(subnet);
+    return (properties.Tags || []) as Array<Record<string, string>>;
+  };
+
+  /**
+   * Check if subnet is private
+   */
+  const isPrivateSubnet = (subnet: unknown): boolean => {
+    const tags = getSubnetTags(subnet);
+    return tags.some(
+      (tag) => tag.Key === "aws-cdk:subnet-type" && tag.Value === "Private"
+    );
+  };
+
+  /**
+   * Extract NAT gateway properties
+   */
+  const getNatGatewayProperties = (natGw: unknown): Record<string, unknown> => {
+    return getResourceProperties(natGw);
+  };
+
+  // ==========================================================================
+  // VPC CONFIGURATION
+  // ==========================================================================
+
   describe("VPC Configuration", () => {
     test("VPC has DNS hostnames and DNS support enabled", () => {
-      const template = Template.fromStack(stacks.networkingStack);
+      const template = getTemplate("networkingStack");
 
       template.hasResourceProperties("AWS::EC2::VPC", {
         EnableDnsHostnames: true,
@@ -35,7 +171,7 @@ describe("Security Posture: Network Security", () => {
     });
 
     test("VPC Flow Logs are enabled and capture all traffic", () => {
-      const template = Template.fromStack(stacks.networkingStack);
+      const template = getTemplate("networkingStack");
 
       template.hasResourceProperties("AWS::EC2::FlowLog", {
         ResourceType: "VPC",
@@ -45,7 +181,7 @@ describe("Security Posture: Network Security", () => {
     });
 
     test("VPC Flow Logs have retention configured", () => {
-      const template = Template.fromStack(stacks.networkingStack);
+      const template = getTemplate("networkingStack");
 
       template.hasResourceProperties("AWS::Logs::LogGroup", {
         RetentionInDays: Match.anyValue(),
@@ -53,31 +189,33 @@ describe("Security Posture: Network Security", () => {
     });
   });
 
+  // ==========================================================================
+  // SECURITY GROUPS
+  // ==========================================================================
+
   describe("Security Groups", () => {
-    test("no security groups allow unrestricted SSH access", () => {
-      const template = Template.fromStack(stacks.infraStack);
+    test("no security groups allow unrestricted SSH access (if SSH rules exist)", () => {
+      const template = getTemplate("infraStack");
+      const rules = getSecurityGroupIngressRules(template);
 
-      const rules = template.findResources("AWS::EC2::SecurityGroupIngress");
+      rules.forEach((rule) => {
+        const properties = getResourceProperties(rule);
 
-      Object.entries(rules).forEach(([_logicalId, resource]) => {
-        const properties = (resource as Record<string, Record<string, unknown>>)
-          .Properties;
-        if (properties.FromPort === 22 && properties.ToPort === 22) {
+        if (isPortRule(properties, 22)) {
           expect(properties.CidrIp).not.toBe("0.0.0.0/0");
           expect(properties.CidrIpv6).not.toBe("::/0");
         }
       });
     });
 
-    test("no security groups allow unrestricted RDP access", () => {
-      const template = Template.fromStack(stacks.infraStack);
+    test("no security groups allow unrestricted RDP access (if RDP rules exist)", () => {
+      const template = getTemplate("infraStack");
+      const rules = getSecurityGroupIngressRules(template);
 
-      const rules = template.findResources("AWS::EC2::SecurityGroupIngress");
+      rules.forEach((rule) => {
+        const properties = getResourceProperties(rule);
 
-      Object.entries(rules).forEach(([_logicalId, resource]) => {
-        const properties = (resource as Record<string, Record<string, unknown>>)
-          .Properties;
-        if (properties.FromPort === 3389 && properties.ToPort === 3389) {
+        if (isPortRule(properties, 3389)) {
           expect(properties.CidrIp).not.toBe("0.0.0.0/0");
           expect(properties.CidrIpv6).not.toBe("::/0");
         }
@@ -85,98 +223,75 @@ describe("Security Posture: Network Security", () => {
     });
 
     test("EFS security group does not allow unrestricted NFS access", () => {
-      const template = Template.fromStack(stacks.efsStack);
+      const template = getTemplate("efsStack");
+      const securityGroups = getSecurityGroups(template);
 
-      const securityGroups = template.findResources("AWS::EC2::SecurityGroup");
+      expect(securityGroups.length).toBeGreaterThan(0);
 
-      // EFS security group should exist
-      expect(Object.keys(securityGroups).length).toBeGreaterThan(0);
+      securityGroups.forEach((sg) => {
+        const ingressRules = getIngressRules(sg);
 
-      // Verify no security group allows NFS from 0.0.0.0/0
-      Object.values(securityGroups).forEach((sg) => {
-        const properties = (sg as Record<string, Record<string, unknown>>)
-          .Properties;
-
-        if (properties.SecurityGroupIngress) {
-          const ingressRules = properties.SecurityGroupIngress as Array<
-            Record<string, unknown>
-          >;
-
-          // Check for NFS rules with unrestricted access
-          ingressRules.forEach((rule) => {
-            if (rule.FromPort === 2049 && rule.ToPort === 2049) {
-              // Should NOT allow from anywhere
-              expect(rule.CidrIp).not.toBe("0.0.0.0/0");
-              expect(rule.CidrIpv6).not.toBe("::/0");
-            }
-          });
-        }
+        ingressRules.forEach((rule) => {
+          if (isPortRule(rule, 2049)) {
+            expect(rule.CidrIp).not.toBe("0.0.0.0/0");
+            expect(rule.CidrIpv6).not.toBe("::/0");
+          }
+        });
       });
     });
 
     test("no security group allows all traffic from 0.0.0.0/0", () => {
-      const templates = [
-        Template.fromStack(stacks.networkingStack),
-        Template.fromStack(stacks.efsStack),
-        Template.fromStack(stacks.infraStack),
-      ];
+      const templates = getTemplates([
+        "networkingStack",
+        "efsStack",
+        "infraStack",
+      ]);
 
       templates.forEach((template) => {
-        const rules = template.findResources("AWS::EC2::SecurityGroupIngress");
+        const rules = getSecurityGroupIngressRules(template);
 
-        Object.entries(rules).forEach(([_logicalId, resource]) => {
-          const properties = (
-            resource as Record<string, Record<string, unknown>>
-          ).Properties;
-          if (
-            properties.CidrIp === "0.0.0.0/0" ||
-            properties.CidrIpv6 === "::/0"
-          ) {
+        rules.forEach((rule) => {
+          const properties = getResourceProperties(rule);
+
+          if (isUnrestrictedAccess(properties)) {
             // If allowing from anywhere, ensure it's restricted to specific ports
-            expect(properties.IpProtocol).not.toBe("-1"); // Not all protocols
+            expect(isAllProtocols(properties)).toBe(false);
           }
         });
       });
     });
   });
 
+  // ==========================================================================
+  // NETWORK ISOLATION
+  // ==========================================================================
+
   describe("Network Isolation", () => {
     test("private subnets exist for workload isolation", () => {
-      const template = Template.fromStack(stacks.networkingStack);
-
-      const subnets = template.findResources("AWS::EC2::Subnet");
-      const privateSubnets = Object.values(subnets).filter((subnet) => {
-        const properties = (subnet as Record<string, Record<string, unknown>>)
-          .Properties;
-        const tags = (properties.Tags || []) as Array<Record<string, string>>;
-        return tags.some(
-          (tag) => tag.Key === "aws-cdk:subnet-type" && tag.Value === "Private"
-        );
-      });
+      const template = getTemplate("networkingStack");
+      const subnets = getSubnets(template);
+      const privateSubnets = subnets.filter(isPrivateSubnet);
 
       expect(privateSubnets.length).toBeGreaterThan(0);
     });
 
-    test("NAT Gateways are in public subnets if present", () => {
-      const template = Template.fromStack(stacks.networkingStack);
+    test("NAT Gateways are in public subnets (if NAT gateways exist)", () => {
+      const template = getTemplate("networkingStack");
+      const natGateways = getNatGateways(template);
 
-      const natGateways = template.findResources("AWS::EC2::NatGateway");
-
-      // If NAT Gateways exist, they should be in public subnets
-      if (Object.keys(natGateways).length > 0) {
-        Object.values(natGateways).forEach((natGw) => {
-          const properties = (natGw as Record<string, Record<string, unknown>>)
-            .Properties;
+      if (natGateways.length > 0) {
+        natGateways.forEach((natGw) => {
+          const properties = getNatGatewayProperties(natGw);
           expect(properties.SubnetId).toBeDefined();
         });
       }
 
       // NAT Gateways are optional in test configurations
-      expect(Object.keys(natGateways).length).toBeGreaterThanOrEqual(0);
+      expect(natGateways.length).toBeGreaterThanOrEqual(0);
     });
 
     test("Internet Gateway exists for public subnet access", () => {
-      const template = Template.fromStack(stacks.networkingStack);
+      const template = getTemplate("networkingStack");
 
       template.resourceCountIs("AWS::EC2::InternetGateway", 1);
     });

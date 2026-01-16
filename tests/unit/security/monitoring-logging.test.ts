@@ -16,22 +16,175 @@
 
 import { Template, Match } from "aws-cdk-lib/assertions";
 
-import {
-  SecurityTestFixtures,
-  TEST_CONSTANTS,
-  type SecurityTestStacks,
-} from "./test-fixtures";
+import { type ConnectivityTestStacks } from "../connectivity/test-config";
+
+import { SecurityTestFixtures } from "../utils/test-utils";
 
 describe("Security Posture: Monitoring & Logging", () => {
-  let stacks: SecurityTestStacks;
+  let stacks: ConnectivityTestStacks;
 
   beforeAll(() => {
     stacks = SecurityTestFixtures.getDevelopmentStacks();
   });
 
+  // ==========================================================================
+  // HELPER FUNCTIONS (defined as arrow functions)
+  // ==========================================================================
+
+  /**
+   * Get template from stack name
+   */
+  const getTemplate = (stackName: keyof ConnectivityTestStacks) => {
+    if (stackName === "app") {
+      throw new Error("Cannot get template for app");
+    }
+    return Template.fromStack(stacks[stackName]);
+  };
+
+  /**
+   * Get all templates from multiple stacks
+   */
+  const getTemplates = (
+    stackNames: Array<keyof ConnectivityTestStacks>
+  ): Template[] => {
+    return stackNames.map((name) => getTemplate(name));
+  };
+
+  /**
+   * Get resources of a specific type
+   */
+  const getResources = (template: Template, resourceType: string) => {
+    return Object.values(template.findResources(resourceType));
+  };
+
+  /**
+   * Get log groups from template
+   */
+  const getLogGroups = (template: Template) => {
+    return getResources(template, "AWS::Logs::LogGroup");
+  };
+
+  /**
+   * Get ECS clusters from template
+   */
+  const getClusters = (template: Template) => {
+    return getResources(template, "AWS::ECS::Cluster");
+  };
+
+  /**
+   * Get EventBridge rules from template
+   */
+  const getEventBridgeRules = (template: Template) => {
+    return getResources(template, "AWS::Events::Rule");
+  };
+
+  /**
+   * Get task definitions from template
+   */
+  const getTaskDefinitions = (template: Template) => {
+    return getResources(template, "AWS::ECS::TaskDefinition");
+  };
+
+  /**
+   * Get SSM associations from template
+   */
+  const getAssociations = (template: Template) => {
+    return getResources(template, "AWS::SSM::Association");
+  };
+
+  /**
+   * Extract deletion policy from resource
+   */
+  const getDeletionPolicy = (resource: unknown): string | undefined => {
+    return (resource as Record<string, string | undefined>).DeletionPolicy;
+  };
+
+  /**
+   * Extract log group properties
+   */
+  const getLogGroupProperties = (
+    logGroup: unknown
+  ): Record<string, unknown> => {
+    return (logGroup as Record<string, Record<string, unknown>>).Properties;
+  };
+
+  /**
+   * Extract cluster settings
+   */
+  const getClusterSettings = (
+    cluster: unknown
+  ): Array<Record<string, string>> => {
+    const properties = (cluster as Record<string, Record<string, unknown>>)
+      .Properties;
+    return (properties.ClusterSettings || []) as Array<Record<string, string>>;
+  };
+
+  /**
+   * Extract container insights setting from cluster
+   */
+  const getContainerInsightsSetting = (
+    cluster: unknown
+  ): Record<string, string> | undefined => {
+    const settings = getClusterSettings(cluster);
+    return settings.find((setting) => setting.Name === "containerInsights");
+  };
+
+  /**
+   * Extract container definitions from task definition
+   */
+  const getContainerDefinitions = (
+    taskDef: unknown
+  ): Array<Record<string, unknown>> => {
+    const properties = (taskDef as Record<string, Record<string, unknown>>)
+      .Properties;
+    return (properties.ContainerDefinitions || []) as Array<
+      Record<string, unknown>
+    >;
+  };
+
+  /**
+   * Extract log configuration from container
+   */
+  const getLogConfiguration = (
+    container: unknown
+  ): Record<string, unknown> | undefined => {
+    return (container as Record<string, Record<string, unknown>>)
+      .LogConfiguration;
+  };
+
+  /**
+   * Extract log configuration options
+   */
+  const getLogOptions = (
+    container: unknown
+  ): Record<string, string> | undefined => {
+    const logConfig = getLogConfiguration(container);
+    return logConfig?.Options as Record<string, string> | undefined;
+  };
+
+  /**
+   * Extract rule properties
+   */
+  const getRuleProperties = (rule: unknown): Record<string, unknown> => {
+    return (rule as Record<string, Record<string, unknown>>).Properties;
+  };
+
+  /**
+   * Extract association properties
+   */
+  const getAssociationProperties = (
+    association: unknown
+  ): Record<string, unknown> => {
+    return (association as Record<string, Record<string, unknown>>).Properties;
+  };
+
+  // ==========================================================================
+  // CLOUDWATCH LOGS
+  // ==========================================================================
+
   describe("CloudWatch Logs", () => {
     test("log groups have retention configured", () => {
-      const template = Template.fromStack(stacks.infraStack);
+      const template = getTemplate("infraStack");
 
       template.hasResourceProperties("AWS::Logs::LogGroup", {
         RetentionInDays: Match.anyValue(),
@@ -41,34 +194,28 @@ describe("Security Posture: Monitoring & Logging", () => {
     test("log groups have deletion policy configured for production", () => {
       const prodStacks = SecurityTestFixtures.getProductionStacks();
       const template = Template.fromStack(prodStacks.infraStack);
+      const logGroups = getLogGroups(template);
 
-      const logGroups = template.findResources("AWS::Logs::LogGroup");
+      logGroups.forEach((logGroup) => {
+        const deletionPolicy = getDeletionPolicy(logGroup);
 
-      // Production should have deletion policy explicitly configured
-      Object.values(logGroups).forEach((logGroup) => {
-        const deletionPolicy = (logGroup as Record<string, unknown>)
-          .DeletionPolicy;
-        
-        // Deletion policy should be explicitly set (Retain, Delete, or Snapshot)
         expect(deletionPolicy).toBeDefined();
         expect(["Retain", "Delete", "Snapshot"]).toContain(deletionPolicy);
       });
     });
 
     test("all log groups have retention set to prevent indefinite storage", () => {
-      const templates = [
-        Template.fromStack(stacks.networkingStack),
-        Template.fromStack(stacks.infraStack),
-        Template.fromStack(stacks.serviceStack),
-      ];
+      const templates = getTemplates([
+        "networkingStack",
+        "infraStack",
+        "serviceStack",
+      ]);
 
       templates.forEach((template) => {
-        const logGroups = template.findResources("AWS::Logs::LogGroup");
+        const logGroups = getLogGroups(template);
 
-        Object.values(logGroups).forEach((logGroup) => {
-          const properties = (
-            logGroup as Record<string, Record<string, unknown>>
-          ).Properties;
+        logGroups.forEach((logGroup) => {
+          const properties = getLogGroupProperties(logGroup);
           expect(properties.RetentionInDays).toBeDefined();
           expect(properties.RetentionInDays).not.toBe(null);
         });
@@ -76,39 +223,36 @@ describe("Security Posture: Monitoring & Logging", () => {
     });
 
     test("log group names follow consistent naming pattern", () => {
-      const templates = [
-        Template.fromStack(stacks.networkingStack),
-        Template.fromStack(stacks.infraStack),
-        Template.fromStack(stacks.serviceStack),
-      ];
+      const templates = getTemplates([
+        "networkingStack",
+        "infraStack",
+        "serviceStack",
+      ]);
 
       templates.forEach((template) => {
-        const logGroups = template.findResources("AWS::Logs::LogGroup");
+        const logGroups = getLogGroups(template);
 
-        Object.values(logGroups).forEach((logGroup) => {
-          const properties = (
-            logGroup as Record<string, Record<string, unknown>>
-          ).Properties;
-          
-          // LogGroupName can be a string, object (Ref), or undefined
+        logGroups.forEach((logGroup) => {
+          const properties = getLogGroupProperties(logGroup);
           const logGroupName = properties.LogGroupName;
-          
+
           if (typeof logGroupName === "string") {
-            // String log group names should be descriptive
             expect(logGroupName.length).toBeGreaterThan(0);
           } else if (logGroupName && typeof logGroupName === "object") {
-            // Dynamic names (Ref, Fn::Join, etc.) are acceptable
             expect(logGroupName).toBeDefined();
           }
-          // If no explicit name, CloudFormation generates one automatically
         });
       });
     });
   });
 
+  // ==========================================================================
+  // VPC FLOW LOGS
+  // ==========================================================================
+
   describe("VPC Flow Logs", () => {
     test("VPC Flow Logs capture all traffic types", () => {
-      const template = Template.fromStack(stacks.networkingStack);
+      const template = getTemplate("networkingStack");
 
       template.hasResourceProperties("AWS::EC2::FlowLog", {
         TrafficType: "ALL",
@@ -116,7 +260,7 @@ describe("Security Posture: Monitoring & Logging", () => {
     });
 
     test("VPC Flow Logs have IAM role for CloudWatch Logs delivery", () => {
-      const template = Template.fromStack(stacks.networkingStack);
+      const template = getTemplate("networkingStack");
 
       template.hasResourceProperties("AWS::EC2::FlowLog", {
         DeliverLogsPermissionArn: Match.anyValue(),
@@ -124,7 +268,7 @@ describe("Security Posture: Monitoring & Logging", () => {
     });
 
     test("VPC Flow Logs are sent to CloudWatch Logs", () => {
-      const template = Template.fromStack(stacks.networkingStack);
+      const template = getTemplate("networkingStack");
 
       template.hasResourceProperties("AWS::EC2::FlowLog", {
         LogDestinationType: "cloud-watch-logs",
@@ -132,6 +276,10 @@ describe("Security Posture: Monitoring & Logging", () => {
       });
     });
   });
+
+  // ==========================================================================
+  // CONTAINER INSIGHTS
+  // ==========================================================================
 
   describe("Container Insights", () => {
     test("ECS cluster has Container Insights enabled for production", () => {
@@ -148,33 +296,27 @@ describe("Security Posture: Monitoring & Logging", () => {
       });
     });
 
-    test("Container Insights is explicitly configured", () => {
-      const template = Template.fromStack(stacks.infraStack);
+    test("Container Insights is explicitly configured (if configured)", () => {
+      const template = getTemplate("infraStack");
+      const clusters = getClusters(template);
 
-      const clusters = template.findResources("AWS::ECS::Cluster");
-
-      Object.values(clusters).forEach((cluster) => {
-        const properties = (cluster as Record<string, Record<string, unknown>>)
-          .Properties;
-        const settings = (properties.ClusterSettings || []) as Array<
-          Record<string, string>
-        >;
-
-        const containerInsights = settings.find(
-          (setting) => setting.Name === "containerInsights"
-        );
+      clusters.forEach((cluster) => {
+        const containerInsights = getContainerInsightsSetting(cluster);
 
         if (containerInsights) {
-          // Container Insights should be explicitly enabled or disabled
           expect(["enabled", "disabled"]).toContain(containerInsights.Value);
         }
       });
     });
   });
 
+  // ==========================================================================
+  // EVENTBRIDGE RULES
+  // ==========================================================================
+
   describe("EventBridge Rules", () => {
     test("ECS state change events are captured", () => {
-      const template = Template.fromStack(stacks.infraStack);
+      const template = getTemplate("infraStack");
 
       template.hasResourceProperties("AWS::Events::Rule", {
         EventPattern: Match.objectLike({
@@ -185,69 +327,62 @@ describe("Security Posture: Monitoring & Logging", () => {
     });
 
     test("EventBridge rules have targets configured", () => {
-      const template = Template.fromStack(stacks.infraStack);
+      const template = getTemplate("infraStack");
+      const rules = getEventBridgeRules(template);
 
-      const rules = template.findResources("AWS::Events::Rule");
-
-      Object.values(rules).forEach((rule) => {
-        const properties = (rule as Record<string, Record<string, unknown>>)
-          .Properties;
+      rules.forEach((rule) => {
+        const properties = getRuleProperties(rule);
         expect(properties.Targets).toBeDefined();
         expect(Array.isArray(properties.Targets)).toBe(true);
       });
     });
 
-    test("EventBridge rules are enabled", () => {
-      const template = Template.fromStack(stacks.infraStack);
+    test("EventBridge rules are enabled (if state is specified)", () => {
+      const template = getTemplate("infraStack");
+      const rules = getEventBridgeRules(template);
 
-      const rules = template.findResources("AWS::Events::Rule");
+      rules.forEach((rule) => {
+        const properties = getRuleProperties(rule) as Record<string, string>;
+        const state = properties.State;
 
-      Object.values(rules).forEach((rule) => {
-        const properties = (rule as Record<string, Record<string, string>>)
-          .Properties;
-        // State should either be undefined (defaults to ENABLED) or explicitly ENABLED
-        if (properties.State) {
-          expect(properties.State).toBe("ENABLED");
+        if (state) {
+          expect(state).toBe("ENABLED");
         }
       });
     });
   });
 
+  // ==========================================================================
+  // APPLICATION LOGGING
+  // ==========================================================================
+
   describe("Application Logging", () => {
     test("ECS containers log to CloudWatch", () => {
-      const template = Template.fromStack(stacks.serviceStack);
+      const template = getTemplate("serviceStack");
+      const taskDefs = getTaskDefinitions(template);
 
-      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
-
-      Object.values(taskDefs).forEach((taskDef) => {
-        const properties = (taskDef as Record<string, Record<string, unknown>>)
-          .Properties;
-        const containers = properties.ContainerDefinitions as Array<
-          Record<string, Record<string, string>>
-        >;
+      taskDefs.forEach((taskDef) => {
+        const containers = getContainerDefinitions(taskDef);
 
         containers.forEach((container) => {
-          expect(container.LogConfiguration).toBeDefined();
-          expect(container.LogConfiguration.LogDriver).toBe("awslogs");
-          expect(container.LogConfiguration.Options).toBeDefined();
+          const logConfig = getLogConfiguration(container);
+          expect(logConfig).toBeDefined();
+          expect(logConfig?.LogDriver).toBe("awslogs");
+          expect(logConfig?.Options).toBeDefined();
         });
       });
     });
 
-    test("container logs have stream prefix configured", () => {
-      const template = Template.fromStack(stacks.serviceStack);
+    test("container logs have stream prefix configured (if log configuration exists)", () => {
+      const template = getTemplate("serviceStack");
+      const taskDefs = getTaskDefinitions(template);
 
-      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
-
-      Object.values(taskDefs).forEach((taskDef) => {
-        const properties = (taskDef as Record<string, Record<string, unknown>>)
-          .Properties;
-        const containers = properties.ContainerDefinitions as Array<
-          Record<string, Record<string, Record<string, string>>>
-        >;
+      taskDefs.forEach((taskDef) => {
+        const containers = getContainerDefinitions(taskDef);
 
         containers.forEach((container) => {
-          const options = container.LogConfiguration?.Options;
+          const options = getLogOptions(container);
+
           if (options) {
             expect(
               options["awslogs-stream-prefix"] ||
@@ -259,20 +394,17 @@ describe("Security Posture: Monitoring & Logging", () => {
     });
   });
 
+  // ==========================================================================
+  // AUDIT LOGGING
+  // ==========================================================================
+
   describe("Audit Logging", () => {
     test("SSM associations have output logging configured", () => {
-      const template = Template.fromStack(stacks.infraStack);
+      const template = getTemplate("infraStack");
+      const associations = getAssociations(template);
 
-      const associations = template.findResources("AWS::SSM::Association");
-
-      Object.values(associations).forEach((association) => {
-        const properties = (association as Record<string, Record<string, unknown>>)
-          .Properties;
-        
-        // Associations should have output location or sync compliance
-        const hasLogging =
-          properties.OutputLocation !== undefined ||
-          properties.SyncCompliance !== undefined;
+      associations.forEach((association) => {
+        const properties = getAssociationProperties(association);
 
         // At minimum, associations are tracked in SSM State Manager
         expect(properties.AssociationName).toBeDefined();
