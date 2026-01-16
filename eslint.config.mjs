@@ -6,14 +6,12 @@ import importPlugin from "eslint-plugin-import";
 import jestPlugin from "eslint-plugin-jest";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
-import { createRequire } from "module";
 
-const require = createRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Load custom rules
-const localRules = require("./.eslint-local-rules.mjs");
+// Load custom rules (ES module import)
+import localRules from "./.eslint-local-rules.mjs";
 
 export default [
   // Base configurations

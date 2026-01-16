@@ -443,6 +443,13 @@ jobs:
             ENVIRONMENT=${{ env.ENVIRONMENT }} \
             AWS_REGION=${{ env.AWS_REGION }}
 
+      - name: Verify Grafana-Prometheus Connectivity
+        run: |
+          echo "Verifying Grafana-Prometheus Connectivity..."
+          make verify-grafana-prometheus \
+            ENVIRONMENT=${{ env.ENVIRONMENT }} \
+            AWS_REGION=${{ env.AWS_REGION }}
+
   # =================================================================
   # Final Verification & Summary
   # =================================================================
