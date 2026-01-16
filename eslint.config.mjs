@@ -3,11 +3,17 @@
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 import importPlugin from "eslint-plugin-import";
+import jestPlugin from "eslint-plugin-jest";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
+import { createRequire } from "module";
 
+const require = createRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// Load custom rules
+const localRules = require("./.eslint-local-rules.mjs");
 
 export default [
   // Base configurations
@@ -105,7 +111,13 @@ export default [
 
   // Lambda handlers and scripts - more relaxed rules
   {
-    files: ["lambda/**/*.ts", "handlers/**/*.ts", "scripts/**/*.ts", "scripts/**/*.js", "playground/**/*.ts"],
+    files: [
+      "lambda/**/*.ts",
+      "handlers/**/*.ts",
+      "scripts/**/*.ts",
+      "scripts/**/*.js",
+      "playground/**/*.ts",
+    ],
     languageOptions: {
       parser: tseslint.parser,
       parserOptions: {
@@ -122,16 +134,16 @@ export default [
     },
   },
 
-  // Test files configuration
+  // Test files configuration with Jest plugin
   {
-    files: ["test/**/*.ts", "test/**/*.js"],
+    files: ["**/*.test.ts", "**/*.test.tsx", "tests/**/*.ts"],
     languageOptions: {
       parser: tseslint.parser,
       parserOptions: {
         ecmaVersion: "latest",
         sourceType: "module",
         tsconfigRootDir: __dirname,
-        project: "./tsconfig.test.json",
+        project: "./tsconfig.json",
       },
       globals: {
         // Jest globals
@@ -149,8 +161,11 @@ export default [
     plugins: {
       "@typescript-eslint": tseslint.plugin,
       import: importPlugin,
+      jest: jestPlugin,
+      local: localRules,
     },
     rules: {
+      // Basic rules
       "no-console": "off",
       "@typescript-eslint/no-explicit-any": "off",
       "@typescript-eslint/no-require-imports": "off",
@@ -158,6 +173,36 @@ export default [
         "error",
         { argsIgnorePattern: "^_" },
       ],
+
+      // Prevent accessing variables before they're initialized
+      "no-use-before-define": [
+        "error",
+        {
+          variables: true,
+          functions: false, // Allow function hoisting
+        },
+      ],
+
+      // Jest recommended rules
+      ...jestPlugin.configs.recommended.rules,
+
+      // Custom Jest rules for template safety
+      "jest/no-conditional-in-test": "error",
+      "jest/valid-describe-callback": "error",
+      "jest/valid-title": [
+        "error",
+        {
+          mustNotMatch: /template\./, // Flag if "template." in test name
+        },
+      ],
+      "jest/no-done-callback": "error",
+      "jest/no-test-return-statement": "error",
+      "jest/no-duplicate-hooks": "error",
+      "jest/require-top-level-describe": "error",
+
+      // Custom local rules
+      "local/no-template-in-describe": "error",
+      "local/no-iife-in-describe": "error",
     },
   },
 

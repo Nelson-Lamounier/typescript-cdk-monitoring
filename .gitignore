@@ -57,3 +57,8 @@ tests/integration/.generated-templates/
 
 # Deployment outputs (contains sensitive information)
 .deployment-outputs/
+
+.prompts/*
+.prompts.txt
+
+*.txt

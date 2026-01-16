@@ -1,8 +1,24 @@
 <!-- @format -->
 
-# EFS Stack Verification Script
+# Monitoring Stack Verification Scripts
 
-This directory contains verification scripts for testing and validating CDK stack deployments.
+This directory contains verification scripts for testing and validating CDK stack deployments and diagnosing runtime issues.
+
+## Available Scripts
+
+### `verify-efs-stack.sh`
+Validates the MonitoringEfsStack deployment (storage layer)
+
+### `verify-networking-stack.ts`
+Validates the NetworkingStack deployment (VPC, subnets, security groups)
+
+### `verify-infra-stack.ts`
+Validates the MonitoringInfraStack deployment (ECS cluster, ALB, Auto Scaling)
+
+### `verify-grafana-prometheus-connectivity.ts`
+**NEW**: Diagnoses Grafana-Prometheus connectivity issues
+
+---
 
 ## `verify-efs-stack.sh`
 
@@ -469,14 +485,408 @@ The script can be integrated into CI/CD pipelines:
       -r ${{ env.AWS_REGION }}
 ```
 
+---
+
+## `verify-grafana-prometheus-connectivity.ts`
+
+A comprehensive TypeScript diagnostic script that troubleshoots Grafana-Prometheus connectivity issues in the monitoring infrastructure.
+
+### What It Checks
+
+The script performs 10 comprehensive checks:
+
+1. **Prometheus Service Status** - Verifies Prometheus ECS task is running
+2. **Grafana Service Status** - Verifies Grafana ECS task is running  
+3. **Network Mode Configuration** - Ensures both containers use bridge mode (not host)
+4. **Port Mappings** - Validates Prometheus port 9090 is correctly mapped
+5. **Security Group Rules** - Checks port 9090 is accessible within VPC
+6. **Grafana Datasource Configuration** - Verifies HOST_IP_PLACEHOLDER was replaced
+7. **Prometheus Accessibility** - Tests actual HTTP connectivity to Prometheus
+8. **Datasource IP Match** - Ensures datasource uses correct EC2 instance IP
+9. **Service Startup Order** - Checks if Prometheus started before Grafana
+10. **Container Logs** - Analyses recent CloudWatch logs for errors
+
+### Error Diagnosed
+
+This script specifically addresses the error:
+
+```
+Post "http://10.1.0.202:9090/prometheus/api/v1/query": dial tcp 10.1.0.202:9090: connect: connection refused
+```
+
+### Prerequisites
+
+- **Node.js** and **ts-node** installed
+- **AWS CLI** configured with appropriate credentials
+- **MonitoringServiceStack** deployed
+- IAM permissions for:
+  - ECS (DescribeClusters, DescribeTasks, ListTasks)
+  - EC2 (DescribeInstances, DescribeSecurityGroups)
+  - SSM (GetParameter, SendCommand, GetCommandInvocation)
+  - CloudWatch Logs (FilterLogEvents)
+
+### Usage
+
+#### Basic Usage
+
+```bash
+# Run with TypeScript
+ts-node scripts/integration/deployment/monitoring/verify-grafana-prometheus-connectivity.ts \
+  --environment development \
+  --profile dev-account
+
+# Or if compiled to JavaScript
+node dist/scripts/integration/deployment/monitoring/verify-grafana-prometheus-connectivity.js \
+  --environment development \
+  --profile dev-account
+```
+
+#### Command-Line Options
+
+```bash
+-e, --environment <env>  Environment name (development|staging|production|pipeline)
+                         Default: development
+                         
+-r, --region <region>    AWS region
+                         Default: eu-west-1
+                         
+-p, --profile <profile>  AWS CLI profile to use
+                         Optional (uses default credentials if not specified)
+                         
+-v, --verbose           Enable verbose output with detailed diagnostics
+                         Default: false
+```
+
+#### Examples
+
+**Development Environment:**
+
+```bash
+ts-node scripts/integration/deployment/monitoring/verify-grafana-prometheus-connectivity.ts \
+  -e development \
+  -p dev-account
+```
+
+**With Verbose Output:**
+
+```bash
+ts-node scripts/integration/deployment/monitoring/verify-grafana-prometheus-connectivity.ts \
+  -e development \
+  -p dev-account \
+  -v
+```
+
+**Production Environment:**
+
+```bash
+ts-node scripts/integration/deployment/monitoring/verify-grafana-prometheus-connectivity.ts \
+  -e production \
+  -p prod-account \
+  -r eu-west-1
+```
+
+### Script Output
+
+The script provides colour-coded output organised into 10 verification steps:
+
+**Example Output:**
+
+```
+================================================================
+Grafana-Prometheus Connectivity Verification - development
+================================================================
+
+Initialising AWS clients...
+ℹ️  INFO: Using AWS profile: dev-account
+ℹ️  INFO: AWS Account: 123456789012
+ℹ️  INFO: Region: eu-west-1
+ℹ️  INFO: Environment: development
+
+Step 1: Retrieving cluster information...
+────────────────────────────────────────
+✅ Cluster: development-monitoring-monitoring-cluster
+
+Step 2: Retrieving EC2 instance information...
+────────────────────────────────────────
+✅ Instance ID: i-0123456789abcdef0
+ℹ️  INFO: Private IP: 10.1.0.202
+ℹ️  INFO: Security Groups: sg-0123456789abcdef0
+
+Step 3: Checking Prometheus service...
+────────────────────────────────────────
+✅ Prometheus container is running
+ℹ️  INFO: Network Mode: bridge
+ℹ️  INFO: Port Mappings: [{"hostPort":9090,"containerPort":9090}]
+
+Step 4: Checking Grafana service...
+────────────────────────────────────────
+✅ Grafana container is running
+ℹ️  INFO: Network Mode: bridge
+
+Step 5: Verifying network mode configuration...
+────────────────────────────────────────
+✅ ✓ Container Network Mode: Prometheus (bridge) and Grafana (bridge) network modes configured correctly
+
+Step 6: Verifying port mappings...
+────────────────────────────────────────
+✅ ✓ Port Mappings: Prometheus port 9090 correctly mapped to host port 9090
+
+Step 7: Checking security group rules...
+────────────────────────────────────────
+✅ ✓ Security Group Rules: Security group allows traffic on port 9090 from VPC
+
+Step 8: Verifying Grafana datasource configuration...
+────────────────────────────────────────
+❌ ✗ Datasource Configuration: HOST_IP_PLACEHOLDER was NOT replaced with actual EC2 private IP
+
+Details:
+────────────────────────────────────────────────────────────────
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: "http://HOST_IP_PLACEHOLDER:9090/prometheus"
+    isDefault: true
+────────────────────────────────────────────────────────────────
+
+ℹ️  INFO: Remediation:
+The EFS initialization script should replace HOST_IP_PLACEHOLDER with the EC2 instance's private IP. Check if the EFS init association executed successfully. 
+
+Run manually: PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4) && sed -i "s/HOST_IP_PLACEHOLDER/$PRIVATE_IP/g" /mnt/efs/config/grafana/provisioning/datasources/prometheus.yml
+
+Step 9: Testing Prometheus accessibility...
+────────────────────────────────────────
+✅ ✓ Prometheus Accessibility: Prometheus is accessible on both localhost and private IP (port 9090)
+
+Step 10: Checking service startup order...
+────────────────────────────────────────
+✅ ✓ Service Startup Order: Prometheus started before Grafana (or at similar time), which is correct
+
+================================================================
+VERIFICATION SUMMARY
+================================================================
+Total Checks: 10
+✅ Passed: 9
+❌ Failed: 1
+
+Overall Status: UNHEALTHY
+
+Failed Checks - Action Required:
+
+1. Datasource Configuration
+   Issue: HOST_IP_PLACEHOLDER was NOT replaced with actual EC2 private IP
+   Action: The EFS initialization script should replace HOST_IP_PLACEHOLDER with the EC2 instance's private IP. Check if the EFS init association executed successfully. 
+           
+           Run manually: PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4) && sed -i "s/HOST_IP_PLACEHOLDER/$PRIVATE_IP/g" /mnt/efs/config/grafana/provisioning/datasources/prometheus.yml
+
+❌ ERROR: CONNECTIVITY VERIFICATION FAILED - Critical issues detected
+```
+
+### Common Issues Detected
+
+#### Issue 1: HOST_IP_PLACEHOLDER Not Replaced
+
+**Symptom:**
+```
+Datasource Configuration: HOST_IP_PLACEHOLDER was NOT replaced
+```
+
+**Root Cause:**
+The EFS initialization SSM Association hasn't executed successfully, or the sed replacement command failed.
+
+**Fix:**
+1. Check EFS init association status:
+   ```bash
+   aws ssm describe-association-executions \
+     --association-id <assoc-id> \
+     --profile dev-account \
+     --region eu-west-1
+   ```
+
+2. Manually replace placeholder:
+   ```bash
+   # Via SSM Session Manager
+   aws ssm start-session \
+     --target i-0123456789abcdef0 \
+     --profile dev-account \
+     --region eu-west-1
+   
+   # Inside the instance:
+   PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+   sed -i "s/HOST_IP_PLACEHOLDER/$PRIVATE_IP/g" /mnt/efs/config/grafana/provisioning/datasources/prometheus.yml
+   
+   # Restart Grafana
+   docker restart $(docker ps -q --filter name=grafana)
+   ```
+
+3. Force EFS init association re-execution:
+   ```bash
+   aws ssm start-associations-once \
+     --association-ids <efs-init-assoc-id> \
+     --profile dev-account \
+     --region eu-west-1
+   ```
+
+#### Issue 2: Prometheus Not Accessible
+
+**Symptom:**
+```
+Prometheus Accessibility: Prometheus not accessible on localhost:9090
+```
+
+**Possible Causes:**
+- Prometheus container not running
+- Port 9090 not bound to host
+- Network mode misconfiguration
+
+**Fix:**
+1. Check Prometheus container status:
+   ```bash
+   docker ps | grep prometheus
+   ```
+
+2. Check port bindings:
+   ```bash
+   docker inspect <container-id> | grep HostPort
+   netstat -tulpn | grep 9090
+   ```
+
+3. View Prometheus logs:
+   ```bash
+   aws logs tail /aws/ecs/development-prometheus \
+     --follow \
+     --profile dev-account \
+     --region eu-west-1
+   ```
+
+4. Restart Prometheus service:
+   ```bash
+   aws ecs update-service \
+     --cluster development-monitoring-monitoring-cluster \
+     --service development-prometheus \
+     --force-new-deployment \
+     --profile dev-account \
+     --region eu-west-1
+   ```
+
+#### Issue 3: Network Mode Mismatch
+
+**Symptom:**
+```
+Container Network Mode: Prometheus is using HOST network mode (should be BRIDGE)
+```
+
+**Root Cause:**
+Task definition configured with incorrect network mode.
+
+**Fix:**
+Update the Prometheus task definition in the MonitoringServiceStack:
+1. Ensure `networkMode: ecs.NetworkMode.BRIDGE` is set
+2. Verify port mappings include `containerPort: 9090, hostPort: 9090`
+3. Redeploy the service stack:
+   ```bash
+   cdk deploy development-MonitoringService \
+     --profile dev-account
+   ```
+
+#### Issue 4: Security Group Blocking Traffic
+
+**Symptom:**
+```
+Security Group Rules: No explicit rule found allowing port 9090 within VPC
+```
+
+**Fix:**
+Add ingress rule to the ECS instance security group:
+```bash
+aws ec2 authorize-security-group-ingress \
+  --group-id sg-0123456789abcdef0 \
+  --protocol tcp \
+  --port 9090 \
+  --source-group sg-0123456789abcdef0 \
+  --profile dev-account \
+  --region eu-west-1
+```
+
+Or in CDK:
+```typescript
+securityGroup.addIngressRule(
+  ec2.Peer.securityGroupId(securityGroup.securityGroupId),
+  ec2.Port.tcp(9090),
+  'Allow Prometheus scraping from same security group'
+);
+```
+
+#### Issue 5: Grafana Started Before Prometheus
+
+**Symptom:**
+```
+Service Startup Order: Grafana may have started before Prometheus
+```
+
+**Fix:**
+Restart Grafana to re-establish connection:
+```bash
+aws ecs update-service \
+  --cluster development-monitoring-monitoring-cluster \
+  --service development-grafana \
+  --force-new-deployment \
+  --profile dev-account \
+  --region eu-west-1
+```
+
+### Exit Codes
+
+- **0** - All checks passed (healthy or degraded with warnings)
+- **1** - One or more critical checks failed (unhealthy)
+- **2** - Invalid command-line arguments
+
+### Integration with CI/CD
+
+```yaml
+# Example GitHub Actions workflow step
+- name: Verify Grafana-Prometheus Connectivity
+  run: |
+    npm run build
+    node dist/scripts/integration/deployment/monitoring/verify-grafana-prometheus-connectivity.js \
+      --environment ${{ env.ENVIRONMENT }} \
+      --region ${{ env.AWS_REGION }}
+  env:
+    AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+    AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+```
+
 ### Related Documentation
 
-- [MonitoringEfsStack](../../lib/stacks/monitoring/efs-stack.ts)
-- [EFS Initialization Document Construct](../../lib/constructs/ssm/efs-initialization-document.ts)
-- [SSM Automation Document Migration Guide](../../MIGRATION_EFS_LAMBDA_TO_SSM.md)
-- [CDK Application Deployment Guide](../../bin/README.md)
+- [MonitoringEfsStack](../../../../lib/stacks/monitoring/efs-stack.ts)
+- [MonitoringServiceStack](../../../../lib/stacks/monitoring/service-stack.ts)
+- [EFS Initialization Document](../../../../lib/constructs/ssm/efs-initialization-document.ts)
+- [Grafana Datasource Troubleshooting](../../../../docs/GRAFANA_DATASOURCE_TROUBLESHOOTING.md)
+- [Prometheus Configuration](../../../../lib/shared/helpers/prometheus-config-builder.ts)
 
 ### Support
+
+For issues or questions:
+
+1. Run this script first to identify the root cause
+2. Follow the remediation steps provided in the output
+3. Check CloudWatch Logs for Prometheus and Grafana
+4. Review SSM State Manager association execution logs
+5. Verify EFS is mounted: `mountpoint -q /mnt/efs`
+6. Check container networking: `docker network ls && docker inspect <container-id>`
+
+---
+
+## Related Documentation
+
+- [MonitoringEfsStack](../../../../lib/stacks/monitoring/efs-stack.ts)
+- [EFS Initialization Document Construct](../../../../lib/constructs/ssm/efs-initialization-document.ts)
+- [SSM Automation Document Migration Guide](../../../../MIGRATION_EFS_LAMBDA_TO_SSM.md)
+- [CDK Application Deployment Guide](../../../../bin/README.md)
+
+## Support
 
 For issues or questions:
 

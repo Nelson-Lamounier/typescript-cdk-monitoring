@@ -126,6 +126,18 @@ verify-service: ## Verify Service stack deployment and readiness
 		npx tsx scripts/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION) --service-only || true; \
 	fi
 
+verify-grafana-prometheus: ## Diagnose Grafana-Prometheus connectivity issues
+	@echo "$(BLUE)Verifying Grafana-Prometheus Connectivity...$(NC)"
+	@echo "Environment: $(ENVIRONMENT)"
+	@echo "AWS Region: $(AWS_REGION)"
+	@if [ -n "$(AWS_PROFILE)" ]; then \
+		echo "AWS Profile: $(AWS_PROFILE)"; \
+		npx tsx scripts/integration/deployment/monitoring/verify-grafana-prometheus-connectivity.ts -e $(ENVIRONMENT) -r $(AWS_REGION) -p $(AWS_PROFILE); \
+	else \
+		echo "AWS Profile: (using default credentials)"; \
+		npx tsx scripts/integration/deployment/monitoring/verify-grafana-prometheus-connectivity.ts -e $(ENVIRONMENT) -r $(AWS_REGION); \
+	fi
+
 verify-all: verify-networking verify-efs verify-infra verify-service ## Verify all stacks in order
 	@echo ""
 	@echo "$(GREEN)✓ All verification checks completed$(NC)"
@@ -308,26 +320,6 @@ view-coverage: ## Open coverage HTML report in browser
 test-unit: ## Run unit tests only
 	@echo "$(BLUE)Running unit tests...$(NC)"
 	yarn test tests/unit
-
-test-integration: ## Run integration tests
-	@echo "$(BLUE)Running integration tests...$(NC)"
-	yarn test:integration
-
-test-integration-coverage: ## Run integration tests with coverage
-	@echo "$(BLUE)Running integration tests with coverage...$(NC)"
-	yarn test:integration:coverage
-
-test-integration-local: ## Run local integration tests (synthesise stacks)
-	@echo "$(BLUE)Running local integration tests...$(NC)"
-	yarn test:integration:local
-
-test-integration-local-save: ## Run local integration tests and save templates
-	@echo "$(BLUE)Running local integration tests and saving templates...$(NC)"
-	yarn test:integration:local:save
-
-test-integration-local-debug: ## Run local integration tests with detailed output
-	@echo "$(BLUE)Running local integration tests with debug output...$(NC)"
-	yarn test:integration:local:debug
 
 test-security: ## Run all security posture tests
 	@echo "$(BLUE)Running security posture tests...$(NC)"

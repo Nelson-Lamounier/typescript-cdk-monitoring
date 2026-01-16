@@ -9,6 +9,30 @@ module.exports = {
   collectCoverage: false,
   coverageDirectory: "coverage",
   coverageReporters: ["text", "text-summary", "json", "lcov", "html"],
+  
+  // Only collect coverage from source files
+  collectCoverageFrom: [
+    "lib/**/*.ts",
+    "!lib/**/*.d.ts",
+    "!lib/**/*.test.ts",
+    "!lib/**/__tests__/**",
+    "!lib/**/__mocks__/**",
+  ],
+  
+  // Exclude test files, config files, and build outputs from coverage
+  coveragePathIgnorePatterns: [
+    "/node_modules/",
+    "/tests/",
+    "/dist/",
+    "/cdk.out/",
+    "/coverage/",
+    "\\.test\\.ts$",
+    "\\.spec\\.ts$",
+    "jest.config.js",
+    "babel.config.js",
+    "/\\.generated-templates/",
+  ],
+  
   reporters: ["default"],
   maxWorkers: 1,
   forceExit: true,
