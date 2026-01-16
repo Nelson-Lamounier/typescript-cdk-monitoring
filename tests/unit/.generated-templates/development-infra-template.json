@@ -1,0 +1,2556 @@
+{
+  "Metadata": {
+    "cdk_nag": {
+      "rules_to_suppress": [
+        {
+          "reason": "AWS managed policies are used for Lambda functions created by CDK for custom resources (Auto Scaling lifecycle hooks, VPC default security group restriction, EventBridge targets). These are standard CloudFormation custom resource Lambda functions managed by CDK.",
+          "id": "AwsSolutions-IAM4",
+          "applies_to": [
+            "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+          ]
+        },
+        {
+          "reason": "Wildcard permissions are used by CDK-managed custom resource Lambdas for EventBridge to CloudWatch Logs integration and other CDK framework operations. This is required by the CDK framework to manage resource policies and cannot be scoped further. This is standard CDK behavior.",
+          "id": "AwsSolutions-IAM5",
+          "applies_to": [
+            "Resource::*"
+          ]
+        },
+        {
+          "reason": "ECS Container Instance IAM role requires wildcard action permissions (ecs:Submit*) to communicate with ECS control plane. This is a standard permission for ECS EC2 instances as documented in AWS ECS best practices and is created by CDK's Auto Scaling Group construct.",
+          "id": "AwsSolutions-IAM5",
+          "applies_to": [
+            "Action::ecs:Submit*"
+          ]
+        },
+        {
+          "reason": "Auto Scaling Group lifecycle hook Lambda (DrainECSHook) requires permissions to manage Auto Scaling lifecycle actions. The wildcard is scoped to the specific Auto Scaling Group name pattern and is necessary for proper instance lifecycle management during ECS task draining. This is a CDK-managed resource.",
+          "id": "AwsSolutions-IAM5",
+          "applies_to": [
+            {
+              "regex": "/^Resource::arn:(aws|<AWS::Partition>):autoscaling:.*:.*:autoScalingGroup:\\*:autoScalingGroupName\\/<.*>$/"
+            }
+          ]
+        },
+        {
+          "reason": "Lambda runtime versions are managed by CDK for custom resources. CDK automatically updates these with new releases. Upgrading CDK version will update these runtimes.",
+          "id": "AwsSolutions-L1"
+        },
+        {
+          "reason": "Monitoring services (Prometheus, Grafana) require read access to CloudWatch metrics and logs across the account for comprehensive observability. This is standard practice for monitoring solutions and is read-only access.",
+          "id": "AwsSolutions-IAM5",
+          "applies_to": [
+            "Resource::*"
+          ]
+        },
+        {
+          "reason": "Grafana CloudWatch datasource requires permissions to query logs across all log groups in the account. The wildcard is scoped to the account and region, and permissions are read-only.",
+          "id": "AwsSolutions-IAM5",
+          "applies_to": [
+            {
+              "regex": "/^Resource::arn:aws:logs:.*:.*:log-group:\\*$/"
+            },
+            {
+              "regex": "/^Resource::arn:aws:logs:.*:.*:log-group:\\*:\\*$/"
+            }
+          ]
+        },
+        {
+          "reason": "ECS task roles require CloudWatch Logs permissions to write to their specific log groups. The wildcard allows log stream creation within the task's designated log group, which is necessary for ECS container logging.",
+          "id": "AwsSolutions-IAM5",
+          "applies_to": [
+            {
+              "regex": "/^Resource::arn:aws:logs:.*:.*:log-group:<.*>:\\*$/"
+            }
+          ]
+        },
+        {
+          "reason": "EC2 instances in monitoring infrastructure require read access to SSM parameters under the monitoring stack path for EFS setup scripts and configuration. The wildcard is scoped to the specific stack's parameter namespace (/monitoring/{stackName}/*) and provides read-only access to configuration data.",
+          "id": "AwsSolutions-IAM5",
+          "applies_to": [
+            {
+              "regex": "/^Resource::arn:aws:ssm:.*:.*:parameter/monitoring/.*\\*$/"
+            }
+          ]
+        },
+        {
+          "reason": "SNS topic is used for internal ECS lifecycle hooks managed by CDK for the monitoring cluster. SSL enforcement is handled by AWS internal services. The lifecycle hook topic is used for draining ECS tasks during instance termination.",
+          "id": "AwsSolutions-SNS3"
+        },
+        {
+          "reason": "EFS security group allows NFS access from VPC CIDR block only. The CIDR block is dynamically resolved from VPC configuration using CloudFormation intrinsic functions, which CDK Nag cannot validate at synthesis time. This is secure as it restricts access to the VPC's private network only.",
+          "id": "AwsSolutions-EC23"
+        },
+        {
+          "reason": "CDK Nag validation failure occurs when CloudFormation intrinsic functions (like Fn::GetAtt for VPC CIDR) are used in security group rules. This is expected behavior and the actual values will be resolved at deployment time with proper CIDR restrictions.",
+          "id": "CdkNagValidationFailure"
+        },
+        {
+          "reason": "Environment variables like NODE_ENV, PORT, and service configuration are non-sensitive values. Sensitive values (API keys, passwords, tokens) must use AWS Secrets Manager or SSM Parameter Store with SecureString. These basic config values are safe as environment variables.",
+          "id": "AwsSolutions-ECS2"
+        },
+        {
+          "reason": "Container logging is intentionally disabled for certain containers to reduce costs in development environments. For production, enable CloudWatch Logs with proper IAM permissions.",
+          "id": "AwsSolutions-ECS7"
+        },
+        {
+          "reason": "Auto Scaling lifecycle hooks require permissions to describe instances and complete lifecycle actions. These permissions are scoped to the specific Auto Scaling Group and are necessary for proper instance lifecycle management.",
+          "id": "AwsSolutions-IAM5",
+          "applies_to": [
+            "Resource::*"
+          ]
+        },
+        {
+          "reason": "Auto Scaling Group lifecycle hook Lambda requires wildcard permissions for Auto Scaling Group operations because the ASG name contains CDK-generated tokens that are not known at synthesis time. This is required for ECS instance draining functionality.",
+          "id": "AwsSolutions-IAM5",
+          "applies_to": [
+            {
+              "regex": "/^Resource::arn:(aws|<AWS::Partition>):autoscaling:.*:.*:autoScalingGroup:\\*:autoScalingGroupName\\/<.*>$/"
+            }
+          ]
+        },
+        {
+          "reason": "Auto Scaling Group notifications are optional for development environments. For production, consider enabling SNS notifications for scaling events to improve operational visibility.",
+          "id": "AwsSolutions-AS3"
+        },
+        {
+          "reason": "EBS encryption can be managed at the account level via AWS Config or enabled per-environment. For development environments, unencrypted volumes reduce costs. Production environments should enable EBS encryption.",
+          "id": "AwsSolutions-EC26"
+        },
+        {
+          "reason": "Application Load Balancer must accept traffic from the internet (0.0.0.0/0) to serve public-facing application. Security is enforced through: 1) ALB security group only allows HTTP/HTTPS, 2) Target security groups restrict access to ALB only, 3) WAF rules (if enabled), 4) Application-level authentication.",
+          "id": "AwsSolutions-EC23"
+        },
+        {
+          "reason": "ALB access logging is disabled to reduce costs in development environments. For production, enable access logging to S3 bucket for audit and troubleshooting purposes. Logs should be retained according to compliance requirements.",
+          "id": "AwsSolutions-ELB2"
+        },
+        {
+          "reason": "S3 access log bucket has server access logging enabled via serverAccessLogsPrefix property. This bucket stores ALB access logs and its own access logs are stored in a separate prefix within the same bucket.",
+          "id": "AwsSolutions-S1"
+        },
+        {
+          "reason": "S3 GetBucket* permissions are required for EC2 instances to download CDK assets (config files) from the CDK staging bucket. These are read-only operations scoped to the CDK asset bucket and are necessary for bootstrapping instances with configuration files.",
+          "id": "AwsSolutions-IAM5",
+          "applies_to": [
+            "Action::s3:GetBucket*"
+          ]
+        },
+        {
+          "reason": "S3 GetObject* permissions are required for EC2 instances to download CDK assets (config files) from the CDK staging bucket. These are read-only operations scoped to the CDK asset bucket and are necessary for bootstrapping instances with configuration files.",
+          "id": "AwsSolutions-IAM5",
+          "applies_to": [
+            "Action::s3:GetObject*"
+          ]
+        },
+        {
+          "reason": "S3 List* permissions are required for EC2 instances to list objects in the CDK staging bucket when downloading assets. These are read-only operations scoped to the CDK asset bucket and are necessary for bootstrapping instances with configuration files.",
+          "id": "AwsSolutions-IAM5",
+          "applies_to": [
+            "Action::s3:List*"
+          ]
+        },
+        {
+          "reason": "CDK asset bucket permissions use wildcard for objects within the CDK staging bucket. This is automatically created by CDK and scoped to the specific account and region. The bucket only contains CDK deployment assets (config files, Lambda code, etc.) and permissions are read-only.",
+          "id": "AwsSolutions-IAM5",
+          "applies_to": [
+            {
+              "regex": "/^Resource::arn:aws:s3:::cdk-[a-z0-9]+-assets-.*-.*\\/\\*$/"
+            }
+          ]
+        },
+        {
+          "reason": "Monitoring configuration bucket permissions use wildcard for objects within the monitoring config bucket. This allows EC2 instances to read configuration files (Prometheus configs, Grafana dashboards, etc.) stored in the bucket. The wildcard is scoped to the specific monitoring configuration bucket and permissions are read-only for operational configuration management.",
+          "id": "AwsSolutions-IAM5",
+          "applies_to": [
+            {
+              "regex": "/^Resource::<ConfigBucket.*\\.Arn>\\/\\*$/"
+            }
+          ]
+        },
+        {
+          "reason": "CloudWatch Logs permissions use wildcard for log streams within the environment-specific log group. This allows services to create log streams dynamically while restricting access to the specific environment. The wildcard is scoped to /ecs/{envName}* pattern.",
+          "id": "AwsSolutions-IAM5",
+          "applies_to": [
+            {
+              "regex": "/^Resource::arn:aws:logs:.*:.*:log-group:/ecs/development\\*:\\*$/"
+            }
+          ]
+        },
+        {
+          "reason": "CloudWatch Logs permissions use wildcard for log streams within the ECS cluster log group. This allows ECS tasks to create log streams dynamically. The wildcard is scoped to the specific log group ARN.",
+          "id": "AwsSolutions-IAM5",
+          "applies_to": [
+            "Resource::arn:aws:logs:eu-west-1:123456789012:log-group:<EcsClusterClusterLogGroupF10E9DBD>:*"
+          ]
+        }
+      ]
+    }
+  },
+  "Resources": {
+    "TaskLogGroup933EA2D6": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/ecs/TestInfraStack/tasks",
+        "RetentionInDays": 14,
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Infrastructure"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringInfra"
+          }
+        ]
+      },
+      "UpdateReplacePolicy": "Delete",
+      "DeletionPolicy": "Delete"
+    },
+    "EventLogGroupD7F451ED": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/ecs/TestInfraStack/events",
+        "RetentionInDays": 14,
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Infrastructure"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringInfra"
+          }
+        ]
+      },
+      "UpdateReplacePolicy": "Delete",
+      "DeletionPolicy": "Delete"
+    },
+    "LaunchTemplateSecurityGroup02438453": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Security group for development instances",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow HTTPS for AWS API endpoints (ECR, ECS, SSM, CloudWatch)",
+            "FromPort": 443,
+            "IpProtocol": "tcp",
+            "ToPort": 443
+          },
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow NTP for time synchronization",
+            "FromPort": 123,
+            "IpProtocol": "udp",
+            "ToPort": 123
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Infrastructure"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringInfra"
+          }
+        ],
+        "VpcId": {
+          "Fn::ImportValue": "TestNetworkingStack:ExportsOutputRefVpcC302751171D26A23"
+        }
+      }
+    },
+    "LaunchTemplateSecurityGroupfromTestInfraStackLoadBalancerSecurityGroupB84F35AC3276865535DE4EF8AD": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "Description": "Allow ALB to reach Grafana on dynamic ports (bridge networking)",
+        "FromPort": 32768,
+        "GroupId": {
+          "Fn::GetAtt": [
+            "LaunchTemplateSecurityGroup02438453",
+            "GroupId"
+          ]
+        },
+        "IpProtocol": "tcp",
+        "SourceSecurityGroupId": {
+          "Fn::GetAtt": [
+            "LoadBalancerSecurityGroupAA74F0EC",
+            "GroupId"
+          ]
+        },
+        "ToPort": 65535
+      }
+    },
+    "LaunchTemplateSecurityGroupfromTestInfraStackLoadBalancerSecurityGroupB84F35AC9090584C14F8": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "Description": "Allow ALB to reach Prometheus on port 9090",
+        "FromPort": 9090,
+        "GroupId": {
+          "Fn::GetAtt": [
+            "LaunchTemplateSecurityGroup02438453",
+            "GroupId"
+          ]
+        },
+        "IpProtocol": "tcp",
+        "SourceSecurityGroupId": {
+          "Fn::GetAtt": [
+            "LoadBalancerSecurityGroupAA74F0EC",
+            "GroupId"
+          ]
+        },
+        "ToPort": 9090
+      }
+    },
+    "LaunchTemplateSecurityGrouptoTestEfsStackEfsSecurityGroupEfsMountTargetSgEE85B7B12049543C040A": {
+      "Type": "AWS::EC2::SecurityGroupEgress",
+      "Properties": {
+        "Description": "Allow ECS instances to mount EFS via NFS",
+        "DestinationSecurityGroupId": {
+          "Fn::ImportValue": "TestEfsStack:ExportsOutputFnGetAttEfsSecurityGroupEfsMountTargetSgA4E5C597GroupIdDC33B5DF"
+        },
+        "FromPort": 2049,
+        "GroupId": {
+          "Fn::GetAtt": [
+            "LaunchTemplateSecurityGroup02438453",
+            "GroupId"
+          ]
+        },
+        "IpProtocol": "tcp",
+        "ToPort": 2049
+      }
+    },
+    "LaunchTemplateInstanceRole4CDEA2C5": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ec2.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "Description": "EC2 instance role for development",
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition"
+                },
+                ":iam::aws:policy/AmazonSSMManagedInstanceCore"
+              ]
+            ]
+          },
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition"
+                },
+                ":iam::aws:policy/CloudWatchAgentServerPolicy"
+              ]
+            ]
+          },
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition"
+                },
+                ":iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
+              ]
+            ]
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Infrastructure"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringInfra"
+          }
+        ]
+      },
+      "Metadata": {
+        "cdk_nag": {
+          "rules_to_suppress": [
+            {
+              "reason": "AWS managed policies required for ECS monitoring instances (SSM, CloudWatch, ECS).",
+              "id": "AwsSolutions-IAM4",
+              "applies_to": [
+                "Policy::arn:<AWS::Partition>:iam::aws:policy/AmazonSSMManagedInstanceCore",
+                "Policy::arn:<AWS::Partition>:iam::aws:policy/CloudWatchAgentServerPolicy",
+                "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
+              ]
+            },
+            {
+              "reason": "SSM parameter access, CloudWatch Logs, and bootstrap metadata wildcard permissions required for runtime operations.",
+              "id": "AwsSolutions-IAM5",
+              "applies_to": [
+                "Action::ssm:GetParameter",
+                "Action::ssm:GetParameters",
+                "Action::ssm:GetParametersByPath",
+                "Action::ssm:PutParameter",
+                "Action::ssm:AddTagsToResource",
+                "Resource::arn:aws:logs:eu-west-1:123456789012:log-group:/ecs/*:*",
+                "Resource::arn:aws:logs:eu-west-1:123456789012:log-group:/aws/ecs/*:*",
+                "Resource::arn:aws:ssm:eu-west-1:123456789012:parameter/bootstrap/development/instances/*"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "LaunchTemplateInstanceRoleDefaultPolicy9FA43BA5": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "elasticfilesystem:ClientMount",
+                "elasticfilesystem:ClientWrite",
+                "elasticfilesystem:ClientRootAccess"
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::ImportValue": "TestEfsStack:ExportsOutputFnGetAttEfsFileSystemEfsdevelopment4A26EAF9Arn4B1E7C9A"
+              }
+            },
+            {
+              "Action": [
+                "ssm:GetParameter",
+                "ssm:GetParameters",
+                "ssm:GetParametersByPath"
+              ],
+              "Effect": "Allow",
+              "Resource": "*"
+            },
+            {
+              "Action": [
+                "ssm:PutParameter",
+                "ssm:AddTagsToResource"
+              ],
+              "Effect": "Allow",
+              "Resource": "arn:aws:ssm:eu-west-1:123456789012:parameter/bootstrap/development/instances/*"
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+                "logs:DescribeLogStreams"
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                "arn:aws:logs:eu-west-1:123456789012:log-group:/ecs/*:*",
+                "arn:aws:logs:eu-west-1:123456789012:log-group:/aws/ecs/*:*"
+              ]
+            },
+            {
+              "Action": [
+                "ecs:DeregisterContainerInstance",
+                "ecs:RegisterContainerInstance",
+                "ecs:Submit*"
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "EcsClusterFB9B21B5",
+                  "Arn"
+                ]
+              }
+            },
+            {
+              "Action": [
+                "ecs:Poll",
+                "ecs:StartTelemetrySession"
+              ],
+              "Condition": {
+                "ArnEquals": {
+                  "ecs:cluster": {
+                    "Fn::GetAtt": [
+                      "EcsClusterFB9B21B5",
+                      "Arn"
+                    ]
+                  }
+                }
+              },
+              "Effect": "Allow",
+              "Resource": "*"
+            },
+            {
+              "Action": [
+                "ecs:DiscoverPollEndpoint",
+                "ecr:GetAuthorizationToken",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+              ],
+              "Effect": "Allow",
+              "Resource": "*"
+            },
+            {
+              "Action": [
+                "ssm:DescribeInstanceInformation",
+                "ssm:ListAssociations",
+                "ssm:ListInstanceAssociations",
+                "ssm:DescribeAssociation",
+                "ssm:UpdateInstanceInformation"
+              ],
+              "Effect": "Allow",
+              "Resource": "*"
+            },
+            {
+              "Action": [
+                "ssm:GetDocument",
+                "ssm:SendCommand",
+                "ssm:GetCommandInvocation"
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                "arn:aws:ssm:eu-west-1:123456789012:document/AWS-RunShellScript",
+                "arn:aws:ssm:eu-west-1:123456789012:document/AWS-ConfigureAWSPackage",
+                "arn:aws:ssm:eu-west-1:123456789012:document/TestInfraStack-development-cloudwatch-agent-config"
+              ]
+            },
+            {
+              "Action": [
+                "elasticfilesystem:ClientMount",
+                "elasticfilesystem:ClientWrite",
+                "elasticfilesystem:ClientRootAccess",
+                "elasticfilesystem:DescribeMountTargets"
+              ],
+              "Condition": {
+                "Bool": {
+                  "elasticfilesystem:AccessedViaMountTarget": "true"
+                }
+              },
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:aws:elasticfilesystem:eu-west-1:123456789012:file-system/",
+                    {
+                      "Fn::ImportValue": "TestEfsStack:ExportsOutputRefEfsFileSystemEfsdevelopment4A26EAF9471ED0A2"
+                    }
+                  ]
+                ]
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "PolicyName": "LaunchTemplateInstanceRoleDefaultPolicy9FA43BA5",
+        "Roles": [
+          {
+            "Ref": "LaunchTemplateInstanceRole4CDEA2C5"
+          }
+        ]
+      },
+      "Metadata": {
+        "cdk_nag": {
+          "rules_to_suppress": [
+            {
+              "reason": "AWS managed policies required for ECS monitoring instances (SSM, CloudWatch, ECS).",
+              "id": "AwsSolutions-IAM4",
+              "applies_to": [
+                "Policy::arn:<AWS::Partition>:iam::aws:policy/AmazonSSMManagedInstanceCore",
+                "Policy::arn:<AWS::Partition>:iam::aws:policy/CloudWatchAgentServerPolicy",
+                "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
+              ]
+            },
+            {
+              "reason": "SSM parameter access, CloudWatch Logs, and bootstrap metadata wildcard permissions required for runtime operations.",
+              "id": "AwsSolutions-IAM5",
+              "applies_to": [
+                "Action::ssm:GetParameter",
+                "Action::ssm:GetParameters",
+                "Action::ssm:GetParametersByPath",
+                "Action::ssm:PutParameter",
+                "Action::ssm:AddTagsToResource",
+                "Resource::arn:aws:logs:eu-west-1:123456789012:log-group:/ecs/*:*",
+                "Resource::arn:aws:logs:eu-west-1:123456789012:log-group:/aws/ecs/*:*",
+                "Resource::arn:aws:ssm:eu-west-1:123456789012:parameter/bootstrap/development/instances/*"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "LaunchTemplateProfile8E2CEC77": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Roles": [
+          {
+            "Ref": "LaunchTemplateInstanceRole4CDEA2C5"
+          }
+        ]
+      }
+    },
+    "LaunchTemplate67909292": {
+      "Type": "AWS::EC2::LaunchTemplate",
+      "Properties": {
+        "LaunchTemplateData": {
+          "BlockDeviceMappings": [
+            {
+              "DeviceName": "/dev/xvda",
+              "Ebs": {
+                "DeleteOnTermination": true,
+                "Encrypted": true,
+                "VolumeSize": 30,
+                "VolumeType": "gp3"
+              }
+            }
+          ],
+          "IamInstanceProfile": {
+            "Arn": {
+              "Fn::GetAtt": [
+                "LaunchTemplateProfile8E2CEC77",
+                "Arn"
+              ]
+            }
+          },
+          "ImageId": {
+            "Ref": "SsmParameterValueawsserviceecsoptimizedamiamazonlinux2023recommendedimageidC96584B6F00A464EAD1953AFF4B05118Parameter"
+          },
+          "InstanceType": "t3.micro",
+          "MetadataOptions": {
+            "HttpTokens": "required"
+          },
+          "Monitoring": {
+            "Enabled": false
+          },
+          "NetworkInterfaces": [
+            {
+              "AssociatePublicIpAddress": true,
+              "DeviceIndex": 0,
+              "Groups": [
+                {
+                  "Fn::GetAtt": [
+                    "LaunchTemplateSecurityGroup02438453",
+                    "GroupId"
+                  ]
+                }
+              ]
+            }
+          ],
+          "TagSpecifications": [
+            {
+              "ResourceType": "instance",
+              "Tags": [
+                {
+                  "Key": "Environment",
+                  "Value": "development"
+                },
+                {
+                  "Key": "Layer",
+                  "Value": "Infrastructure"
+                },
+                {
+                  "Key": "ManagedBy",
+                  "Value": "CDK"
+                },
+                {
+                  "Key": "Name",
+                  "Value": "TestInfraStack/LaunchTemplate/LaunchTemplate"
+                },
+                {
+                  "Key": "Project",
+                  "Value": "monitoring"
+                },
+                {
+                  "Key": "StackName",
+                  "Value": "MonitoringInfra"
+                }
+              ]
+            },
+            {
+              "ResourceType": "volume",
+              "Tags": [
+                {
+                  "Key": "Environment",
+                  "Value": "development"
+                },
+                {
+                  "Key": "Layer",
+                  "Value": "Infrastructure"
+                },
+                {
+                  "Key": "ManagedBy",
+                  "Value": "CDK"
+                },
+                {
+                  "Key": "Name",
+                  "Value": "TestInfraStack/LaunchTemplate/LaunchTemplate"
+                },
+                {
+                  "Key": "Project",
+                  "Value": "monitoring"
+                },
+                {
+                  "Key": "StackName",
+                  "Value": "MonitoringInfra"
+                }
+              ]
+            }
+          ],
+          "UserData": {
+            "Fn::Base64": {
+              "Fn::Join": [
+                "",
+                [
+                  "#!/bin/bash\n#!/bin/bash\nset -e\nset -o pipefail\n\n# ==========================================================================\n# ENHANCED USER DATA - DEVELOPMENT\n# Purpose: SSM Agent Bootstrap with CloudFormation Signalling\n# All complex configuration handled by SSM State Manager\n# Bootstrap Version: 2026-01-15T15:35:20.269Z\n# ==========================================================================\n\n# Enable comprehensive logging\nexec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1\n\necho '========================================='\necho 'Bootstrap Started - development'\necho 'Timestamp:' $(date)\necho '========================================='\n\n# ==========================================================================\n# HELPER FUNCTIONS\n# ==========================================================================\n\n# Error handler - called when script encounters an error\nhandle_error() {\n  local exit_code=$?\n  local line_number=$1\n  echo 'ERROR: Bootstrap failed at line $line_number with exit code $exit_code'\n  echo 'Check /var/log/user-data.log for details'\n  \n  # Send failure signal to CloudFormation if configured\n  send_cfn_signal 'FAILURE' 'Bootstrap failed at line $line_number'\n  \n  exit $exit_code\n}\n\n# Set error trap\ntrap 'handle_error ${LINENO}' ERR\n\n# CloudFormation signal helper\nsend_cfn_signal() {\n  local status=$1\n  local reason=$2\n  local stack_name='TestInfraStack'\n  local logical_id='EcsAutoScalingGroup'\n  local region='eu-west-1'\n  \n  echo 'Sending CloudFormation signal: $status'\n  \n  /opt/aws/bin/cfn-signal \\\n    --success \"$status\" \\\n    --reason \"$reason\" \\\n    --stack \"$stack_name\" \\\n    --resource \"$logical_id\" \\\n    --region \"$region\" || {\n      echo 'WARNING: Failed to send CloudFormation signal'\n      return 1\n    }\n  \n  echo 'CloudFormation signal sent successfully'\n}\n\n# ==========================================================================\n# COLLECT INSTANCE METADATA\n# ==========================================================================\n\necho 'Collecting instance metadata...'\n\n# EC2 metadata service endpoint\nMETADATA_URL='http://169.254.169.254/latest/meta-data'\nINSTANCE_ID=$(curl -s $METADATA_URL/instance-id || echo 'unknown')\nINSTANCE_TYPE=$(curl -s $METADATA_URL/instance-type || echo 'unknown')\nAMI_ID=$(curl -s $METADATA_URL/ami-id || echo 'unknown')\nAVAILABILITY_ZONE=$(curl -s $METADATA_URL/placement/availability-zone || echo 'unknown')\nPRIVATE_IP=$(curl -s $METADATA_URL/local-ipv4 || echo 'unknown')\n\necho 'Instance ID: '$INSTANCE_ID\necho 'Instance Type: '$INSTANCE_TYPE\necho 'AMI ID: '$AMI_ID\necho 'Availability Zone: '$AVAILABILITY_ZONE\necho 'Private IP: '$PRIVATE_IP\n\n# ==========================================================================\n# SSM AGENT INSTALLATION\n# ==========================================================================\n\necho 'Installing SSM agent...'\n\n# Detect package manager\nPKG_MGR=yum\ncommand -v dnf >/dev/null 2>&1 && PKG_MGR=dnf\n\n# Install SSM agent\n$PKG_MGR install -y amazon-ssm-agent || {\n  echo 'ERROR: SSM agent installation failed'\n  exit 1\n}\n\n# Enable and start SSM agent\nsystemctl enable amazon-ssm-agent\nsystemctl start amazon-ssm-agent\n\n# Verify SSM agent with retries\necho 'Verifying SSM agent...'\nSSM_RETRY_COUNT=0\nSSM_MAX_RETRIES=12\nSSM_AGENT_RUNNING=false\n\nwhile [ $SSM_RETRY_COUNT -lt $SSM_MAX_RETRIES ]; do\n  if systemctl is-active amazon-ssm-agent >/dev/null 2>&1; then\n    echo 'SSM agent is running'\n    SSM_AGENT_RUNNING=true\n    break\n  else\n    SSM_RETRY_COUNT=$((SSM_RETRY_COUNT + 1))\n    echo \"Verification attempt $SSM_RETRY_COUNT/$SSM_MAX_RETRIES...\"\n    systemctl start amazon-ssm-agent >/dev/null 2>&1 || true\n    sleep 10\n  fi\ndone\n\nif [ \"$SSM_AGENT_RUNNING\" != \"true\" ]; then\n  echo 'ERROR: SSM agent not running after $SSM_MAX_RETRIES attempts'\n  systemctl status amazon-ssm-agent || true\n  exit 1\nfi\n\necho 'SSM agent verified successfully'\necho ''\necho 'SSM State Manager will handle:'\necho '  - ECS agent configuration'\necho '  - CloudWatch Agent installation'\necho '  - Log collection setup'\necho '  - Security hardening'\n\n# ==========================================================================\n# STORE BOOTSTRAP METADATA\n# ==========================================================================\n\necho 'Storing bootstrap metadata in SSM Parameter Store...'\n\n# Build metadata JSON\nMETADATA_JSON=$(cat <<EOF\n{\n  \"bootstrapVersion\": \"2026-01-15T15:35:20.269Z\",\n  \"bootstrapTimestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\n  \"environment\": \"development\",\n  \"clusterName\": \"development-monitoring-monitoring-cluster\",\n  \"instanceId\": \"$INSTANCE_ID\",\n  \"instanceType\": \"$INSTANCE_TYPE\",\n  \"amiId\": \"$AMI_ID\",\n  \"availabilityZone\": \"$AVAILABILITY_ZONE\",\n  \"privateIp\": \"$PRIVATE_IP\",\n  \"ssmAgentVersion\": \"$(rpm -q amazon-ssm-agent --queryformat %{VERSION} 2>/dev/null || echo unknown)\"\n}\nEOF\n)\n\n# Store metadata in SSM Parameter Store at /bootstrap/development/instances/${INSTANCE_ID}\naws ssm put-parameter \\\n  --name '/bootstrap/development/instances/${INSTANCE_ID}' \\\n  --value \"$METADATA_JSON\" \\\n  --type String \\\n  --overwrite \\\n  --tags Key=Environment,Value=development Key=ClusterName,Value=development-monitoring-monitoring-cluster Key=ManagedBy,Value=UserData \\\n  --region eu-west-1 || {\n    echo 'WARNING: Failed to store bootstrap metadata'\n    echo 'Instance will continue but metadata will not be tracked'\n  }\n\necho 'Bootstrap metadata stored successfully'\n\n# ==========================================================================\n# CLOUDFORMATION SIGNAL\n# ==========================================================================\n\necho 'Sending CloudFormation completion signal...'\n\nsend_cfn_signal 'SUCCESS' 'Bootstrap completed successfully' || {\n  echo 'WARNING: Failed to send CloudFormation signal'\n  echo 'Instance is ready but stack may show incomplete'\n}\n\n# ==========================================================================\n# BOOTSTRAP COMPLETE\n# ==========================================================================\n\necho '========================================='\necho 'Bootstrap Completed Successfully'\necho 'Timestamp: '$(date)\necho 'Instance ID: '$INSTANCE_ID\necho 'SSM Agent: Running'\necho 'CloudFormation: Signalled'\necho 'Metadata: Stored in SSM Parameter Store'\necho ''\necho 'Instance is ready for SSM State Manager associations'\necho '========================================='\n\necho ECS_CLUSTER=",
+                  {
+                    "Ref": "EcsClusterFB9B21B5"
+                  },
+                  " >> /etc/ecs/ecs.config"
+                ]
+              ]
+            }
+          }
+        },
+        "LaunchTemplateName": "TestInfraStack-template",
+        "TagSpecifications": [
+          {
+            "ResourceType": "launch-template",
+            "Tags": [
+              {
+                "Key": "Environment",
+                "Value": "development"
+              },
+              {
+                "Key": "Layer",
+                "Value": "Infrastructure"
+              },
+              {
+                "Key": "ManagedBy",
+                "Value": "CDK"
+              },
+              {
+                "Key": "Name",
+                "Value": "TestInfraStack/LaunchTemplate/LaunchTemplate"
+              },
+              {
+                "Key": "Project",
+                "Value": "monitoring"
+              },
+              {
+                "Key": "StackName",
+                "Value": "MonitoringInfra"
+              }
+            ]
+          }
+        ]
+      },
+      "DependsOn": [
+        "LaunchTemplateInstanceRoleDefaultPolicy9FA43BA5",
+        "LaunchTemplateInstanceRole4CDEA2C5"
+      ]
+    },
+    "EcsClusterClusterLogGroupF10E9DBD": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/aws/ecs/cluster/development-monitoring-monitoring-cluster",
+        "RetentionInDays": 14,
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Infrastructure"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringInfra"
+          }
+        ]
+      },
+      "UpdateReplacePolicy": "Delete",
+      "DeletionPolicy": "Delete"
+    },
+    "EcsClusterFB9B21B5": {
+      "Type": "AWS::ECS::Cluster",
+      "Properties": {
+        "ClusterName": "development-monitoring-monitoring-cluster",
+        "ClusterSettings": [
+          {
+            "Name": "containerInsights",
+            "Value": "enabled"
+          }
+        ],
+        "Configuration": {
+          "ExecuteCommandConfiguration": {
+            "LogConfiguration": {
+              "CloudWatchLogGroupName": {
+                "Ref": "EcsClusterClusterLogGroupF10E9DBD"
+              }
+            },
+            "Logging": "OVERRIDE"
+          }
+        },
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Infrastructure"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Name",
+            "Value": "development-monitoring-monitoring-cluster"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringInfra"
+          }
+        ]
+      }
+    },
+    "EcsCluster78858DD3": {
+      "Type": "AWS::ECS::ClusterCapacityProviderAssociations",
+      "Properties": {
+        "CapacityProviders": [
+          {
+            "Ref": "EcsClusterCapacityProvider64AC1BA5"
+          }
+        ],
+        "Cluster": {
+          "Ref": "EcsClusterFB9B21B5"
+        },
+        "DefaultCapacityProviderStrategy": []
+      }
+    },
+    "EcsClusterAutoScalingGroupASGB16C0B67": {
+      "Type": "AWS::AutoScaling::AutoScalingGroup",
+      "Properties": {
+        "DesiredCapacity": "1",
+        "HealthCheckGracePeriod": 300,
+        "HealthCheckType": "EC2",
+        "LaunchTemplate": {
+          "LaunchTemplateId": {
+            "Ref": "LaunchTemplate67909292"
+          },
+          "Version": {
+            "Fn::GetAtt": [
+              "LaunchTemplate67909292",
+              "LatestVersionNumber"
+            ]
+          }
+        },
+        "MaxSize": "2",
+        "MinSize": "1",
+        "Tags": [
+          {
+            "Key": "Environment",
+            "PropagateAtLaunch": true,
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "PropagateAtLaunch": true,
+            "Value": "Infrastructure"
+          },
+          {
+            "Key": "ManagedBy",
+            "PropagateAtLaunch": true,
+            "Value": "CDK"
+          },
+          {
+            "Key": "Name",
+            "PropagateAtLaunch": true,
+            "Value": "development-asg"
+          },
+          {
+            "Key": "Project",
+            "PropagateAtLaunch": true,
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "PropagateAtLaunch": true,
+            "Value": "MonitoringInfra"
+          }
+        ],
+        "VPCZoneIdentifier": [
+          {
+            "Fn::ImportValue": "TestNetworkingStack:ExportsOutputRefVpcPublicSubnet1Subnet8E8DEDC0785EBA99"
+          }
+        ]
+      },
+      "UpdatePolicy": {
+        "AutoScalingScheduledAction": {
+          "IgnoreUnmodifiedGroupSizeProperties": true
+        }
+      },
+      "Metadata": {
+        "cdk_nag": {
+          "rules_to_suppress": [
+            {
+              "reason": "Auto Scaling Group lifecycle hook Lambda (DrainECSHook) requires permissions to manage Auto Scaling lifecycle actions. The wildcard is scoped to the specific Auto Scaling Group name pattern and is necessary for proper instance lifecycle management during ECS task draining. This is a CDK-managed resource.",
+              "id": "AwsSolutions-IAM5",
+              "applies_to": [
+                {
+                  "regex": "/^Resource::arn:(aws|<AWS::Partition>):autoscaling:.*:.*:autoScalingGroup:\\*:autoScalingGroupName\\/<.*>$/"
+                }
+              ]
+            },
+            {
+              "reason": "SNS topic SSL/TLS enforcement is not configured for CDK-managed topics used by Auto Scaling lifecycle hooks. These topics are internal to AWS services and use AWS's internal secure communication. For custom SNS topics, SSL/TLS should be enforced.",
+              "id": "AwsSolutions-SNS3"
+            }
+          ]
+        }
+      }
+    },
+    "EcsClusterAutoScalingGroupDrainECSHookFunctionServiceRoleE7C36BAD": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition"
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+              ]
+            ]
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Infrastructure"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Name",
+            "Value": "development-asg"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringInfra"
+          }
+        ]
+      }
+    },
+    "EcsClusterAutoScalingGroupDrainECSHookFunctionServiceRoleDefaultPolicyE4ECEC82": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "ec2:DescribeInstances",
+                "ec2:DescribeInstanceAttribute",
+                "ec2:DescribeInstanceStatus",
+                "ec2:DescribeHosts"
+              ],
+              "Effect": "Allow",
+              "Resource": "*"
+            },
+            {
+              "Action": "autoscaling:CompleteLifecycleAction",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition"
+                    },
+                    ":autoscaling:eu-west-1:123456789012:autoScalingGroup:*:autoScalingGroupName/",
+                    {
+                      "Ref": "EcsClusterAutoScalingGroupASGB16C0B67"
+                    }
+                  ]
+                ]
+              }
+            },
+            {
+              "Action": [
+                "ecs:DescribeContainerInstances",
+                "ecs:DescribeTasks"
+              ],
+              "Condition": {
+                "ArnEquals": {
+                  "ecs:cluster": {
+                    "Fn::GetAtt": [
+                      "EcsClusterFB9B21B5",
+                      "Arn"
+                    ]
+                  }
+                }
+              },
+              "Effect": "Allow",
+              "Resource": "*"
+            },
+            {
+              "Action": [
+                "ecs:ListContainerInstances",
+                "ecs:SubmitContainerStateChange",
+                "ecs:SubmitTaskStateChange"
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "EcsClusterFB9B21B5",
+                  "Arn"
+                ]
+              }
+            },
+            {
+              "Action": [
+                "ecs:UpdateContainerInstancesState",
+                "ecs:ListTasks"
+              ],
+              "Condition": {
+                "ArnEquals": {
+                  "ecs:cluster": {
+                    "Fn::GetAtt": [
+                      "EcsClusterFB9B21B5",
+                      "Arn"
+                    ]
+                  }
+                }
+              },
+              "Effect": "Allow",
+              "Resource": "*"
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "PolicyName": "EcsClusterAutoScalingGroupDrainECSHookFunctionServiceRoleDefaultPolicyE4ECEC82",
+        "Roles": [
+          {
+            "Ref": "EcsClusterAutoScalingGroupDrainECSHookFunctionServiceRoleE7C36BAD"
+          }
+        ]
+      }
+    },
+    "EcsClusterAutoScalingGroupDrainECSHookFunction00A2F700": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Code": {
+          "ZipFile": "import boto3, json, os, time\n\necs = boto3.client('ecs')\nautoscaling = boto3.client('autoscaling')\n\n\ndef lambda_handler(event, context):\n  print(json.dumps(dict(event, ResponseURL='...')))\n  cluster = os.environ['CLUSTER']\n  snsTopicArn = event['Records'][0]['Sns']['TopicArn']\n  lifecycle_event = json.loads(event['Records'][0]['Sns']['Message'])\n  instance_id = lifecycle_event.get('EC2InstanceId')\n  if not instance_id:\n    print(f\"Got event without EC2InstanceId: { json.dumps(dict(event, ResponseURL='...')) }\")\n    return\n\n  instance_arn = container_instance_arn(cluster, instance_id)\n  print('Instance %s has container instance ARN %s' % (lifecycle_event['EC2InstanceId'], instance_arn))\n\n  if not instance_arn:\n    return\n\n  task_arns = container_instance_task_arns(cluster, instance_arn)\n\n  if task_arns:\n    print('Instance ARN %s has task ARNs %s' % (instance_arn, ', '.join(task_arns)))\n\n  while has_tasks(cluster, instance_arn, task_arns):\n    time.sleep(10)\n\n  try:\n    print('Terminating instance %s' % instance_id)\n    autoscaling.complete_lifecycle_action(\n        LifecycleActionResult='CONTINUE',\n        **pick(lifecycle_event, 'LifecycleHookName', 'LifecycleActionToken', 'AutoScalingGroupName'))\n  except Exception as e:\n    # Lifecycle action may have already completed.\n    print(str(e))\n\n\ndef container_instance_arn(cluster, instance_id):\n  \"\"\"Turn an instance ID into a container instance ARN.\"\"\"\n  arns = ecs.list_container_instances(cluster=cluster, filter='ec2InstanceId==' + instance_id)['containerInstanceArns']\n  if not arns:\n    return None\n  return arns[0]\n\ndef container_instance_task_arns(cluster, instance_arn):\n  \"\"\"Fetch tasks for a container instance ARN.\"\"\"\n  arns = ecs.list_tasks(cluster=cluster, containerInstance=instance_arn)['taskArns']\n  return arns\n\ndef has_tasks(cluster, instance_arn, task_arns):\n  \"\"\"Return True if the instance is running tasks for the given cluster.\"\"\"\n  instances = ecs.describe_container_instances(cluster=cluster, containerInstances=[instance_arn])['containerInstances']\n  if not instances:\n    return False\n  instance = instances[0]\n\n  if instance['status'] == 'ACTIVE':\n    # Start draining, then try again later\n    set_container_instance_to_draining(cluster, instance_arn)\n    return True\n\n  task_count = None\n\n  if task_arns:\n    # Fetch details for tasks running on the container instance\n    tasks = ecs.describe_tasks(cluster=cluster, tasks=task_arns)['tasks']\n    if tasks:\n      # Consider any non-stopped tasks as running\n      task_count = sum(task['lastStatus'] != 'STOPPED' for task in tasks) + instance['pendingTasksCount']\n\n  if not task_count:\n    # Fallback to instance task counts if detailed task information is unavailable\n    task_count = instance['runningTasksCount'] + instance['pendingTasksCount']\n\n  print('Instance %s has %s tasks' % (instance_arn, task_count))\n\n  return task_count > 0\n\ndef set_container_instance_to_draining(cluster, instance_arn):\n  ecs.update_container_instances_state(\n      cluster=cluster,\n      containerInstances=[instance_arn], status='DRAINING')\n\n\ndef pick(dct, *keys):\n  \"\"\"Pick a subset of a dict.\"\"\"\n  return {k: v for k, v in dct.items() if k in keys}\n"
+        },
+        "Environment": {
+          "Variables": {
+            "CLUSTER": {
+              "Ref": "EcsClusterFB9B21B5"
+            }
+          }
+        },
+        "Handler": "index.lambda_handler",
+        "Role": {
+          "Fn::GetAtt": [
+            "EcsClusterAutoScalingGroupDrainECSHookFunctionServiceRoleE7C36BAD",
+            "Arn"
+          ]
+        },
+        "Runtime": "python3.13",
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Infrastructure"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Name",
+            "Value": "development-asg"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringInfra"
+          }
+        ],
+        "Timeout": 310
+      },
+      "DependsOn": [
+        "EcsClusterAutoScalingGroupDrainECSHookFunctionServiceRoleDefaultPolicyE4ECEC82",
+        "EcsClusterAutoScalingGroupDrainECSHookFunctionServiceRoleE7C36BAD"
+      ]
+    },
+    "EcsClusterAutoScalingGroupDrainECSHookFunctionAllowInvokeTestInfraStackEcsClusterAutoScalingGroupLifecycleHookDrainHookTopic962EC474CA594577": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "EcsClusterAutoScalingGroupDrainECSHookFunction00A2F700",
+            "Arn"
+          ]
+        },
+        "Principal": "sns.amazonaws.com",
+        "SourceArn": {
+          "Ref": "EcsClusterAutoScalingGroupLifecycleHookDrainHookTopic6D5F7C40"
+        }
+      }
+    },
+    "EcsClusterAutoScalingGroupDrainECSHookFunctionTopicAA4A1961": {
+      "Type": "AWS::SNS::Subscription",
+      "Properties": {
+        "Endpoint": {
+          "Fn::GetAtt": [
+            "EcsClusterAutoScalingGroupDrainECSHookFunction00A2F700",
+            "Arn"
+          ]
+        },
+        "Protocol": "lambda",
+        "TopicArn": {
+          "Ref": "EcsClusterAutoScalingGroupLifecycleHookDrainHookTopic6D5F7C40"
+        }
+      }
+    },
+    "EcsClusterAutoScalingGroupLifecycleHookDrainHookTopic6D5F7C40": {
+      "Type": "AWS::SNS::Topic",
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Infrastructure"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Name",
+            "Value": "development-asg"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringInfra"
+          }
+        ]
+      }
+    },
+    "EcsClusterAutoScalingGroupLifecycleHookDrainHookRole10E1A7EA": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "autoscaling.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Infrastructure"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Name",
+            "Value": "development-asg"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringInfra"
+          }
+        ]
+      }
+    },
+    "EcsClusterAutoScalingGroupLifecycleHookDrainHookRoleDefaultPolicy8C7706FE": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "EcsClusterAutoScalingGroupLifecycleHookDrainHookTopic6D5F7C40"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "PolicyName": "EcsClusterAutoScalingGroupLifecycleHookDrainHookRoleDefaultPolicy8C7706FE",
+        "Roles": [
+          {
+            "Ref": "EcsClusterAutoScalingGroupLifecycleHookDrainHookRole10E1A7EA"
+          }
+        ]
+      }
+    },
+    "EcsClusterAutoScalingGroupLifecycleHookDrainHook8D8B72B7": {
+      "Type": "AWS::AutoScaling::LifecycleHook",
+      "Properties": {
+        "AutoScalingGroupName": {
+          "Ref": "EcsClusterAutoScalingGroupASGB16C0B67"
+        },
+        "DefaultResult": "CONTINUE",
+        "HeartbeatTimeout": 300,
+        "LifecycleTransition": "autoscaling:EC2_INSTANCE_TERMINATING",
+        "NotificationTargetARN": {
+          "Ref": "EcsClusterAutoScalingGroupLifecycleHookDrainHookTopic6D5F7C40"
+        },
+        "RoleARN": {
+          "Fn::GetAtt": [
+            "EcsClusterAutoScalingGroupLifecycleHookDrainHookRole10E1A7EA",
+            "Arn"
+          ]
+        }
+      },
+      "DependsOn": [
+        "EcsClusterAutoScalingGroupLifecycleHookDrainHookRoleDefaultPolicy8C7706FE",
+        "EcsClusterAutoScalingGroupLifecycleHookDrainHookRole10E1A7EA"
+      ]
+    },
+    "EcsClusterCapacityProvider64AC1BA5": {
+      "Type": "AWS::ECS::CapacityProvider",
+      "Properties": {
+        "AutoScalingGroupProvider": {
+          "AutoScalingGroupArn": {
+            "Ref": "EcsClusterAutoScalingGroupASGB16C0B67"
+          },
+          "ManagedScaling": {
+            "Status": "ENABLED",
+            "TargetCapacity": 100
+          },
+          "ManagedTerminationProtection": "DISABLED"
+        },
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Infrastructure"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringInfra"
+          }
+        ]
+      }
+    },
+    "SsmStateManagerContainerLogsF0DFAB11": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/ecs/monitoring-containers",
+        "RetentionInDays": 14,
+        "Tags": [
+          {
+            "Key": "Component",
+            "Value": "SSMStateManager"
+          },
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Infrastructure"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringInfra"
+          }
+        ]
+      },
+      "UpdateReplacePolicy": "Delete",
+      "DeletionPolicy": "Delete"
+    },
+    "SsmStateManagerEcsAgentLogs6E9523F2": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/ecs/monitoring-ecs-agent",
+        "RetentionInDays": 14,
+        "Tags": [
+          {
+            "Key": "Component",
+            "Value": "SSMStateManager"
+          },
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Infrastructure"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringInfra"
+          }
+        ]
+      },
+      "UpdateReplacePolicy": "Delete",
+      "DeletionPolicy": "Delete"
+    },
+    "SsmStateManagerEcsInitLogsC7228E82": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/ecs/monitoring-ecs-init",
+        "RetentionInDays": 14,
+        "Tags": [
+          {
+            "Key": "Component",
+            "Value": "SSMStateManager"
+          },
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Infrastructure"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringInfra"
+          }
+        ]
+      },
+      "UpdateReplacePolicy": "Delete",
+      "DeletionPolicy": "Delete"
+    },
+    "SsmStateManagerEfsMountAssociation4947EDD4": {
+      "Type": "AWS::SSM::Association",
+      "Properties": {
+        "AssociationName": "TestInfraStack-development-efs-mount",
+        "Name": "AWS-RunShellScript",
+        "Parameters": {
+          "commands": [
+            {
+              "Fn::Join": [
+                "",
+                [
+                  "#!/bin/bash\nset -e\n\necho \"=========================================\"\necho \"EFS Mount Configuration\"\necho \"=========================================\"\necho \"File System ID: ",
+                  {
+                    "Fn::ImportValue": "TestEfsStack:ExportsOutputRefEfsFileSystemEfsdevelopment4A26EAF9471ED0A2"
+                  },
+                  "\"\necho \"Mount Point: /mnt/efs\"\necho \"Region: eu-west-1\"\necho \"\"\n\n# Install EFS utilities if not present\nif ! command -v mount.efs &> /dev/null; then\n  echo \"Installing amazon-efs-utils...\"\n  yum install -y amazon-efs-utils\nfi\n\n# Create mount point directory\necho \"Creating mount point directory...\"\nmkdir -p /mnt/efs\n\n# Check if already mounted\nif mountpoint -q /mnt/efs; then\n  echo \"EFS already mounted at /mnt/efs\"\n  df -h /mnt/efs\n  exit 0\nfi\n\n# Add to /etc/fstab if not present\nFSTAB_ENTRY=\"",
+                  {
+                    "Fn::ImportValue": "TestEfsStack:ExportsOutputRefEfsFileSystemEfsdevelopment4A26EAF9471ED0A2"
+                  },
+                  ":/ /mnt/efs efs _netdev,tls,iam 0 0\"\nif ! grep -q \"",
+                  {
+                    "Fn::ImportValue": "TestEfsStack:ExportsOutputRefEfsFileSystemEfsdevelopment4A26EAF9471ED0A2"
+                  },
+                  "\" /etc/fstab; then\n  echo \"Adding EFS to /etc/fstab...\"\n  echo \"$FSTAB_ENTRY\" >> /etc/fstab\nfi\n\n# Mount the file system\necho \"Mounting EFS...\"\nmount -a -t efs\n\n# Verify mount\nif mountpoint -q /mnt/efs; then\n  echo \"✅ EFS successfully mounted at /mnt/efs\"\n  df -h /mnt/efs\nelse\n  echo \"❌ Failed to mount EFS at /mnt/efs\"\n  exit 1\nfi\n"
+                ]
+              ]
+            }
+          ]
+        },
+        "Targets": [
+          {
+            "Key": "tag:Environment",
+            "Values": [
+              "development"
+            ]
+          }
+        ]
+      }
+    },
+    "SsmStateManagerEfsInitAssociationF2A4D85E": {
+      "Type": "AWS::SSM::Association",
+      "Properties": {
+        "AssociationName": "TestInfraStack-development-efs-init",
+        "Name": "AWS-RunShellScript",
+        "Parameters": {
+          "commands": [
+            "#!/bin/bash\nset -e\n\necho \"=========================================\"\necho \"EFS Initialization\"\necho \"=========================================\"\necho \"Mount Point: /mnt/efs\"\necho \"Environment: development\"\necho \"Region: eu-west-1\"\necho \"\"\n\n# Wait for EFS to be mounted (max 60 seconds)\necho \"Waiting for EFS to be mounted...\"\nMAX_RETRIES=12\nRETRY_COUNT=0\nwhile [ $RETRY_COUNT -lt $MAX_RETRIES ]; do\n  if mountpoint -q /mnt/efs; then\n    echo \"✅ EFS is mounted at /mnt/efs\"\n    break\n  fi\n  \n  RETRY_COUNT=$((RETRY_COUNT + 1))\n  if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then\n    echo \"ERROR: EFS not mounted after $((MAX_RETRIES * 5)) seconds\"\n    exit 1\n  fi\n  \n  echo \"EFS not mounted yet, waiting... (attempt $RETRY_COUNT/$MAX_RETRIES)\"\n  sleep 5\ndone\n\necho \"Setting up EFS directory structure...\"\n\n# Create directory structure\nmkdir -p /mnt/efs/prometheus-data\nmkdir -p /mnt/efs/grafana-data/plugins\nmkdir -p /mnt/efs/grafana-data/logs\nmkdir -p /mnt/efs/grafana-data/csv\nmkdir -p /mnt/efs/grafana-data/png\nmkdir -p /mnt/efs/config/prometheus\nmkdir -p /mnt/efs/config/grafana/provisioning/datasources\nmkdir -p /mnt/efs/config/grafana/provisioning/dashboards\nmkdir -p /mnt/efs/config/grafana/dashboards\nmkdir -p /mnt/efs/config/alertmanager\n\necho \"Setting ownership and permissions...\"\n\n# Set ownership for Prometheus (UID 65534 = nobody)\nchown -R 65534:65534 /mnt/efs/prometheus-data /mnt/efs/config/prometheus\nchmod -R 755 /mnt/efs/prometheus-data /mnt/efs/config/prometheus\n\n# Set ownership for Grafana (UID 472, GID 0 = root group)\nchown -R 472:0 /mnt/efs/grafana-data /mnt/efs/config/grafana\nchmod -R 755 /mnt/efs/grafana-data /mnt/efs/config/grafana\n\n# Ensure Grafana can write to data directories\nchmod -R 777 /mnt/efs/grafana-data/plugins\nchmod -R 777 /mnt/efs/grafana-data/logs\nchmod -R 777 /mnt/efs/grafana-data/csv\nchmod -R 777 /mnt/efs/grafana-data/png\n\necho \"Downloading configuration files from SSM...\"\n\n# Download Prometheus config (YAML)\naws ssm get-parameter --region eu-west-1 --name \"/monitoring/development/prometheus-config-yaml\" --query \"Parameter.Value\" --output text > /mnt/efs/config/prometheus/prometheus.yml\n\n# Replace HOST_IP_PLACEHOLDER in Prometheus config with EC2 instance's private IP address\n# This is required because Prometheus (bridge networking) cannot access node-exporter (host networking) via localhost\n# Use IMDSv2 for metadata retrieval\nTOKEN=$(curl -s -X PUT \"http://169.254.169.254/latest/api/token\" -H \"X-aws-ec2-metadata-token-ttl-seconds: 300\" || true)\nif [ -z \"$TOKEN\" ]; then\n  echo \"ERROR: Failed to retrieve IMDSv2 token\"\n  exit 1\nfi\nPRIVATE_IP=$(curl -s -H \"X-aws-ec2-metadata-token: $TOKEN\" \"http://169.254.169.254/latest/meta-data/local-ipv4\" || true)\nif [ -z \"$PRIVATE_IP\" ]; then\n  echo \"ERROR: Failed to retrieve private IP from EC2 metadata service\"\n  exit 1\nfi\nsed -i \"s/HOST_IP_PLACEHOLDER/$PRIVATE_IP/g\" /mnt/efs/config/prometheus/prometheus.yml\necho \"Replaced HOST_IP_PLACEHOLDER with $PRIVATE_IP in Prometheus config\"\n\n# Download Grafana datasource config (YAML)\naws ssm get-parameter --region eu-west-1 --name \"/monitoring/development/grafana-datasource-config-yaml\" --query \"Parameter.Value\" --output text > /mnt/efs/config/grafana/provisioning/datasources/prometheus.yml\n\n# Replace HOST_IP_PLACEHOLDER in Grafana datasource config with EC2 instance's private IP address\n# This is required because Grafana (bridge networking) cannot access Prometheus via localhost\nsed -i \"s/HOST_IP_PLACEHOLDER/$PRIVATE_IP/g\" /mnt/efs/config/grafana/provisioning/datasources/prometheus.yml\necho \"Replaced HOST_IP_PLACEHOLDER with $PRIVATE_IP in Grafana datasource config\"\n\n# Download Grafana dashboard config (YAML)\naws ssm get-parameter --region eu-west-1 --name \"/monitoring/development/grafana-dashboard-config-yaml\" --query \"Parameter.Value\" --output text > /mnt/efs/config/grafana/provisioning/dashboards/dashboards.yml\n\n# Set proper ownership for config files\nchown 65534:65534 /mnt/efs/config/prometheus/prometheus.yml\nchown 472:0 /mnt/efs/config/grafana/provisioning/datasources/prometheus.yml\nchown 472:0 /mnt/efs/config/grafana/provisioning/dashboards/dashboards.yml\n\necho \"Verifying setup...\"\nls -lh /mnt/efs/config/prometheus/\nls -lh /mnt/efs/config/grafana/provisioning/datasources/\n\necho \"✅ EFS initialization completed successfully\"\n"
+          ]
+        },
+        "Targets": [
+          {
+            "Key": "tag:Environment",
+            "Values": [
+              "development"
+            ]
+          }
+        ]
+      },
+      "DependsOn": [
+        "SsmStateManagerEfsMountAssociation4947EDD4"
+      ]
+    },
+    "SsmStateManagerEcsConfigAssociation249C1CA3": {
+      "Type": "AWS::SSM::Association",
+      "Properties": {
+        "ApplyOnlyAtCronInterval": false,
+        "AssociationName": "TestInfraStack-development-ecs-agent-config",
+        "ComplianceSeverity": "HIGH",
+        "MaxConcurrency": "10",
+        "MaxErrors": "5",
+        "Name": "AWS-RunShellScript",
+        "Parameters": {
+          "commands": [
+            "#!/bin/bash\n# Don't use 'set -e' - we want to handle errors gracefully\nset -o pipefail\n\necho '========================================='\necho 'ECS Agent Configuration Script'\necho 'Timestamp:' $(date)\necho '========================================='\n\n# Configure ECS cluster (idempotent - safe to run multiple times)\necho ECS_CLUSTER=development-monitoring-monitoring-cluster >> /etc/ecs/ecs.config || echo 'WARNING: Failed to write ECS_CLUSTER'\necho ECS_ENABLE_CONTAINER_METADATA=true >> /etc/ecs/ecs.config || true\necho ECS_ENABLE_TASK_IAM_ROLE=true >> /etc/ecs/ecs.config || true\necho ECS_AWSVPC_BLOCK_IMDS=true >> /etc/ecs/ecs.config || true\ncat >> /etc/ecs/ecs.config << 'EOF' || true\nECS_AVAILABLE_LOGGING_DRIVERS=[\"json-file\",\"awslogs\"]\nEOF\n\n# Verify the config was written correctly\necho 'Verifying ECS config format...'\nif grep -q 'ECS_AVAILABLE_LOGGING_DRIVERS' /etc/ecs/ecs.config; then\n  echo '✓ ECS_AVAILABLE_LOGGING_DRIVERS found in config'\n  grep 'ECS_AVAILABLE_LOGGING_DRIVERS' /etc/ecs/ecs.config\nelse\n  echo 'WARNING: ECS_AVAILABLE_LOGGING_DRIVERS not found in config'\nfi\n\n# Ensure Docker is running (required for ECS agent on AL2023)\necho 'Ensuring Docker is running...'\nsystemctl enable docker 2>&1 || echo 'WARNING: Failed to enable Docker'\nsystemctl start docker 2>&1 || echo 'WARNING: Failed to start Docker'\n\n# Wait for Docker to be ready\necho 'Waiting for Docker to be ready...'\nDOCKER_RETRY=0\nDOCKER_MAX_RETRIES=24\nDOCKER_READY=false\nwhile [ $DOCKER_RETRY -lt $DOCKER_MAX_RETRIES ]; do\n  if systemctl is-active docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then\n    echo 'Docker is ready'\n    DOCKER_READY=true\n    break\n  fi\n  DOCKER_RETRY=$((DOCKER_RETRY + 1))\n  echo \"Waiting for Docker (attempt $DOCKER_RETRY/$DOCKER_MAX_RETRIES)...\"\n  systemctl start docker >/dev/null 2>&1 || true\n  sleep 5\ndone\n\nif [ \"$DOCKER_READY\" != \"true\" ]; then\n  echo 'WARNING: Docker not ready after $DOCKER_MAX_RETRIES attempts, continuing anyway'\nfi\n\n# Pre-pull ECS agent Docker image\necho 'Pre-pulling ECS agent Docker image...'\nECS_AGENT_IMAGE=\"public.ecr.aws/ecs/amazon-ecs-agent:latest\"\nECS_AGENT_LEGACY_TAG=\"amazon/amazon-ecs-agent:latest\"\nif command -v docker >/dev/null 2>&1; then\n  if docker info >/dev/null 2>&1; then\n    echo \"Pulling ECS agent image: $ECS_AGENT_IMAGE\"\n    docker pull $ECS_AGENT_IMAGE 2>&1 || echo 'WARNING: Failed to pull ECS agent image'\n    if docker images | grep -q amazon-ecs-agent; then\n      echo \"Creating legacy tag alias: $ECS_AGENT_LEGACY_TAG\"\n      docker tag $ECS_AGENT_IMAGE $ECS_AGENT_LEGACY_TAG 2>&1 || echo 'WARNING: Failed to create legacy tag'\n    fi\n  else\n    echo 'WARNING: Docker daemon not accessible, skipping image pull'\n  fi\nelse\n  echo 'WARNING: Docker command not found'\nfi\n\n# Configure ECS agent service with retry logic (idempotent)\necho 'Configuring ECS agent service...'\nmkdir -p /etc/systemd/system/ecs.service.d\ncat > /etc/systemd/system/ecs.service.d/override.conf << 'EOF' || echo 'WARNING: Failed to create override.conf'\n[Service]\nRestart=on-failure\nRestartSec=30\nStartLimitInterval=600\nStartLimitBurst=20\nEOF\nsystemctl daemon-reload || echo 'WARNING: Failed to reload systemd'\n\n# Start/Restart ECS agent to pick up new logging drivers config\necho 'Starting/Restarting ECS agent to apply logging drivers config...'\nsystemctl enable ecs 2>&1 || echo 'WARNING: Failed to enable ECS service'\nsystemctl reset-failed ecs 2>&1 || true\n\n# Restart ECS agent if already running to pick up config changes\nif systemctl is-active ecs >/dev/null 2>&1; then\n  echo 'ECS agent is running, restarting to apply new logging drivers config...'\n  systemctl restart ecs 2>&1 || echo 'WARNING: Failed to restart ECS service'\nelse\n  echo 'ECS agent not running, starting...'\nfi\n\n# Start ECS agent with retries\nECS_START_RETRY=0\nECS_START_MAX_RETRIES=6\nECS_STARTED=false\nwhile [ $ECS_START_RETRY -lt $ECS_START_MAX_RETRIES ]; do\n  if systemctl start ecs 2>&1; then\n    echo 'ECS service start command succeeded'\n    ECS_STARTED=true\n    break\n  fi\n  ECS_START_RETRY=$((ECS_START_RETRY + 1))\n  echo \"ECS start attempt $ECS_START_RETRY/$ECS_START_MAX_RETRIES failed, retrying...\"\n  systemctl reset-failed ecs 2>&1 || true\n  sleep 5\ndone\n\nif [ \"$ECS_STARTED\" != \"true\" ]; then\n  echo 'WARNING: Failed to start ECS service after $ECS_START_MAX_RETRIES attempts'\n  echo 'Checking if ECS agent is already running...'\nfi\n\n# Verify ECS agent is running\necho 'Verifying ECS agent is running...'\nRETRY_COUNT=0\nMAX_RETRIES=36\nAGENT_RUNNING=false\n\nwhile [ $RETRY_COUNT -lt $MAX_RETRIES ]; do\n  if pgrep -f 'ecs-agent' >/dev/null 2>&1; then\n    echo 'ECS agent process detected'\n    if [ -f /var/log/ecs/ecs-agent.log ]; then\n      AGENT_PID=$(pgrep -f 'ecs-agent' | head -1)\n      if [ -n \"$AGENT_PID\" ]; then\n        if [ -d \"/proc/$AGENT_PID\" ]; then\n          AGENT_START_TIME=$(stat -c %Y /proc/$AGENT_PID 2>/dev/null || echo 0)\n          CURRENT_TIME=$(date +%s)\n          AGENT_UPTIME=$((CURRENT_TIME - AGENT_START_TIME))\n          if [ $AGENT_UPTIME -ge 10 ]; then\n            echo 'ECS agent is running and stable (uptime: ${AGENT_UPTIME}s)'\n            AGENT_RUNNING=true\n            break\n          else\n            echo \"ECS agent starting (uptime: ${AGENT_UPTIME}s), waiting for stabilization...\"\n          fi\n        else\n          echo 'ECS agent process is running'\n          AGENT_RUNNING=true\n          break\n        fi\n      fi\n    else\n      echo 'ECS agent process running but log file not found, waiting...'\n    fi\n  else\n    if [ $RETRY_COUNT -gt 0 ] && [ $((RETRY_COUNT % 6)) -eq 0 ]; then\n      echo 'Retrying ECS agent start...'\n      systemctl reset-failed ecs 2>&1 || true\n      systemctl start ecs 2>&1 || true\n    fi\n  fi\n\n  RETRY_COUNT=$((RETRY_COUNT + 1))\n  if [ $((RETRY_COUNT % 6)) -eq 0 ]; then\n    echo \"Still waiting for ECS agent (attempt $RETRY_COUNT/$MAX_RETRIES)...\"\n  fi\n  sleep 10\ndone\n\nif [ \"$AGENT_RUNNING\" = \"true\" ]; then\n  echo '========================================='\n  echo 'SUCCESS: ECS agent is running and stable'\n  echo '========================================='\n  exit 0\nelse\n  echo '========================================='\n  echo 'WARNING: ECS agent not confirmed running after $MAX_RETRIES attempts'\n  echo 'This may be normal if the agent is still starting or if IAM/network dependencies are pending.'\n  echo '========================================='\n  exit 0\nfi"
+          ]
+        },
+        "ScheduleExpression": "rate(30 days)",
+        "Targets": [
+          {
+            "Key": "tag:Environment",
+            "Values": [
+              "development"
+            ]
+          }
+        ]
+      },
+      "DependsOn": [
+        "SsmStateManagerEfsInitAssociationF2A4D85E"
+      ]
+    },
+    "SsmStateManagerCloudWatchAgentInstallAssociation98979D56": {
+      "Type": "AWS::SSM::Association",
+      "Properties": {
+        "ApplyOnlyAtCronInterval": false,
+        "AssociationName": "TestInfraStack-development-cloudwatch-agent-install",
+        "ComplianceSeverity": "HIGH",
+        "MaxConcurrency": "10",
+        "MaxErrors": "5",
+        "Name": "AWS-ConfigureAWSPackage",
+        "Parameters": {
+          "action": [
+            "Install"
+          ],
+          "name": [
+            "AmazonCloudWatchAgent"
+          ]
+        },
+        "ScheduleExpression": "rate(30 days)",
+        "Targets": [
+          {
+            "Key": "tag:Environment",
+            "Values": [
+              "development"
+            ]
+          }
+        ]
+      }
+    },
+    "SsmStateManagerCloudWatchAgentConfigDocument86AB44B4": {
+      "Type": "AWS::SSM::Document",
+      "Properties": {
+        "Content": {
+          "schemaVersion": "2.2",
+          "description": "Configure CloudWatch Agent for development environment",
+          "mainSteps": [
+            {
+              "action": "aws:runShellScript",
+              "name": "configureCloudWatchAgent",
+              "inputs": {
+                "runCommand": [
+                  "#!/bin/bash",
+                  "set -e",
+                  "",
+                  "echo '========================================='",
+                  "echo 'CloudWatch Agent Configuration'",
+                  "echo 'Timestamp:' $(date)",
+                  "echo '========================================='",
+                  "",
+                  "INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id || echo 'unknown')",
+                  "echo 'Instance ID:' $INSTANCE_ID",
+                  "",
+                  "# Wait for CloudWatch Agent to be installed",
+                  "# The installation association may still be running",
+                  "echo 'Checking if CloudWatch Agent is installed...'",
+                  "MAX_WAIT=300  # 5 minutes",
+                  "WAIT_INTERVAL=10",
+                  "ELAPSED=0",
+                  "",
+                  "while [ $ELAPSED -lt $MAX_WAIT ]; do",
+                  "  if [ -f /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl ]; then",
+                  "    echo '✅ CloudWatch Agent is installed'",
+                  "    break",
+                  "  fi",
+                  "  ",
+                  "  echo \"CloudWatch Agent not found yet, waiting... (${ELAPSED}s/${MAX_WAIT}s)\"",
+                  "  sleep $WAIT_INTERVAL",
+                  "  ELAPSED=$((ELAPSED + WAIT_INTERVAL))",
+                  "done",
+                  "",
+                  "# Verify installation",
+                  "if [ ! -f /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl ]; then",
+                  "  echo 'ERROR: CloudWatch Agent installation timed out'",
+                  "  echo 'The agent must be installed before configuration can proceed'",
+                  "  echo 'Check the CloudWatch Agent Install association status'",
+                  "  exit 1",
+                  "fi",
+                  "",
+                  "echo 'CloudWatch Agent found, proceeding with configuration...'",
+                  "",
+                  "# Create CloudWatch Agent configuration directory",
+                  "mkdir -p /opt/aws/amazon-cloudwatch-agent/etc",
+                  "",
+                  "# Write CloudWatch Agent configuration",
+                  "# Collects logs from Docker containers, ECS agent, and ECS init",
+                  "cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << 'CWAGENT_CONFIG_EOF'",
+                  "{",
+                  "  \"logs\": {",
+                  "    \"logs_collected\": {",
+                  "      \"files\": {",
+                  "        \"collect_list\": [",
+                  "          {",
+                  "            \"file_path\": \"/var/lib/docker/containers/*/*-json.log\",",
+                  {
+                    "Fn::Join": [
+                      "",
+                      [
+                        "            \"log_group_name\": \"",
+                        {
+                          "Ref": "SsmStateManagerContainerLogsF0DFAB11"
+                        },
+                        "\","
+                      ]
+                    ]
+                  },
+                  "            \"log_stream_name\": \"{instance_id}-{source_host}\",",
+                  "            \"timezone\": \"UTC\",",
+                  "            \"multi_line_start_pattern\": \"^\\\\{\\\"log\\\\\":\",",
+                  "            \"encoding\": \"utf-8\",",
+                  "            \"auto_removal\": false",
+                  "          },",
+                  "          {",
+                  "            \"file_path\": \"/var/log/ecs/ecs-agent.log\",",
+                  {
+                    "Fn::Join": [
+                      "",
+                      [
+                        "            \"log_group_name\": \"",
+                        {
+                          "Ref": "SsmStateManagerEcsAgentLogs6E9523F2"
+                        },
+                        "\","
+                      ]
+                    ]
+                  },
+                  "            \"log_stream_name\": \"{instance_id}\",",
+                  "            \"timezone\": \"UTC\",",
+                  "            \"encoding\": \"utf-8\"",
+                  "          },",
+                  "          {",
+                  "            \"file_path\": \"/var/log/ecs/ecs-init.log\",",
+                  {
+                    "Fn::Join": [
+                      "",
+                      [
+                        "            \"log_group_name\": \"",
+                        {
+                          "Ref": "SsmStateManagerEcsInitLogsC7228E82"
+                        },
+                        "\","
+                      ]
+                    ]
+                  },
+                  "            \"log_stream_name\": \"{instance_id}\",",
+                  "            \"timezone\": \"UTC\",",
+                  "            \"encoding\": \"utf-8\"",
+                  "          }",
+                  "        ]",
+                  "      }",
+                  "    }",
+                  "  }",
+                  "}",
+                  "CWAGENT_CONFIG_EOF",
+                  "",
+                  "echo 'CloudWatch Agent configuration written successfully'",
+                  "",
+                  "# Start CloudWatch Agent using the official control script",
+                  "# This is the recommended way to manage the CloudWatch Agent",
+                  "echo 'Starting CloudWatch Agent...'",
+                  "",
+                  "# Stop agent if it's already running",
+                  "/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \\",
+                  "  -a fetch-config \\",
+                  "  -m ec2 \\",
+                  "  -s \\",
+                  "  -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json",
+                  "",
+                  "# Verify agent is running",
+                  "sleep 3",
+                  "if /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \\",
+                  "  -a query -m ec2 -c default | grep -q '\"status\":\"running\"'; then",
+                  "  echo '✅ SUCCESS: CloudWatch Agent is running'",
+                  "  /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a query -m ec2 -c default",
+                  "else",
+                  "  echo '⚠️  WARNING: CloudWatch Agent may not be running properly'",
+                  "  /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a query -m ec2 -c default || true",
+                  "  echo 'Checking systemd service status...'",
+                  "  systemctl status amazon-cloudwatch-agent || true",
+                  "fi",
+                  "",
+                  "echo '========================================='",
+                  "echo 'CloudWatch Agent configuration complete'",
+                  "echo '========================================='"
+                ]
+              }
+            }
+          ]
+        },
+        "DocumentFormat": "YAML",
+        "DocumentType": "Command",
+        "Name": "TestInfraStack-development-cloudwatch-agent-config",
+        "Tags": [
+          {
+            "Key": "Component",
+            "Value": "SSMStateManager"
+          },
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Infrastructure"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringInfra"
+          }
+        ]
+      }
+    },
+    "SsmStateManagerCloudWatchAgentConfigAssociationB8E84103": {
+      "Type": "AWS::SSM::Association",
+      "Properties": {
+        "ApplyOnlyAtCronInterval": false,
+        "AssociationName": "TestInfraStack-development-cloudwatch-agent-config",
+        "ComplianceSeverity": "HIGH",
+        "MaxConcurrency": "10",
+        "MaxErrors": "5",
+        "Name": "TestInfraStack-development-cloudwatch-agent-config",
+        "ScheduleExpression": "rate(30 days)",
+        "Targets": [
+          {
+            "Key": "tag:Environment",
+            "Values": [
+              "development"
+            ]
+          }
+        ]
+      },
+      "DependsOn": [
+        "SsmStateManagerCloudWatchAgentConfigDocument86AB44B4",
+        "SsmStateManagerCloudWatchAgentInstallAssociation98979D56"
+      ]
+    },
+    "LoadBalancerSecurityGroupAA74F0EC": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Security group for development-monitoring-mon-alb application load balancer",
+        "GroupName": "development-monitoring-mon-alb-sg",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow outbound HTTPS for health checks and backend communication",
+            "FromPort": 443,
+            "IpProtocol": "tcp",
+            "ToPort": 443
+          },
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow outbound HTTP for health checks",
+            "FromPort": 80,
+            "IpProtocol": "tcp",
+            "ToPort": 80
+          },
+          {
+            "CidrIp": {
+              "Fn::ImportValue": "TestNetworkingStack:ExportsOutputFnGetAttVpcC3027511CidrBlockCD27B0C0"
+            },
+            "Description": "Allow outbound to ECS tasks on dynamic ports for health checks (bridge networking)",
+            "FromPort": 32768,
+            "IpProtocol": "tcp",
+            "ToPort": 65535
+          }
+        ],
+        "SecurityGroupIngress": [
+          {
+            "CidrIp": "10.0.0.0/8",
+            "Description": "Allow HTTP from 10.0.0.0/8",
+            "FromPort": 80,
+            "IpProtocol": "tcp",
+            "ToPort": 80
+          },
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow from anyone on port 80",
+            "FromPort": 80,
+            "IpProtocol": "tcp",
+            "ToPort": 80
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Infrastructure"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Name",
+            "Value": "development-monitoring-mon-alb-sg"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "ResourceType",
+            "Value": "SecurityGroup"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringInfra"
+          }
+        ],
+        "VpcId": {
+          "Fn::ImportValue": "TestNetworkingStack:ExportsOutputRefVpcC302751171D26A23"
+        }
+      },
+      "Metadata": {
+        "cdk_nag": {
+          "rules_to_suppress": [
+            {
+              "reason": "Application Load Balancer must accept traffic from the internet (0.0.0.0/0) to serve public-facing application. Security is enforced through: 1) ALB security group only allows HTTP/HTTPS, 2) Target security groups restrict access to ALB only, 3) WAF rules (if enabled), 4) Application-level authentication.",
+              "id": "AwsSolutions-EC23"
+            }
+          ]
+        }
+      }
+    },
+    "LoadBalancerALBDF7822E0": {
+      "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+      "Properties": {
+        "LoadBalancerAttributes": [
+          {
+            "Key": "deletion_protection.enabled",
+            "Value": "false"
+          },
+          {
+            "Key": "routing.http2.enabled",
+            "Value": "true"
+          },
+          {
+            "Key": "idle_timeout.timeout_seconds",
+            "Value": "60"
+          },
+          {
+            "Key": "routing.http.drop_invalid_header_fields.enabled",
+            "Value": "true"
+          },
+          {
+            "Key": "routing.http.desync_mitigation_mode",
+            "Value": "defensive"
+          }
+        ],
+        "Name": "development-monitoring-mon-alb",
+        "Scheme": "internet-facing",
+        "SecurityGroups": [
+          {
+            "Fn::GetAtt": [
+              "LoadBalancerSecurityGroupAA74F0EC",
+              "GroupId"
+            ]
+          }
+        ],
+        "Subnets": [
+          {
+            "Fn::ImportValue": "TestNetworkingStack:ExportsOutputRefVpcPublicSubnet1Subnet8E8DEDC0785EBA99"
+          },
+          {
+            "Fn::ImportValue": "TestNetworkingStack:ExportsOutputRefVpcPublicSubnet2SubnetA811849C19D90E96"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Infrastructure"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Name",
+            "Value": "development-monitoring-mon-alb"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "ResourceType",
+            "Value": "ApplicationLoadBalancer"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringInfra"
+          }
+        ],
+        "Type": "application"
+      }
+    },
+    "LoadBalancerALBHttpListenerCFA96AD3": {
+      "Type": "AWS::ElasticLoadBalancingV2::Listener",
+      "Properties": {
+        "DefaultActions": [
+          {
+            "FixedResponseConfig": {
+              "ContentType": "text/plain",
+              "MessageBody": "Not Found",
+              "StatusCode": "404"
+            },
+            "Type": "fixed-response"
+          }
+        ],
+        "LoadBalancerArn": {
+          "Ref": "LoadBalancerALBDF7822E0"
+        },
+        "Port": 80,
+        "Protocol": "HTTP"
+      }
+    },
+    "EcsEventRule94337D8C": {
+      "Type": "AWS::Events::Rule",
+      "Properties": {
+        "Description": "Capture ECS events for development monitoring",
+        "EventPattern": {
+          "source": [
+            "aws.ecs"
+          ],
+          "detail-type": [
+            "ECS Task State Change",
+            "ECS Container Instance State Change",
+            "ECS Service Action"
+          ],
+          "detail": {
+            "clusterArn": [
+              {
+                "Fn::GetAtt": [
+                  "EcsClusterFB9B21B5",
+                  "Arn"
+                ]
+              }
+            ]
+          }
+        },
+        "State": "ENABLED",
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Infrastructure"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringInfra"
+          }
+        ],
+        "Targets": [
+          {
+            "Arn": {
+              "Fn::Join": [
+                "",
+                [
+                  "arn:",
+                  {
+                    "Ref": "AWS::Partition"
+                  },
+                  ":logs:eu-west-1:123456789012:log-group:",
+                  {
+                    "Ref": "EventLogGroupD7F451ED"
+                  }
+                ]
+              ]
+            },
+            "Id": "Target0"
+          }
+        ]
+      }
+    },
+    "EventsLogGroupPolicyTestInfraStackEcsEventRuleAE1021E623C6827E": {
+      "Type": "Custom::CloudwatchLogResourcePolicy",
+      "Properties": {
+        "ServiceToken": {
+          "Fn::GetAtt": [
+            "AWS679f53fac002430cb0da5b7982bd22872D164C4C",
+            "Arn"
+          ]
+        },
+        "Create": {
+          "Fn::Join": [
+            "",
+            [
+              "{\"service\":\"CloudWatchLogs\",\"action\":\"putResourcePolicy\",\"parameters\":{\"policyName\":\"TestInfraStackEventsLogGroupPolicyTestInfraStackEcsEventRuleAE1021E677DB38C7\",\"policyDocument\":\"{\\\"Statement\\\":[{\\\"Action\\\":[\\\"logs:PutLogEvents\\\",\\\"logs:CreateLogStream\\\"],\\\"Effect\\\":\\\"Allow\\\",\\\"Principal\\\":{\\\"Service\\\":\\\"events.amazonaws.com\\\"},\\\"Resource\\\":\\\"",
+              {
+                "Fn::GetAtt": [
+                  "EventLogGroupD7F451ED",
+                  "Arn"
+                ]
+              },
+              "\\\"}],\\\"Version\\\":\\\"2012-10-17\\\"}\"},\"physicalResourceId\":{\"id\":\"EventsLogGroupPolicyTestInfraStackEcsEventRuleAE1021E6\"}}"
+            ]
+          ]
+        },
+        "Update": {
+          "Fn::Join": [
+            "",
+            [
+              "{\"service\":\"CloudWatchLogs\",\"action\":\"putResourcePolicy\",\"parameters\":{\"policyName\":\"TestInfraStackEventsLogGroupPolicyTestInfraStackEcsEventRuleAE1021E677DB38C7\",\"policyDocument\":\"{\\\"Statement\\\":[{\\\"Action\\\":[\\\"logs:PutLogEvents\\\",\\\"logs:CreateLogStream\\\"],\\\"Effect\\\":\\\"Allow\\\",\\\"Principal\\\":{\\\"Service\\\":\\\"events.amazonaws.com\\\"},\\\"Resource\\\":\\\"",
+              {
+                "Fn::GetAtt": [
+                  "EventLogGroupD7F451ED",
+                  "Arn"
+                ]
+              },
+              "\\\"}],\\\"Version\\\":\\\"2012-10-17\\\"}\"},\"physicalResourceId\":{\"id\":\"EventsLogGroupPolicyTestInfraStackEcsEventRuleAE1021E6\"}}"
+            ]
+          ]
+        },
+        "Delete": "{\"service\":\"CloudWatchLogs\",\"action\":\"deleteResourcePolicy\",\"parameters\":{\"policyName\":\"TestInfraStackEventsLogGroupPolicyTestInfraStackEcsEventRuleAE1021E677DB38C7\"},\"ignoreErrorCodesMatching\":\"ResourceNotFoundException\"}",
+        "InstallLatestAwsSdk": true
+      },
+      "DependsOn": [
+        "EventsLogGroupPolicyTestInfraStackEcsEventRuleAE1021E6CustomResourcePolicy3DC0BF2B"
+      ],
+      "UpdateReplacePolicy": "Delete",
+      "DeletionPolicy": "Delete"
+    },
+    "EventsLogGroupPolicyTestInfraStackEcsEventRuleAE1021E6CustomResourcePolicy3DC0BF2B": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "logs:PutResourcePolicy",
+              "Effect": "Allow",
+              "Resource": "*"
+            },
+            {
+              "Action": "logs:DeleteResourcePolicy",
+              "Effect": "Allow",
+              "Resource": "*"
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "PolicyName": "EventsLogGroupPolicyTestInfraStackEcsEventRuleAE1021E6CustomResourcePolicy3DC0BF2B",
+        "Roles": [
+          {
+            "Ref": "AWS679f53fac002430cb0da5b7982bd2287ServiceRoleC1EA0FF2"
+          }
+        ]
+      }
+    },
+    "AWS679f53fac002430cb0da5b7982bd2287ServiceRoleC1EA0FF2": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition"
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+              ]
+            ]
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Infrastructure"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringInfra"
+          }
+        ]
+      }
+    },
+    "AWS679f53fac002430cb0da5b7982bd22872D164C4C": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-eu-west-1",
+          "S3Key": "bc8ef58951f4c88e641dd23090e9d2e2e61c7530a07960e767522941e959b625.zip"
+        },
+        "Handler": "index.handler",
+        "Role": {
+          "Fn::GetAtt": [
+            "AWS679f53fac002430cb0da5b7982bd2287ServiceRoleC1EA0FF2",
+            "Arn"
+          ]
+        },
+        "Runtime": "nodejs22.x",
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Infrastructure"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringInfra"
+          }
+        ],
+        "Timeout": 120
+      },
+      "DependsOn": [
+        "AWS679f53fac002430cb0da5b7982bd2287ServiceRoleC1EA0FF2"
+      ]
+    },
+    "ParametersCustomParam070CFF361": {
+      "Type": "AWS::SSM::Parameter",
+      "Properties": {
+        "Description": "ECS cluster name for development monitoring",
+        "Name": "/monitoring/development/infra/config/cluster-name",
+        "Tags": {
+          "Component": "SSMParameters",
+          "Environment": "development",
+          "Layer": "Infrastructure",
+          "ManagedBy": "CDK",
+          "Project": "monitoring",
+          "StackName": "MonitoringInfra"
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": {
+          "Ref": "EcsClusterFB9B21B5"
+        }
+      }
+    },
+    "ParametersCustomParam16BB6DF6F": {
+      "Type": "AWS::SSM::Parameter",
+      "Properties": {
+        "Description": "ECS cluster ARN for development monitoring",
+        "Name": "/monitoring/development/infra/config/cluster-arn",
+        "Tags": {
+          "Component": "SSMParameters",
+          "Environment": "development",
+          "Layer": "Infrastructure",
+          "ManagedBy": "CDK",
+          "Project": "monitoring",
+          "StackName": "MonitoringInfra"
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "EcsClusterFB9B21B5",
+            "Arn"
+          ]
+        }
+      }
+    },
+    "ParametersCustomParam298A454C6": {
+      "Type": "AWS::SSM::Parameter",
+      "Properties": {
+        "Description": "ALB DNS for development monitoring",
+        "Name": "/monitoring/development/infra/config/alb-dns",
+        "Tags": {
+          "Component": "SSMParameters",
+          "Environment": "development",
+          "Layer": "Infrastructure",
+          "ManagedBy": "CDK",
+          "Project": "monitoring",
+          "StackName": "MonitoringInfra"
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "LoadBalancerALBDF7822E0",
+            "DNSName"
+          ]
+        }
+      }
+    },
+    "ParametersCustomParam337C26767": {
+      "Type": "AWS::SSM::Parameter",
+      "Properties": {
+        "Description": "ALB listener ARN for development monitoring",
+        "Name": "/monitoring/development/infra/config/listener-arn",
+        "Tags": {
+          "Component": "SSMParameters",
+          "Environment": "development",
+          "Layer": "Infrastructure",
+          "ManagedBy": "CDK",
+          "Project": "monitoring",
+          "StackName": "MonitoringInfra"
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": {
+          "Ref": "LoadBalancerALBHttpListenerCFA96AD3"
+        }
+      }
+    },
+    "ParametersCustomParam4B633FEDA": {
+      "Type": "AWS::SSM::Parameter",
+      "Properties": {
+        "Description": "Auto Scaling Group name for development monitoring",
+        "Name": "/monitoring/development/infra/config/asg-name",
+        "Tags": {
+          "Component": "SSMParameters",
+          "Environment": "development",
+          "Layer": "Infrastructure",
+          "ManagedBy": "CDK",
+          "Project": "monitoring",
+          "StackName": "MonitoringInfra"
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": {
+          "Ref": "EcsClusterAutoScalingGroupASGB16C0B67"
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "LaunchTemplateLaunchTemplateId5AD7653C": {
+      "Description": "Launch Template ID",
+      "Value": {
+        "Ref": "LaunchTemplate67909292"
+      },
+      "Export": {
+        "Name": "development-launch-template-id"
+      }
+    },
+    "HttpListenerArn": {
+      "Description": "HTTP Listener ARN",
+      "Value": {
+        "Ref": "LoadBalancerALBHttpListenerCFA96AD3"
+      },
+      "Export": {
+        "Name": "TestInfraStack-http-listener-arn"
+      }
+    },
+    "ParametersParameterCount6DC4838A": {
+      "Description": "Number of SSM parameters created for development",
+      "Value": "5"
+    },
+    "ParametersParameterPathPrefix4435E05D": {
+      "Description": "SSM parameter path prefix for development",
+      "Value": "/monitoring/development/infra",
+      "Export": {
+        "Name": "TestInfraStack-ssm-path-prefix"
+      }
+    },
+    "ClusterName": {
+      "Description": "ECS cluster name for development monitoring",
+      "Value": {
+        "Ref": "EcsClusterFB9B21B5"
+      }
+    },
+    "ClusterArn": {
+      "Description": "ECS cluster ARN for development monitoring",
+      "Value": {
+        "Fn::GetAtt": [
+          "EcsClusterFB9B21B5",
+          "Arn"
+        ]
+      }
+    },
+    "LoadBalancerDns": {
+      "Description": "ALB DNS name for monitoring services",
+      "Value": {
+        "Fn::GetAtt": [
+          "LoadBalancerALBDF7822E0",
+          "DNSName"
+        ]
+      }
+    },
+    "ListenerArn": {
+      "Description": "ALB listener ARN",
+      "Value": {
+        "Ref": "LoadBalancerALBHttpListenerCFA96AD3"
+      }
+    },
+    "MonitoringUrl": {
+      "Description": "Base URL for monitoring services",
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            "http://",
+            {
+              "Fn::GetAtt": [
+                "LoadBalancerALBDF7822E0",
+                "DNSName"
+              ]
+            }
+          ]
+        ]
+      }
+    },
+    "PrometheusUrl": {
+      "Description": "Prometheus URL",
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            "http://",
+            {
+              "Fn::GetAtt": [
+                "LoadBalancerALBDF7822E0",
+                "DNSName"
+              ]
+            },
+            "/prometheus"
+          ]
+        ]
+      }
+    },
+    "GrafanaUrl": {
+      "Description": "Grafana URL (default credentials: admin/admin)",
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            "http://",
+            {
+              "Fn::GetAtt": [
+                "LoadBalancerALBDF7822E0",
+                "DNSName"
+              ]
+            },
+            "/grafana"
+          ]
+        ]
+      }
+    },
+    "AutoScalingGroupName": {
+      "Description": "Auto Scaling Group name (check EC2 console to verify instances)",
+      "Value": {
+        "Ref": "EcsClusterAutoScalingGroupASGB16C0B67"
+      }
+    },
+    "TaskLogGroupName": {
+      "Description": "CloudWatch Log Group for ECS task logs",
+      "Value": {
+        "Ref": "TaskLogGroup933EA2D6"
+      }
+    },
+    "SsmParameterPrefix": {
+      "Description": "SSM Parameter Store path prefix for monitoring infrastructure",
+      "Value": "/monitoring/development/infra"
+    },
+    "ExportsOutputRefEcsClusterClusterLogGroupF10E9DBD3B0F8D26": {
+      "Value": {
+        "Ref": "EcsClusterClusterLogGroupF10E9DBD"
+      },
+      "Export": {
+        "Name": "TestInfraStack:ExportsOutputRefEcsClusterClusterLogGroupF10E9DBD3B0F8D26"
+      }
+    },
+    "ExportsOutputFnGetAttLoadBalancerALBDF7822E0DNSNameBFFB8EDC": {
+      "Value": {
+        "Fn::GetAtt": [
+          "LoadBalancerALBDF7822E0",
+          "DNSName"
+        ]
+      },
+      "Export": {
+        "Name": "TestInfraStack:ExportsOutputFnGetAttLoadBalancerALBDF7822E0DNSNameBFFB8EDC"
+      }
+    },
+    "ExportsOutputRefEcsClusterFB9B21B57CC29CC9": {
+      "Value": {
+        "Ref": "EcsClusterFB9B21B5"
+      },
+      "Export": {
+        "Name": "TestInfraStack:ExportsOutputRefEcsClusterFB9B21B57CC29CC9"
+      }
+    },
+    "ExportsOutputRefLoadBalancerALBHttpListenerCFA96AD3B481498E": {
+      "Value": {
+        "Ref": "LoadBalancerALBHttpListenerCFA96AD3"
+      },
+      "Export": {
+        "Name": "TestInfraStack:ExportsOutputRefLoadBalancerALBHttpListenerCFA96AD3B481498E"
+      }
+    }
+  },
+  "Parameters": {
+    "SsmParameterValueawsserviceecsoptimizedamiamazonlinux2023recommendedimageidC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Type": "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>",
+      "Default": "/aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id"
+    },
+    "BootstrapVersion": {
+      "Type": "AWS::SSM::Parameter::Value<String>",
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]"
+    }
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5"
+                  ],
+                  {
+                    "Ref": "BootstrapVersion"
+                  }
+                ]
+              }
+            ]
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI."
+        }
+      ]
+    }
+  }
+}

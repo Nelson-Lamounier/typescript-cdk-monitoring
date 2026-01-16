@@ -12,15 +12,15 @@ These tests validate security configurations across all stack layers to catch mi
 
 ### Test Files
 
-| File | Tests | Focus Area |
-|------|-------|------------|
-| `network-security.test.ts` | 11 | VPC, Security Groups, Network Isolation |
-| `instance-security.test.ts` | 11 | IMDSv2, EBS Encryption, User Data |
-| `storage-security.test.ts` | 9 | EFS Encryption, Access Controls, Lifecycle |
-| `iam-security.test.ts` | 12 | Least Privilege, Trust Relationships, Permissions |
-| `monitoring-logging.test.ts` | 13 | CloudWatch, VPC Flow Logs, Container Insights |
-| `application-security.test.ts` | 15 | ALB, Container Security, Secrets Management |
-| `compliance-governance.test.ts` | 14 | Tagging, Deletion Protection, Update Policies |
+| File                            | Tests | Focus Area                                        |
+| ------------------------------- | ----- | ------------------------------------------------- |
+| `network-security.test.ts`      | 11    | VPC, Security Groups, Network Isolation           |
+| `instance-security.test.ts`     | 11    | IMDSv2, EBS Encryption, User Data                 |
+| `storage-security.test.ts`      | 9     | EFS Encryption, Access Controls, Lifecycle        |
+| `iam-security.test.ts`          | 12    | Least Privilege, Trust Relationships, Permissions |
+| `monitoring-logging.test.ts`    | 13    | CloudWatch, VPC Flow Logs, Container Insights     |
+| `application-security.test.ts`  | 15    | ALB, Container Security, Secrets Management       |
+| `compliance-governance.test.ts` | 14    | Tagging, Deletion Protection, Update Policies     |
 
 **Total: 85 security tests across 7 domains**
 
@@ -65,6 +65,7 @@ npm test -- tests/integration/security/ --coverage
 **File**: `network-security.test.ts`
 
 **Validates**:
+
 - VPC DNS configuration
 - VPC Flow Logs (all traffic, retention)
 - Security group rules (no unrestricted SSH/RDP)
@@ -73,6 +74,7 @@ npm test -- tests/integration/security/ --coverage
 - Internet Gateway configuration
 
 **Key Tests**:
+
 - No security groups allow unrestricted SSH/RDP access
 - EFS only accessible from instance security group
 - VPC Flow Logs capture all traffic types
@@ -83,6 +85,7 @@ npm test -- tests/integration/security/ --coverage
 **File**: `instance-security.test.ts`
 
 **Validates**:
+
 - IMDSv2 enforcement on launch templates
 - IMDSv2 usage in SSM automation scripts
 - EBS volume encryption (at rest)
@@ -91,6 +94,7 @@ npm test -- tests/integration/security/ --coverage
 - Instance placement (private subnets)
 
 **Key Tests**:
+
 - Launch templates enforce IMDSv2 with `HttpTokens: required`
 - No IMDSv1 usage in automation scripts
 - EBS volumes encrypted with GP3 type
@@ -101,6 +105,7 @@ npm test -- tests/integration/security/ --coverage
 **File**: `storage-security.test.ts`
 
 **Validates**:
+
 - EFS encryption at rest
 - EFS access point POSIX permissions
 - EFS security group restrictions
@@ -108,6 +113,7 @@ npm test -- tests/integration/security/ --coverage
 - EFS deletion protection (production)
 
 **Key Tests**:
+
 - EFS encrypted with AWS managed keys
 - Access points enforce restrictive POSIX permissions (not 777)
 - NFS port (2049) only accessible from security groups (not CIDRs)
@@ -118,6 +124,7 @@ npm test -- tests/integration/security/ --coverage
 **File**: `iam-security.test.ts`
 
 **Validates**:
+
 - Least privilege principle adherence
 - No AdministratorAccess or PowerUserAccess policies
 - Role trust relationships (EC2, ECS, Lambda)
@@ -126,6 +133,7 @@ npm test -- tests/integration/security/ --coverage
 - No wildcard permissions on sensitive resources
 
 **Key Tests**:
+
 - Instance roles use AmazonSSMManagedInstanceCore
 - No roles have admin access
 - Write actions with wildcard resources are limited
@@ -136,6 +144,7 @@ npm test -- tests/integration/security/ --coverage
 **File**: `monitoring-logging.test.ts`
 
 **Validates**:
+
 - CloudWatch Logs retention and encryption
 - VPC Flow Logs configuration
 - Container Insights (production enabled, dev disabled)
@@ -144,6 +153,7 @@ npm test -- tests/integration/security/ --coverage
 - Log group deletion policies (production: Retain)
 
 **Key Tests**:
+
 - All log groups have retention configured
 - VPC Flow Logs capture all traffic types
 - Container Insights enabled only in production
@@ -154,6 +164,7 @@ npm test -- tests/integration/security/ --coverage
 **File**: `application-security.test.ts`
 
 **Validates**:
+
 - ALB security settings (drop invalid headers)
 - ALB deletion protection (production)
 - Target group health checks
@@ -162,6 +173,7 @@ npm test -- tests/integration/security/ --coverage
 - SSM State Manager security
 
 **Key Tests**:
+
 - ALB drops invalid header fields
 - Target groups have appropriate health check thresholds
 - No privileged containers
@@ -173,6 +185,7 @@ npm test -- tests/integration/security/ --coverage
 **File**: `compliance-governance.test.ts`
 
 **Validates**:
+
 - Resource tagging (Environment, Project)
 - Deletion protection policies (production)
 - Update policies (ASG rolling updates)
@@ -181,6 +194,7 @@ npm test -- tests/integration/security/ --coverage
 - Cost management (instance types, volume types)
 
 **Key Tests**:
+
 - ECS clusters have Environment and Project tags
 - Production resources have deletion protection
 - ASGs have rolling update policies configured
@@ -194,16 +208,15 @@ npm test -- tests/integration/security/ --coverage
 **File**: `test-fixtures.ts`
 
 Provides:
+
 - `createSecurityTestStacks()` - Creates complete stack hierarchy
 - `SecurityTestFixtures` - Singleton cache for stack reuse
 - `TEST_CONSTANTS` - Shared configuration values
 
 **Usage**:
+
 ```typescript
-import {
-  SecurityTestFixtures,
-  TEST_CONSTANTS,
-} from './test-fixtures';
+import { SecurityTestFixtures, TEST_CONSTANTS } from "./test-fixtures";
 
 let stacks = SecurityTestFixtures.getDevelopmentStacks();
 let prodStacks = SecurityTestFixtures.getProductionStacks();
@@ -214,12 +227,14 @@ let prodStacks = SecurityTestFixtures.getProductionStacks();
 ### Writing New Security Tests
 
 1. **Use Descriptive Test Names**
+
    ```typescript
    test("launch template enforces IMDSv2", () => { ... });
    // NOT: test("imds config", () => { ... });
    ```
 
 2. **Group Related Tests**
+
    ```typescript
    describe("EBS Encryption", () => {
      test("encryption at rest enabled", () => { ... });
@@ -228,6 +243,7 @@ let prodStacks = SecurityTestFixtures.getProductionStacks();
    ```
 
 3. **Test Both Positive and Negative Cases**
+
    ```typescript
    test("no security groups allow unrestricted SSH", () => {
      // Ensure misconfiguration is caught
@@ -235,6 +251,7 @@ let prodStacks = SecurityTestFixtures.getProductionStacks();
    ```
 
 4. **Use Environment-Specific Tests When Needed**
+
    ```typescript
    test("production has deletion protection enabled", () => {
      const prodStacks = SecurityTestFixtures.getProductionStacks();
@@ -299,15 +316,19 @@ Object.entries(rules).forEach(([_logicalId, resource]) => {
 ### Test Failures
 
 1. **Stack Synthesis Errors**
+
    ```
    Error: Stack failed to synthesise
    ```
+
    **Solution**: Check `test-fixtures.ts` for correct stack configuration
 
 2. **Resource Not Found**
+
    ```
    Error: Template has 0 AWS::Resource::Type, expected at least 1
    ```
+
    **Solution**: Verify the resource exists in the correct stack layer
 
 3. **Property Mismatch**
@@ -319,6 +340,7 @@ Object.entries(rules).forEach(([_logicalId, resource]) => {
 ### Performance Issues
 
 If tests are slow:
+
 1. Use cached fixtures (`SecurityTestFixtures`)
 2. Run specific test files instead of entire suite
 3. Use `--maxWorkers=1` to reduce memory usage
@@ -343,7 +365,7 @@ console.log(JSON.stringify(securityGroups, null, 2));
 - name: Run Security Tests
   run: |
     npm test -- tests/integration/security/ --coverage
-    
+
 - name: Upload Security Test Results
   if: always()
   uses: actions/upload-artifact@v4
@@ -374,6 +396,7 @@ console.log(JSON.stringify(securityGroups, null, 2));
 ## Contributing
 
 When adding new security tests:
+
 1. Choose the appropriate domain file
 2. Follow existing test patterns
 3. Add test description to this README
