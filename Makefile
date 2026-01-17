@@ -464,7 +464,26 @@ test-constructs-vpc-flow-logs: test-constructs-vpc-flow-logs-creation test-const
 test-constructs-networking: test-constructs-alb-listener test-constructs-alb-target-group test-constructs-security-group test-constructs-vpc-flow-logs test-constructs-vpc-peering ## Run all networking construct tests
 	@echo "$(GREEN)All networking construct tests completed$(NC)"
 
-test-constructs: test-constructs-ecs test-constructs-networking ## Run all construct tests
+test-constructs-grafana-creation: ## Run Grafana creation tests
+	@echo "$(BLUE)Running Grafana creation tests...$(NC)"
+	yarn test tests/unit/constructs/services/monitoring/grafana/grafana-construct.creation.test.ts
+
+test-constructs-grafana-launch-type: ## Run Grafana launch type tests
+	@echo "$(BLUE)Running Grafana launch type tests...$(NC)"
+	yarn test tests/unit/constructs/services/monitoring/grafana/grafana-construct.launch-type.test.ts
+
+test-constructs-grafana-service: ## Run Grafana service configuration tests
+	@echo "$(BLUE)Running Grafana service configuration tests...$(NC)"
+	yarn test tests/unit/constructs/services/monitoring/grafana/grafana-construct.service.test.ts
+
+test-constructs-grafana-datasource: ## Run Grafana datasource tests
+	@echo "$(BLUE)Running Grafana datasource tests...$(NC)"
+	yarn test tests/unit/constructs/services/monitoring/grafana/grafana-construct.datasource.test.ts
+
+test-constructs-grafana: test-constructs-grafana-creation test-constructs-grafana-launch-type test-constructs-grafana-service test-constructs-grafana-datasource ## Run all Grafana construct tests
+	@echo "$(GREEN)All Grafana construct tests completed$(NC)"
+
+test-constructs: test-constructs-ecs test-constructs-networking test-constructs-grafana ## Run all construct tests
 	@echo "$(GREEN)All construct tests completed$(NC)"
 
 # ============================================================================
