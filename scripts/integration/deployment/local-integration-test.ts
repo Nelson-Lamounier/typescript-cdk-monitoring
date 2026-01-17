@@ -44,7 +44,7 @@ import {
   PRODUCTION_INTEGRATION_CONFIG,
   IntegrationTestHelpers,
   IntegrationTestConfig,
-} from "../../tests/integration/setup";
+} from "../../../tests/unit/setup";
 
 // ============================================================================
 // CLI ARGUMENT PARSING

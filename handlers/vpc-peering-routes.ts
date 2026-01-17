@@ -131,12 +131,20 @@ async function updatePeerRoutes(
     throw new Error("Failed to assume role in peer account");
   }
 
+  if (
+    !assumeRoleResponse.Credentials?.AccessKeyId ||
+    !assumeRoleResponse.Credentials?.SecretAccessKey ||
+    !assumeRoleResponse.Credentials?.SessionToken
+  ) {
+    throw new Error("Failed to get credentials from assumed role");
+  }
+
   const peerEc2Client = new EC2Client({
     region: Region || process.env.AWS_REGION || "us-east-1",
     credentials: {
-      accessKeyId: assumeRoleResponse.Credentials.AccessKeyId!,
-      secretAccessKey: assumeRoleResponse.Credentials.SecretAccessKey!,
-      sessionToken: assumeRoleResponse.Credentials.SessionToken!,
+      accessKeyId: assumeRoleResponse.Credentials.AccessKeyId,
+      secretAccessKey: assumeRoleResponse.Credentials.SecretAccessKey,
+      sessionToken: assumeRoleResponse.Credentials.SessionToken,
     },
   });
 
@@ -253,12 +261,17 @@ async function deletePeerRoutes(
       throw new Error("Failed to assume role in peer account");
     }
 
+    const credentials = assumeRoleResponse.Credentials;
+    if (!credentials.AccessKeyId || !credentials.SecretAccessKey || !credentials.SessionToken) {
+      throw new Error("Failed to get credentials from assumed role");
+    }
+
     const peerEc2Client = new EC2Client({
       region: Region || process.env.AWS_REGION || "us-east-1",
       credentials: {
-        accessKeyId: assumeRoleResponse.Credentials.AccessKeyId!,
-        secretAccessKey: assumeRoleResponse.Credentials.SecretAccessKey!,
-        sessionToken: assumeRoleResponse.Credentials.SessionToken!,
+        accessKeyId: credentials.AccessKeyId,
+        secretAccessKey: credentials.SecretAccessKey,
+        sessionToken: credentials.SessionToken,
       },
     });
 

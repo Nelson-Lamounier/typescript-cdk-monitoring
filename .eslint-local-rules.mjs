@@ -1,3 +1,4 @@
+
 /** @format */
 
 export default {
@@ -17,38 +18,73 @@ export default {
         },
       },
       create(context) {
-        let inDescribe = false;
-        let inTest = false;
-        let inHook = false;
+        let describeDepth = 0;
+        let testDepth = 0;
+        let hookDepth = 0;
+
+        const isDescribe = (node) => {
+          const name = node.callee.name;
+          const objectName = node.callee.object?.name;
+          return name === "describe" || objectName === "describe";
+        };
+
+        const isTest = (node) => {
+          const name = node.callee.name;
+          const objectName = node.callee.object?.name;
+          return (
+            ["it", "test"].includes(name) ||
+            ["it", "test"].includes(objectName)
+          );
+        };
+
+        const isHook = (node) => {
+          const name = node.callee.name;
+          return ["beforeAll", "beforeEach", "afterAll", "afterEach"].includes(
+            name
+          );
+        };
+
+        const isInHelperFunction = (node) => {
+          let parent = node.parent;
+          while (parent) {
+            if (
+              parent.type === "ArrowFunctionExpression" ||
+              parent.type === "FunctionExpression" ||
+              parent.type === "FunctionDeclaration"
+            ) {
+              const params = parent.params || [];
+              if (
+                params.some(
+                  (param) =>
+                    (param.type === "Identifier" &&
+                      param.name === "template") ||
+                    (param.type === "ObjectPattern" &&
+                      param.properties.some(
+                        (prop) =>
+                          prop.type === "Property" &&
+                          prop.key.type === "Identifier" &&
+                          prop.key.name === "template"
+                      ))
+                )
+              ) {
+                return true;
+              }
+            }
+            parent = parent.parent;
+          }
+          return false;
+        };
 
         return {
           CallExpression(node) {
-            // Track when we're inside describe
-            if (node.callee.name === "describe") {
-              inDescribe = true;
-            }
+            if (isDescribe(node)) describeDepth++;
+            if (isTest(node)) testDepth++;
+            if (isHook(node)) hookDepth++;
 
-            // Track when we're inside it/test
-            if (node.callee.name === "it" || node.callee.name === "test") {
-              inTest = true;
-            }
-
-            // Track when we're inside hooks
-            if (
-              ["beforeAll", "beforeEach", "afterAll", "afterEach"].includes(
-                node.callee.name
-              )
-            ) {
-              inHook = true;
-            }
-
-            // Check for template access
-            if (inDescribe && !inTest && !inHook) {
+            if (describeDepth > 0 && testDepth === 0 && hookDepth === 0) {
               if (
-                node.callee.object?.name === "template" ||
-                node.arguments.some(
-                  (arg) => arg.type === "Identifier" && arg.name === "template"
-                )
+                node.callee.object?.name === "template" &&
+                !isInHelperFunction(node)
               ) {
                 context.report({
                   node,
@@ -59,19 +95,9 @@ export default {
           },
 
           "CallExpression:exit"(node) {
-            if (node.callee.name === "describe") {
-              inDescribe = false;
-            }
-            if (node.callee.name === "it" || node.callee.name === "test") {
-              inTest = false;
-            }
-            if (
-              ["beforeAll", "beforeEach", "afterAll", "afterEach"].includes(
-                node.callee.name
-              )
-            ) {
-              inHook = false;
-            }
+            if (isDescribe(node)) describeDepth--;
+            if (isTest(node)) testDepth--;
+            if (isHook(node)) hookDepth--;
           },
         };
       },
@@ -92,20 +118,31 @@ export default {
         },
       },
       create(context) {
-        let inDescribe = 0;
-        let inTest = 0;
+        let describeDepth = 0;
+        let testDepth = 0;
+
+        const isDescribe = (node) => {
+          const name = node.callee.name;
+          const objectName = node.callee.object?.name;
+          return name === "describe" || objectName === "describe";
+        };
+
+        const isTest = (node) => {
+          const name = node.callee.name;
+          const objectName = node.callee.object?.name;
+          return (
+            ["it", "test"].includes(name) ||
+            ["it", "test"].includes(objectName)
+          );
+        };
 
         return {
           CallExpression(node) {
-            if (node.callee.name === "describe") {
-              inDescribe++;
-            }
-            if (node.callee.name === "it" || node.callee.name === "test") {
-              inTest++;
-            }
+            if (isDescribe(node)) describeDepth++;
+            if (isTest(node)) testDepth++;
 
             // Check for IIFE pattern: (function() {})() or (() => {})()
-            if (inDescribe > inTest) {
+            if (describeDepth > testDepth) {
               if (
                 node.callee.type === "FunctionExpression" ||
                 node.callee.type === "ArrowFunctionExpression"
@@ -119,12 +156,8 @@ export default {
           },
 
           "CallExpression:exit"(node) {
-            if (node.callee.name === "describe") {
-              inDescribe--;
-            }
-            if (node.callee.name === "it" || node.callee.name === "test") {
-              inTest--;
-            }
+            if (isDescribe(node)) describeDepth--;
+            if (isTest(node)) testDepth--;
           },
         };
       },
