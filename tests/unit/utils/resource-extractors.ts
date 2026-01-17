@@ -7,7 +7,8 @@
  * Used across security and infrastructure test files
  */
 
-import { getResourceProperties, stringifyResource } from "./template-helpers";
+import { Template } from "aws-cdk-lib/assertions";
+import { getResourceProperties, stringifyResource, getResources } from "./template-helpers";
 import type {
   AlbAttribute,
   TargetGroupAttribute,
@@ -21,6 +22,15 @@ import type {
   ResourceTag,
   SsmTarget,
 } from "./types";
+// Networking types from test-types
+import type {
+  SubnetProperties,
+  RouteProperties,
+  SubnetsByType,
+  RoutesByType,
+  AvailabilityZoneInfo,
+  ResourceWithProperties,
+} from "../types/test-types";
 
 // =============================================================================
 // ALB (Application Load Balancer) Extractors
@@ -458,6 +468,9 @@ export const getIngressRules = (
   sg: unknown
 ): Array<Record<string, unknown>> => {
   const properties = getSecurityGroupProperties(sg);
+  if (!properties || typeof properties !== "object") {
+    return [];
+  }
   return (properties.SecurityGroupIngress || []) as Array<
     Record<string, unknown>
   >;
@@ -545,4 +558,100 @@ export const getSsmParameterProperties = (
   parameter: unknown
 ): Record<string, string> => {
   return getResourceProperties<Record<string, string>>(parameter);
+};
+
+// =============================================================================
+// Networking Extractors
+// =============================================================================
+
+/**
+ * Extract subnets categorised by type (public/private/isolated)
+ */
+export const getSubnetsByType = (template: Template): SubnetsByType => {
+  const subnets = template.findResources("AWS::EC2::Subnet");
+  const publicSubnets: SubnetProperties[] = [];
+  const privateSubnets: SubnetProperties[] = [];
+  const isolatedSubnets: SubnetProperties[] = [];
+
+  Object.values(subnets).forEach((subnet) => {
+    const props = subnet.Properties as SubnetProperties;
+    const tags = props.Tags || [];
+    const subnetTypeTag = tags.find(
+      (tag: ResourceTag) => tag.Key === "aws-cdk:subnet-type"
+    );
+    const subnetType = subnetTypeTag?.Value;
+
+    switch (subnetType) {
+      case "Public":
+        publicSubnets.push(props);
+        break;
+      case "Private":
+        privateSubnets.push(props);
+        break;
+      case "Isolated":
+        isolatedSubnets.push(props);
+        break;
+    }
+  });
+
+  return { publicSubnets, privateSubnets, isolatedSubnets };
+};
+
+/**
+ * Get routes categorised by type (IGW/NAT/local/other)
+ */
+export const getRoutesByType = (template: Template): RoutesByType => {
+  const routes = template.findResources("AWS::EC2::Route");
+  const igwRoutes: RouteProperties[] = [];
+  const natRoutes: RouteProperties[] = [];
+  const localRoutes: RouteProperties[] = [];
+  const otherRoutes: RouteProperties[] = [];
+
+  Object.values(routes).forEach((route) => {
+    const props = route.Properties as RouteProperties;
+
+    if (props.DestinationCidrBlock === "0.0.0.0/0") {
+      if (props.GatewayId) {
+        igwRoutes.push(props);
+      } else if (props.NatGatewayId) {
+        natRoutes.push(props);
+      }
+    } else {
+      otherRoutes.push(props);
+    }
+  });
+
+  return { igwRoutes, natRoutes, localRoutes, otherRoutes };
+};
+
+/**
+ * Get availability zones from subnets
+ */
+export const getAvailabilityZones = (template: Template): AvailabilityZoneInfo => {
+  const subnets = template.findResources("AWS::EC2::Subnet");
+  const azSet = new Set<string>();
+
+  Object.values(subnets).forEach((subnet) => {
+    const az = (subnet.Properties as SubnetProperties).AvailabilityZone;
+    if (az && typeof az === "string") {
+      azSet.add(az);
+    }
+  });
+
+  const zones = Array.from(azSet);
+  return {
+    zones,
+    count: zones.length,
+  };
+};
+
+/**
+ * Check if resource has required tags
+ */
+export const hasRequiredTags = (
+  resource: ResourceWithProperties,
+  requiredTags: string[]
+): boolean => {
+  const tags = (resource.Properties.Tags || []) as ResourceTag[];
+  return requiredTags.every((tagKey) => tags.some((tag) => tag.Key === tagKey));
 };

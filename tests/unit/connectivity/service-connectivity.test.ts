@@ -21,11 +21,28 @@
 import { Template, Match } from "aws-cdk-lib/assertions";
 
 import { createConnectivityTestStacks } from "../utils/test-utils";
+import {
+  getResources,
+  getResourceProperties,
+  getContainersFromTaskDef,
+  getTaskDefNetworkMode,
+  getSecurityGroupIngressRules,
+  getIngressRules,
+  validateResourceProperties,
+  isInRange,
+  isValidNetworkMode,
+  isNfsPortRule,
+  isUnrestrictedAccess,
+} from "../utils";
+import type { ContainerDefinition } from "../utils";
 
 import {
   ConnectivityTestStacks,
   RESOURCE_TYPES,
   PORT_CONFIG,
+  STORAGE_TEST_STACKS,
+  IAM_TEST_STACKS,
+  INSTANCE_TEST_STACKS,
 } from "./test-config";
 
 // ============================================================================
@@ -39,10 +56,6 @@ describe("Integration: Service Connectivity Tests", () => {
     stacks = createConnectivityTestStacks();
   });
 
-  // ==========================================================================
-  // HELPER FUNCTIONS (defined as arrow functions)
-  // ==========================================================================
-
   /**
    * Get template from stack name
    */
@@ -54,188 +67,14 @@ describe("Integration: Service Connectivity Tests", () => {
   };
 
   /**
-   * Validate resource has required properties
-   */
-  const validateResourceProperties = (
-    resource: unknown,
-    requiredProps: string[]
-  ) => {
-    const properties = (resource as Record<string, Record<string, unknown>>)
-      .Properties;
-
-    requiredProps.forEach((prop) => {
-      expect(properties[prop]).toBeDefined();
-    });
-  };
-
-  /**
-   * Find container by name in task definition
-   */
-  const findContainerInTaskDef = (
-    taskDef: unknown,
-    containerNamePattern: string
-  ): Record<string, unknown> | undefined => {
-    const properties = (taskDef as Record<string, Record<string, unknown>>)
-      .Properties;
-    const containers = properties.ContainerDefinitions as Array<
-      Record<string, unknown>
-    >;
-
-    return containers.find((container) => {
-      const name = container.Name as string;
-      return name?.toLowerCase().includes(containerNamePattern.toLowerCase());
-    });
-  };
-
-  /**
    * Check if container has specific port mapping
    */
   const containerHasPort = (
-    container: Record<string, unknown>,
+    container: ContainerDefinition,
     port: number
   ): boolean => {
-    const portMappings = container.PortMappings as Array<
-      Record<string, number>
-    >;
-
+    const portMappings = container.PortMappings;
     return portMappings?.some((pm) => pm.ContainerPort === port) ?? false;
-  };
-
-  /**
-   * Validate target group configuration
-   */
-  const validateTargetGroups = (
-    template: Template,
-    validationFn?: (properties: Record<string, unknown>) => void
-  ) => {
-    const targetGroups = template.findResources(RESOURCE_TYPES.TARGET_GROUP);
-
-    Object.values(targetGroups).forEach((tg) => {
-      const properties = (tg as Record<string, Record<string, unknown>>)
-        .Properties;
-
-      // Basic validation
-      expect(properties.Port).toBeDefined();
-      expect(properties.Protocol).toBe("HTTP");
-
-      // Custom validation if provided
-      if (validationFn) {
-        validationFn(properties);
-      }
-    });
-  };
-
-  /**
-   * Validate security group rules
-   */
-  const validateSecurityGroupRules = (
-    template: Template,
-    ruleType: "SECURITY_GROUP_INGRESS" | "SECURITY_GROUP_EGRESS",
-    validationFn: (properties: Record<string, unknown>) => void
-  ) => {
-    const rules = template.findResources(RESOURCE_TYPES[ruleType]);
-
-    Object.values(rules).forEach((rule) => {
-      const properties = (rule as Record<string, Record<string, unknown>>)
-        .Properties;
-      validationFn(properties);
-    });
-  };
-
-  /**
-   * Check if HTTP/HTTPS rule exists in security groups
-   */
-  const hasHttpRule = (template: Template): boolean => {
-    const rules = template.findResources(RESOURCE_TYPES.SECURITY_GROUP_INGRESS);
-    const securityGroups = template.findResources(
-      RESOURCE_TYPES.SECURITY_GROUP
-    );
-
-    // Check standalone ingress rules
-    for (const rule of Object.values(rules)) {
-      const properties = (rule as Record<string, Record<string, unknown>>)
-        .Properties;
-
-      if (
-        properties.IpProtocol === "tcp" &&
-        (properties.FromPort === PORT_CONFIG.HTTP ||
-          properties.FromPort === PORT_CONFIG.HTTPS)
-      ) {
-        return true;
-      }
-    }
-
-    // Check inline ingress rules
-    for (const sg of Object.values(securityGroups)) {
-      const properties = (sg as Record<string, Record<string, unknown>>)
-        .Properties;
-
-      if (properties.SecurityGroupIngress) {
-        const ingressRules = properties.SecurityGroupIngress as Array<
-          Record<string, unknown>
-        >;
-
-        for (const rule of ingressRules) {
-          if (
-            rule.IpProtocol === "tcp" &&
-            (rule.FromPort === PORT_CONFIG.HTTP ||
-              rule.FromPort === PORT_CONFIG.HTTPS)
-          ) {
-            return true;
-          }
-        }
-      }
-    }
-
-    return false;
-  };
-
-  /**
-   * Validate port configuration for service in task definitions
-   */
-  const validateServicePort = (
-    template: Template,
-    serviceName: string,
-    expectedPort: number
-  ) => {
-    const taskDefs = template.findResources(RESOURCE_TYPES.ECS_TASK_DEFINITION);
-
-    Object.values(taskDefs).forEach((taskDef) => {
-      const container = findContainerInTaskDef(taskDef, serviceName);
-
-      if (container) {
-        expect(containerHasPort(container, expectedPort)).toBe(true);
-      }
-    });
-  };
-
-  /**
-   * Validate EFS security group has NFS rules
-   */
-  const validateEfsNfsRules = (template: Template) => {
-    const securityGroups = template.findResources(
-      RESOURCE_TYPES.SECURITY_GROUP
-    );
-
-    Object.values(securityGroups).forEach((sg) => {
-      const properties = (sg as Record<string, Record<string, unknown>>)
-        .Properties;
-
-      if (properties.SecurityGroupIngress) {
-        const ingressRules = properties.SecurityGroupIngress as Array<
-          Record<string, unknown>
-        >;
-
-        ingressRules.forEach((rule) => {
-          if (
-            rule.FromPort === PORT_CONFIG.NFS &&
-            rule.ToPort === PORT_CONFIG.NFS
-          ) {
-            // Valid NFS rule found
-          }
-        });
-      }
-    });
   };
 
   // ==========================================================================
@@ -243,82 +82,86 @@ describe("Integration: Service Connectivity Tests", () => {
   // ==========================================================================
 
   describe("ALB to ECS Connectivity", () => {
-    test("ALB has target groups configured", () => {
-      const template = getTemplate("serviceStack");
-      const targetGroups = template.findResources(RESOURCE_TYPES.TARGET_GROUP);
+    describe("Target Group Configuration", () => {
+      let targetGroups: unknown[];
+      let targetGroupProperties: Array<Record<string, unknown>>;
 
-      expect(Object.keys(targetGroups).length).toBeGreaterThan(0);
-    });
+      beforeAll(() => {
+        const template = getTemplate(IAM_TEST_STACKS[3]);
+        targetGroups = getResources(template, RESOURCE_TYPES.TARGET_GROUP);
+        targetGroupProperties = targetGroups.map((tg) =>
+          getResourceProperties(tg)
+        );
+      });
 
-    test("ALB listener forwards traffic to target groups", () => {
-      const template = getTemplate("infraStack");
-      const listeners = template.findResources(RESOURCE_TYPES.LISTENER);
+      test("ALB has target groups configured", () => {
+        expect(targetGroups.length).toBeGreaterThan(0);
+      });
 
-      expect(Object.keys(listeners).length).toBeGreaterThan(0);
+      test("target groups are configured with correct ports", () => {
+        targetGroupProperties.forEach((properties) => {
+          expect(properties.Port).toBeDefined();
+          expect(properties.Protocol).toBe("HTTP");
+        });
+      });
 
-      Object.values(listeners).forEach((listener) => {
-        validateResourceProperties(listener, [
-          "Protocol",
-          "Port",
-          "DefaultActions",
-        ]);
+      test("target groups have health checks enabled", () => {
+        targetGroupProperties.forEach((properties) => {
+          expect(properties.HealthCheckPath).toBeDefined();
+          expect(properties.HealthCheckIntervalSeconds).toBeDefined();
+        });
       });
     });
 
-    test("target groups are configured with correct ports", () => {
-      const template = getTemplate("serviceStack");
-      validateTargetGroups(template);
-    });
+    describe("ALB Listener Configuration", () => {
+      let listeners: unknown[];
 
-    test("target groups have health checks enabled", () => {
-      const template = getTemplate("serviceStack");
+      beforeAll(() => {
+        const template = getTemplate(INSTANCE_TEST_STACKS[0]);
+        listeners = getResources(template, RESOURCE_TYPES.LISTENER);
+      });
 
-      validateTargetGroups(template, (properties) => {
-        // Health check is enabled if HealthCheckPath is defined
-        expect(properties.HealthCheckPath).toBeDefined();
-        expect(properties.HealthCheckIntervalSeconds).toBeDefined();
+      test("ALB listener forwards traffic to target groups", () => {
+        expect(listeners.length).toBeGreaterThan(0);
+
+        listeners.forEach((listener) => {
+          const validation = validateResourceProperties(listener, [
+            "Protocol",
+            "Port",
+            "DefaultActions",
+          ]);
+          expect(validation.valid).toBe(true);
+        });
       });
     });
 
-    test("ALB security group allows inbound traffic from allowed CIDRs", () => {
-      const template = getTemplate("infraStack");
+    describe("Security Group Configuration", () => {
+      let securityGroups: unknown[];
+      let albToEcsRules: unknown[];
 
-      // Verify HTTP/HTTPS rules exist
-      const hasRules = hasHttpRule(template);
+      beforeAll(() => {
+        const template = getTemplate(INSTANCE_TEST_STACKS[0]);
+        securityGroups = getResources(template, RESOURCE_TYPES.SECURITY_GROUP);
 
-      // At least security groups should exist
-      const securityGroups = template.findResources(
-        RESOURCE_TYPES.SECURITY_GROUP
-      );
-      expect(Object.keys(securityGroups).length).toBeGreaterThan(0);
+        const rules = getResources(
+          template,
+          RESOURCE_TYPES.SECURITY_GROUP_INGRESS
+        );
+        albToEcsRules = rules.filter((rule) => {
+          const properties = getResourceProperties(rule);
+          const isTcp = properties.IpProtocol === "tcp";
+          const hasSourceSg = properties.SourceSecurityGroupId !== undefined;
+          return isTcp && hasSourceSg;
+        });
+      });
 
-      // Note: hasRules check is informational, not always required
-      // depending on infrastructure setup
-      if (hasRules) {
-        expect(hasRules).toBe(true);
-      }
-    });
+      test("ALB security groups exist", () => {
+        expect(securityGroups.length).toBeGreaterThan(0);
+      });
 
-    test("ECS instances accept traffic from ALB security group", () => {
-      const template = getTemplate("infraStack");
-
-      let hasAlbToEcsRule = false;
-
-      validateSecurityGroupRules(
-        template,
-        "SECURITY_GROUP_INGRESS",
-        (properties) => {
-          // ALB to ECS should use security group reference
-          if (
-            properties.IpProtocol === "tcp" &&
-            properties.SourceSecurityGroupId
-          ) {
-            hasAlbToEcsRule = true;
-          }
-        }
-      );
-
-      expect(hasAlbToEcsRule).toBe(true);
+      test("ECS instances accept traffic from ALB security group", () => {
+        expect(albToEcsRules.length).toBeGreaterThan(0);
+      });
     });
   });
 
@@ -327,48 +170,86 @@ describe("Integration: Service Connectivity Tests", () => {
   // ==========================================================================
 
   describe("ECS to EFS Connectivity", () => {
-    test("EFS has mount targets in availability zones", () => {
-      const template = getTemplate("efsStack");
-      const mountTargets = template.findResources(
-        RESOURCE_TYPES.EFS_MOUNT_TARGET
-      );
+    describe("EFS Mount Target Configuration", () => {
+      let mountTargets: unknown[];
+      let mountTargetProperties: Array<Record<string, unknown>>;
 
-      expect(Object.keys(mountTargets).length).toBeGreaterThanOrEqual(1);
+      beforeAll(() => {
+        const template = getTemplate(STORAGE_TEST_STACKS[0]);
+        mountTargets = getResources(template, RESOURCE_TYPES.EFS_MOUNT_TARGET);
+        mountTargetProperties = mountTargets.map((mt) =>
+          getResourceProperties(mt)
+        );
+      });
 
-      Object.values(mountTargets).forEach((mt) => {
-        validateResourceProperties(mt, [
-          "FileSystemId",
-          "SubnetId",
-          "SecurityGroups",
-        ]);
+      test("EFS has mount targets in availability zones", () => {
+        expect(mountTargets.length).toBeGreaterThanOrEqual(1);
+
+        mountTargets.forEach((mt) => {
+          const validation = validateResourceProperties(mt, [
+            "FileSystemId",
+            "SubnetId",
+            "SecurityGroups",
+          ]);
+          expect(validation.valid).toBe(true);
+        });
+      });
+
+      test("EFS mount targets are in private subnets", () => {
+        mountTargets.forEach((mt) => {
+          const validation = validateResourceProperties(mt, ["SubnetId"]);
+          expect(validation.valid).toBe(true);
+        });
+      });
+
+      test("EFS mount targets have correct security group associations", () => {
+        mountTargetProperties.forEach((properties) => {
+          const securityGroups = properties.SecurityGroups as unknown[];
+          expect(Array.isArray(securityGroups)).toBe(true);
+          expect(securityGroups.length).toBeGreaterThan(0);
+        });
       });
     });
 
-    test("EFS mount targets are in private subnets", () => {
-      const template = getTemplate("efsStack");
-      const mountTargets = template.findResources(
-        RESOURCE_TYPES.EFS_MOUNT_TARGET
-      );
+    describe("EFS Security Group Configuration", () => {
+      let securityGroups: unknown[];
+      let nfsRules: Array<Record<string, unknown>>;
 
-      Object.values(mountTargets).forEach((mt) => {
-        validateResourceProperties(mt, ["SubnetId"]);
+      beforeAll(() => {
+        const template = getTemplate(STORAGE_TEST_STACKS[0]);
+        securityGroups = getResources(template, RESOURCE_TYPES.SECURITY_GROUP);
+
+        // Get all ingress rules from SecurityGroupIngress resources
+        const standaloneRules = getSecurityGroupIngressRules(template);
+        const standaloneNfsRules = standaloneRules
+          .map((rule) => getResourceProperties(rule))
+          .filter((properties) => isNfsPortRule(properties));
+
+        // Also get ingress rules from security groups' SecurityGroupIngress property
+        const securityGroupNfsRules = securityGroups.flatMap((sg) => {
+          try {
+            const ingressRules = getIngressRules(sg);
+            return ingressRules.filter((rule) => isNfsPortRule(rule));
+          } catch {
+            return [];
+          }
+        });
+
+        nfsRules = [...standaloneNfsRules, ...securityGroupNfsRules];
+      });
+
+      test("EFS security groups exist", () => {
+        expect(securityGroups.length).toBeGreaterThan(0);
+      });
+
+      test("EFS security group allows NFS traffic from ECS security group", () => {
+        expect(nfsRules.length).toBeGreaterThan(0);
       });
     });
 
-    test("EFS security group allows NFS traffic from ECS security group", () => {
-      const template = getTemplate("efsStack");
-
-      validateEfsNfsRules(template);
-
-      // EFS security group should exist
-      const securityGroups = template.findResources(
-        RESOURCE_TYPES.SECURITY_GROUP
-      );
-      expect(Object.keys(securityGroups).length).toBeGreaterThan(0);
-    });
-
+    // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
     test("EFS access point is configured for ECS tasks", () => {
-      const template = getTemplate("efsStack");
+      const template = getTemplate(STORAGE_TEST_STACKS[0]);
 
       template.hasResourceProperties(RESOURCE_TYPES.EFS_ACCESS_POINT, {
         FileSystemId: Match.anyValue(),
@@ -378,22 +259,6 @@ describe("Integration: Service Connectivity Tests", () => {
         }),
       });
     });
-
-    test("EFS mount targets have correct security group associations", () => {
-      const template = getTemplate("efsStack");
-      const mountTargets = template.findResources(
-        RESOURCE_TYPES.EFS_MOUNT_TARGET
-      );
-
-      Object.values(mountTargets).forEach((mt) => {
-        const properties = (mt as Record<string, Record<string, unknown>>)
-          .Properties;
-        const securityGroups = properties.SecurityGroups as unknown[];
-
-        expect(Array.isArray(securityGroups)).toBe(true);
-        expect(securityGroups.length).toBeGreaterThan(0);
-      });
-    });
   });
 
   // ==========================================================================
@@ -401,68 +266,91 @@ describe("Integration: Service Connectivity Tests", () => {
   // ==========================================================================
 
   describe("Security Group Connectivity Rules", () => {
-    test("security groups exist for all components", () => {
-      const stacksToTest = ["efsStack", "infraStack"] as const;
+    describe("Security Group Existence", () => {
+      let securityGroupsByStack: Array<{
+        stackKey: keyof Omit<ConnectivityTestStacks, "app">;
+        securityGroups: unknown[];
+      }>;
 
-      stacksToTest.forEach((stackKey) => {
-        const template = getTemplate(stackKey);
-        const securityGroups = template.findResources(
-          RESOURCE_TYPES.SECURITY_GROUP
-        );
-        expect(Object.keys(securityGroups).length).toBeGreaterThan(0);
+      beforeAll(() => {
+        const stacksToTest: ReadonlyArray<
+          keyof Omit<ConnectivityTestStacks, "app">
+        > = [STORAGE_TEST_STACKS[0], INSTANCE_TEST_STACKS[0]];
+
+        securityGroupsByStack = stacksToTest.map((stackKey) => {
+          const template = getTemplate(stackKey);
+          const securityGroups = getResources(
+            template,
+            RESOURCE_TYPES.SECURITY_GROUP
+          );
+          return { stackKey, securityGroups };
+        });
+      });
+
+      test("security groups exist for all components", () => {
+        securityGroupsByStack.forEach(({ securityGroups }) => {
+          expect(securityGroups.length).toBeGreaterThan(0);
+        });
       });
     });
 
-    test("security group rules use least privilege principle", () => {
-      const template = getTemplate("infraStack");
+    describe("Security Group Rule Configuration", () => {
+      let tcpUdpRules: Array<Record<string, unknown>>;
+      let unrestrictedRules: Array<Record<string, unknown>>;
 
-      validateSecurityGroupRules(
-        template,
-        "SECURITY_GROUP_INGRESS",
-        (properties) => {
-          // Rules should specify specific ports, not all traffic
-          if (
-            properties.IpProtocol === "tcp" ||
-            properties.IpProtocol === "udp"
-          ) {
-            expect(properties.FromPort).toBeDefined();
-            expect(properties.ToPort).toBeDefined();
+      beforeAll(() => {
+        const template = getTemplate(INSTANCE_TEST_STACKS[0]);
+        
+        // Get all ingress rules from SecurityGroupIngress resources
+        const standaloneRules = getSecurityGroupIngressRules(template);
+        const standaloneRuleProperties = standaloneRules.map((rule) =>
+          getResourceProperties(rule)
+        );
+        
+        // Also get ingress rules from security groups' SecurityGroupIngress property
+        const securityGroups = getResources(template, RESOURCE_TYPES.SECURITY_GROUP);
+        const securityGroupRuleProperties = securityGroups.flatMap((sg) => {
+          try {
+            return getIngressRules(sg);
+          } catch {
+            return [];
           }
-        }
-      );
+        });
+
+        const allRules = [...standaloneRuleProperties, ...securityGroupRuleProperties];
+
+        tcpUdpRules = allRules.filter((rule) => {
+          const protocol = rule.IpProtocol as string;
+          return protocol === "tcp" || protocol === "udp";
+        });
+
+        unrestrictedRules = allRules.filter((rule) => isUnrestrictedAccess(rule));
+      });
+
+      test("security group rules use least privilege principle", () => {
+        expect(tcpUdpRules.length).toBeGreaterThan(0);
+
+        tcpUdpRules.forEach((rule) => {
+          expect(rule.FromPort).toBeDefined();
+          expect(rule.ToPort).toBeDefined();
+        });
+      });
+
+      test("no security groups allow unrestricted inbound traffic", () => {
+        unrestrictedRules.forEach((rule) => {
+          expect(rule.IpProtocol).not.toBe("-1");
+        });
+      });
     });
 
     test("security group egress allows necessary outbound traffic", () => {
-      const template = getTemplate("infraStack");
-      const egressRules = template.findResources(
+      const template = getTemplate(INSTANCE_TEST_STACKS[0]);
+      const egressRules = getResources(
+        template,
         RESOURCE_TYPES.SECURITY_GROUP_EGRESS
       );
 
-      // Should have at least default egress rule
-      expect(Object.keys(egressRules).length).toBeGreaterThan(0);
-    });
-
-    test("no security groups allow unrestricted inbound traffic", () => {
-      const stacksToTest = ["efsStack", "infraStack"] as const;
-
-      stacksToTest.forEach((stackKey) => {
-        const template = getTemplate(stackKey);
-
-        validateSecurityGroupRules(
-          template,
-          "SECURITY_GROUP_INGRESS",
-          (properties) => {
-            // If CIDR is 0.0.0.0/0, it should only be for specific use cases
-            if (
-              properties.CidrIp === "0.0.0.0/0" ||
-              properties.CidrIpv6 === "::/0"
-            ) {
-              // Should not allow all ports
-              expect(properties.IpProtocol).not.toBe("-1");
-            }
-          }
-        );
-      });
+      expect(egressRules.length).toBeGreaterThan(0);
     });
   });
 
@@ -471,8 +359,9 @@ describe("Integration: Service Connectivity Tests", () => {
   // ==========================================================================
 
   describe("Port and Protocol Configuration", () => {
+    // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
     test("ALB listens on standard HTTP port 80", () => {
-      const template = getTemplate("infraStack");
+      const template = getTemplate(INSTANCE_TEST_STACKS[0]);
 
       template.hasResourceProperties(RESOURCE_TYPES.LISTENER, {
         Port: PORT_CONFIG.HTTP,
@@ -480,49 +369,118 @@ describe("Integration: Service Connectivity Tests", () => {
       });
     });
 
-    test("Prometheus service uses correct port", () => {
-      const template = getTemplate("serviceStack");
-      validateServicePort(template, "prometheus", PORT_CONFIG.PROMETHEUS);
-    });
+    describe("Service Port Configuration", () => {
+      let prometheusContainers: Array<{
+        container: ContainerDefinition;
+        hasCorrectPort: boolean;
+      }>;
+      let grafanaContainers: Array<{
+        container: ContainerDefinition;
+        hasCorrectPort: boolean;
+      }>;
+      let nodeExporterContainers: Array<{
+        container: ContainerDefinition;
+        hasCorrectPort: boolean;
+      }>;
 
-    test("Grafana service uses correct port", () => {
-      const template = getTemplate("serviceStack");
-      validateServicePort(template, "grafana", PORT_CONFIG.GRAFANA);
-    });
+      beforeAll(() => {
+        const template = getTemplate(IAM_TEST_STACKS[3]);
+        const taskDefs = getResources(template, RESOURCE_TYPES.ECS_TASK_DEFINITION);
 
-    test("EFS uses NFS port 2049", () => {
-      const template = getTemplate("efsStack");
-      const securityGroups = template.findResources(
-        RESOURCE_TYPES.SECURITY_GROUP
-      );
+        const allContainers = taskDefs.flatMap((taskDef) =>
+          getContainersFromTaskDef(taskDef)
+        );
 
-      Object.values(securityGroups).forEach((sg) => {
-        const properties = (sg as Record<string, Record<string, unknown>>)
-          .Properties;
+        prometheusContainers = allContainers
+          .filter((container) =>
+            container.Name?.toLowerCase().includes("prometheus")
+          )
+          .map((container) => ({
+            container,
+            hasCorrectPort: containerHasPort(container, PORT_CONFIG.PROMETHEUS),
+          }));
 
-        if (properties.SecurityGroupIngress) {
-          const ingressRules = properties.SecurityGroupIngress as Array<
-            Record<string, unknown>
-          >;
+        grafanaContainers = allContainers
+          .filter((container) =>
+            container.Name?.toLowerCase().includes("grafana")
+          )
+          .map((container) => ({
+            container,
+            hasCorrectPort: containerHasPort(container, PORT_CONFIG.GRAFANA),
+          }));
 
-          ingressRules.forEach((rule) => {
-            if (
-              rule.FromPort === PORT_CONFIG.NFS &&
-              rule.ToPort === PORT_CONFIG.NFS
-            ) {
-              expect(rule.IpProtocol).toBe("tcp");
-            }
-          });
-        }
+        nodeExporterContainers = allContainers
+          .filter((container) =>
+            container.Name?.toLowerCase().includes("node-exporter")
+          )
+          .map((container) => ({
+            container,
+            hasCorrectPort: containerHasPort(
+              container,
+              PORT_CONFIG.NODE_EXPORTER
+            ),
+          }));
       });
 
-      // EFS security group should exist
-      expect(Object.keys(securityGroups).length).toBeGreaterThan(0);
+      test("Prometheus service uses correct port", () => {
+        expect(prometheusContainers.length).toBeGreaterThan(0);
+        prometheusContainers.forEach(({ hasCorrectPort }) => {
+          expect(hasCorrectPort).toBe(true);
+        });
+      });
+
+      test("Grafana service uses correct port", () => {
+        expect(grafanaContainers.length).toBeGreaterThan(0);
+        grafanaContainers.forEach(({ hasCorrectPort }) => {
+          expect(hasCorrectPort).toBe(true);
+        });
+      });
+
+      test("Node Exporter uses correct port for metrics", () => {
+        expect(nodeExporterContainers.length).toBeGreaterThan(0);
+        nodeExporterContainers.forEach(({ hasCorrectPort }) => {
+          expect(hasCorrectPort).toBe(true);
+        });
+      });
     });
 
-    test("Node Exporter uses correct port for metrics", () => {
-      const template = getTemplate("serviceStack");
-      validateServicePort(template, "node-exporter", PORT_CONFIG.NODE_EXPORTER);
+    describe("EFS NFS Port Configuration", () => {
+      let securityGroups: unknown[];
+      let nfsRules: Array<Record<string, unknown>>;
+
+      beforeAll(() => {
+        const template = getTemplate(STORAGE_TEST_STACKS[0]);
+        securityGroups = getResources(template, RESOURCE_TYPES.SECURITY_GROUP);
+
+        // Get all ingress rules from SecurityGroupIngress resources
+        const standaloneRules = getSecurityGroupIngressRules(template);
+        const standaloneNfsRules = standaloneRules
+          .map((rule) => getResourceProperties(rule))
+          .filter((properties) => isNfsPortRule(properties));
+
+        // Also get ingress rules from security groups' SecurityGroupIngress property
+        const securityGroupNfsRules = securityGroups.flatMap((sg) => {
+          try {
+            const ingressRules = getIngressRules(sg);
+            return ingressRules.filter((rule) => isNfsPortRule(rule));
+          } catch {
+            return [];
+          }
+        });
+
+        nfsRules = [...standaloneNfsRules, ...securityGroupNfsRules];
+      });
+
+      test("EFS security groups exist", () => {
+        expect(securityGroups.length).toBeGreaterThan(0);
+      });
+
+      test("EFS uses NFS port 2049", () => {
+        expect(nfsRules.length).toBeGreaterThan(0);
+        nfsRules.forEach((rule) => {
+          expect(rule.IpProtocol).toBe("tcp");
+        });
+      });
     });
   });
 
@@ -531,52 +489,69 @@ describe("Integration: Service Connectivity Tests", () => {
   // ==========================================================================
 
   describe("Network Mode Configuration", () => {
-    test("ECS tasks use appropriate network mode", () => {
-      const template = getTemplate("serviceStack");
-      const taskDefs = template.findResources(
-        RESOURCE_TYPES.ECS_TASK_DEFINITION
-      );
+    describe("Task Definition Network Mode", () => {
+      let taskDefsWithNetworkMode: Array<{
+        taskDef: unknown;
+        networkMode: string;
+      }>;
 
-      Object.values(taskDefs).forEach((taskDef) => {
-        const properties = (taskDef as Record<string, Record<string, string>>)
-          .Properties;
+      beforeAll(() => {
+        const template = getTemplate(IAM_TEST_STACKS[3]);
+        const taskDefs = getResources(template, RESOURCE_TYPES.ECS_TASK_DEFINITION);
 
-        // Network mode should be defined
-        expect(properties.NetworkMode).toBeDefined();
+        taskDefsWithNetworkMode = taskDefs
+          .map((taskDef) => ({
+            taskDef,
+            networkMode: getTaskDefNetworkMode(taskDef),
+          }))
+          .filter(
+            (item): item is { taskDef: unknown; networkMode: string } =>
+              item.networkMode !== undefined
+          );
+      });
 
-        // Common modes: bridge, host, awsvpc
-        expect(["bridge", "host", "awsvpc"]).toContain(properties.NetworkMode);
+      test("ECS tasks use appropriate network mode", () => {
+        expect(taskDefsWithNetworkMode.length).toBeGreaterThan(0);
+
+        taskDefsWithNetworkMode.forEach(({ networkMode }) => {
+          expect(isValidNetworkMode(networkMode)).toBe(true);
+        });
       });
     });
 
-    test("bridge network mode containers use dynamic port mapping", () => {
-      const template = getTemplate("serviceStack");
-      const taskDefs = template.findResources(
-        RESOURCE_TYPES.ECS_TASK_DEFINITION
-      );
+    describe("Bridge Network Mode Port Mapping", () => {
+      let bridgeContainers: Array<{
+        container: ContainerDefinition;
+        portMappings: Array<{ ContainerPort: number }>;
+      }>;
 
-      Object.values(taskDefs).forEach((taskDef) => {
-        const properties = (taskDef as Record<string, Record<string, unknown>>)
-          .Properties;
+      beforeAll(() => {
+        const template = getTemplate(IAM_TEST_STACKS[3]);
+        const taskDefs = getResources(template, RESOURCE_TYPES.ECS_TASK_DEFINITION);
 
-        if (properties.NetworkMode === "bridge") {
-          const containers = properties.ContainerDefinitions as Array<
-            Record<string, unknown>
-          >;
+        const bridgeTaskDefs = taskDefs.filter((taskDef) => {
+          const networkMode = getTaskDefNetworkMode(taskDef);
+          return networkMode === "bridge";
+        });
 
-          containers.forEach((container) => {
-            const portMappings = container.PortMappings as Array<
-              Record<string, number>
-            >;
+        bridgeContainers = bridgeTaskDefs.flatMap((taskDef) => {
+          const containers = getContainersFromTaskDef(taskDef);
+          return containers.map((container) => ({
+            container,
+            portMappings: container.PortMappings || [],
+          }));
+        });
+      });
 
-            // Bridge mode should have port mappings
-            if (portMappings && portMappings.length > 0) {
-              portMappings.forEach((pm) => {
-                expect(pm.ContainerPort).toBeDefined();
-              });
-            }
+      test("bridge network mode containers use dynamic port mapping", () => {
+        expect(bridgeContainers.length).toBeGreaterThan(0);
+
+        bridgeContainers.forEach(({ portMappings }) => {
+          expect(portMappings.length).toBeGreaterThan(0);
+          portMappings.forEach((pm) => {
+            expect(pm.ContainerPort).toBeDefined();
           });
-        }
+        });
       });
     });
   });
@@ -586,61 +561,114 @@ describe("Integration: Service Connectivity Tests", () => {
   // ==========================================================================
 
   describe("Health Check Connectivity", () => {
-    test("ALB target groups have accessible health check paths", () => {
-      const template = getTemplate("serviceStack");
+    describe("Target Group Health Check Configuration", () => {
+      let targetGroups: unknown[];
+      let targetGroupProperties: Array<Record<string, unknown>>;
+      let targetGroupsWithProtocol: Array<Record<string, unknown>>;
 
-      validateTargetGroups(template, (properties) => {
-        expect(properties.HealthCheckPath).toBeDefined();
+      beforeAll(() => {
+        const template = getTemplate(IAM_TEST_STACKS[3]);
+        targetGroups = getResources(template, RESOURCE_TYPES.TARGET_GROUP);
+        targetGroupProperties = targetGroups.map((tg) =>
+          getResourceProperties(tg)
+        );
 
-        // HealthCheckProtocol may be undefined (defaults to target protocol)
-        if (properties.HealthCheckProtocol) {
+        targetGroupsWithProtocol = targetGroupProperties.filter(
+          (properties) => properties.HealthCheckProtocol !== undefined
+        );
+      });
+
+      test("ALB target groups have accessible health check paths", () => {
+        expect(targetGroups.length).toBeGreaterThan(0);
+
+        targetGroupProperties.forEach((properties) => {
+          expect(properties.HealthCheckPath).toBeDefined();
+          expect(properties.HealthCheckIntervalSeconds).toBeDefined();
+          expect(properties.HealthyThresholdCount).toBeDefined();
+          expect(properties.UnhealthyThresholdCount).toBeDefined();
+        });
+
+        targetGroupsWithProtocol.forEach((properties) => {
           expect(["HTTP", "HTTPS", "TCP"]).toContain(
             properties.HealthCheckProtocol
           );
-        }
-
-        expect(properties.HealthCheckIntervalSeconds).toBeDefined();
-        expect(properties.HealthyThresholdCount).toBeDefined();
-        expect(properties.UnhealthyThresholdCount).toBeDefined();
+        });
       });
     });
 
-    test("health check intervals are reasonable", () => {
-      const template = getTemplate("serviceStack");
-      const targetGroups = template.findResources(RESOURCE_TYPES.TARGET_GROUP);
+    describe("Health Check Interval Configuration", () => {
+      let targetGroupIntervals: Array<{
+        interval: number;
+        timeout: number | undefined;
+      }>;
+      let intervalsWithTimeout: Array<{
+        interval: number;
+        timeout: number;
+      }>;
 
-      Object.values(targetGroups).forEach((tg) => {
-        const properties = (tg as Record<string, Record<string, number>>)
-          .Properties;
+      beforeAll(() => {
+        const template = getTemplate(IAM_TEST_STACKS[3]);
+        const targetGroups = getResources(template, RESOURCE_TYPES.TARGET_GROUP);
 
-        const interval = properties.HealthCheckIntervalSeconds;
-        const timeout = properties.HealthCheckTimeoutSeconds;
+        targetGroupIntervals = targetGroups.map((tg) => {
+          const properties = getResourceProperties<{
+            HealthCheckIntervalSeconds: number;
+            HealthCheckTimeoutSeconds?: number;
+          }>(tg);
+          return {
+            interval: properties.HealthCheckIntervalSeconds,
+            timeout: properties.HealthCheckTimeoutSeconds,
+          };
+        });
 
-        // Interval should be greater than timeout
-        if (interval && timeout) {
+        intervalsWithTimeout = targetGroupIntervals
+          .filter(
+            (item): item is { interval: number; timeout: number } =>
+              item.timeout !== undefined
+          )
+          .map((item) => ({
+            interval: item.interval,
+            timeout: item.timeout,
+          }));
+      });
+
+      test("health check intervals are reasonable", () => {
+        targetGroupIntervals.forEach(({ interval }) => {
+          expect(interval).toBeDefined();
+          expect(isInRange(interval, 5, 300)).toBe(true);
+        });
+      });
+
+      test("health check interval is greater than timeout when timeout is defined", () => {
+        intervalsWithTimeout.forEach(({ interval, timeout }) => {
           expect(interval).toBeGreaterThan(timeout);
-        }
-
-        // Interval should be reasonable (5-300 seconds)
-        if (interval) {
-          expect(interval).toBeGreaterThanOrEqual(5);
-          expect(interval).toBeLessThanOrEqual(300);
-        }
+        });
       });
     });
 
-    test("ECS services have health check grace period configured (if load balancers exist)", () => {
-      const template = getTemplate("serviceStack");
-      const services = template.findResources(RESOURCE_TYPES.ECS_SERVICE);
+    describe("ECS Service Health Check Grace Period", () => {
+      let servicesWithLoadBalancers: unknown[];
 
-      Object.values(services).forEach((service) => {
-        const properties = (service as Record<string, Record<string, unknown>>)
-          .Properties;
+      beforeAll(() => {
+        const template = getTemplate(IAM_TEST_STACKS[3]);
+        const services = getResources(template, RESOURCE_TYPES.ECS_SERVICE);
 
-        // Services with load balancers should have grace period
-        if (properties.LoadBalancers) {
+        servicesWithLoadBalancers = services.filter((service) => {
+          const properties = getResourceProperties(service);
+          const loadBalancers = properties.LoadBalancers;
+          return (
+            Array.isArray(loadBalancers) && loadBalancers.length > 0
+          );
+        });
+      });
+
+      test("ECS services have health check grace period configured (if load balancers exist)", () => {
+        expect(servicesWithLoadBalancers.length).toBeGreaterThan(0);
+
+        servicesWithLoadBalancers.forEach((service) => {
+          const properties = getResourceProperties(service);
           expect(properties.HealthCheckGracePeriodSeconds).toBeDefined();
-        }
+        });
       });
     });
   });
@@ -650,45 +678,54 @@ describe("Integration: Service Connectivity Tests", () => {
   // ==========================================================================
 
   describe("Service Discovery", () => {
-    test("ECS cluster supports service discovery", () => {
-      const template = getTemplate("infraStack");
-      const cluster = template.findResources(RESOURCE_TYPES.ECS_CLUSTER);
+    describe("ECS Cluster Configuration", () => {
+      let clusters: unknown[];
 
-      expect(Object.keys(cluster).length).toBe(1);
+      beforeAll(() => {
+        const template = getTemplate(INSTANCE_TEST_STACKS[0]);
+        clusters = getResources(template, RESOURCE_TYPES.ECS_CLUSTER);
+      });
 
-      // Cluster should be configured for service discovery
-      Object.values(cluster).forEach((c) => {
-        validateResourceProperties(c, ["ClusterName"]);
+      test("ECS cluster supports service discovery", () => {
+        expect(clusters.length).toBe(1);
+
+        clusters.forEach((c) => {
+          const validation = validateResourceProperties(c, ["ClusterName"]);
+          expect(validation.valid).toBe(true);
+        });
       });
     });
 
-    test("services can reference each other via DNS", () => {
-      const template = getTemplate("serviceStack");
-      const taskDefs = template.findResources(
-        RESOURCE_TYPES.ECS_TASK_DEFINITION
-      );
+    describe("Service DNS Configuration", () => {
+      let urlHostEnvVars: Array<{ name: string; value: string }>;
 
-      Object.values(taskDefs).forEach((taskDef) => {
-        const properties = (taskDef as Record<string, Record<string, unknown>>)
-          .Properties;
-        const containers = properties.ContainerDefinitions as Array<
-          Record<string, unknown>
-        >;
+      beforeAll(() => {
+        const template = getTemplate(IAM_TEST_STACKS[3]);
+        const taskDefs = getResources(template, RESOURCE_TYPES.ECS_TASK_DEFINITION);
 
-        containers.forEach((container) => {
-          const environment = container.Environment as Array<
-            Record<string, string>
-          >;
+        const allContainers = taskDefs.flatMap((taskDef) =>
+          getContainersFromTaskDef(taskDef)
+        );
 
-          // Environment variables may contain service discovery endpoints
-          if (environment) {
-            environment.forEach((env) => {
-              // DNS names should not be hardcoded IPs
-              if (env.Name?.includes("URL") || env.Name?.includes("HOST")) {
-                expect(env.Value).not.toMatch(/^\d+\.\d+\.\d+\.\d+$/);
-              }
-            });
-          }
+        urlHostEnvVars = allContainers
+          .flatMap((container) => container.Environment || [])
+          .filter((env) => {
+            const name = env.Name || "";
+            return name.includes("URL") || name.includes("HOST");
+          })
+          .map((env) => ({
+            name: env.Name || "",
+            value: env.Value || "",
+          }));
+      });
+
+      test("services can reference each other via DNS", () => {
+        expect(urlHostEnvVars).toBeDefined();
+        expect(Array.isArray(urlHostEnvVars)).toBe(true);
+
+        urlHostEnvVars.forEach(({ value }) => {
+          // DNS names should not be hardcoded IPs
+          expect(value).not.toMatch(/^\d+\.\d+\.\d+\.\d+$/);
         });
       });
     });
@@ -699,63 +736,78 @@ describe("Integration: Service Connectivity Tests", () => {
   // ==========================================================================
 
   describe("Cross-Stack Connectivity", () => {
-    test("Infra stack can access EFS from EFS stack", () => {
-      const infraTemplate = getTemplate("infraStack");
-      const efsTemplate = getTemplate("efsStack");
+    describe("EFS Cross-Stack Access", () => {
+      let efsFileSystems: unknown[];
+      let asgs: unknown[];
+      let associations: unknown[];
 
-      // Verify EFS resources exist in EFS stack
-      const efsFileSystems = efsTemplate.findResources(
-        RESOURCE_TYPES.EFS_FILE_SYSTEM
-      );
-      expect(Object.keys(efsFileSystems).length).toBeGreaterThan(0);
+      beforeAll(() => {
+        const infraTemplate = getTemplate(INSTANCE_TEST_STACKS[0]);
+        const efsTemplate = getTemplate(STORAGE_TEST_STACKS[0]);
 
-      // Verify Infra stack has ECS instances that could mount EFS
-      const asgs = infraTemplate.findResources(RESOURCE_TYPES.ASG);
-      expect(Object.keys(asgs).length).toBeGreaterThan(0);
+        efsFileSystems = getResources(
+          efsTemplate,
+          RESOURCE_TYPES.EFS_FILE_SYSTEM
+        );
+        asgs = getResources(infraTemplate, RESOURCE_TYPES.ASG);
+        associations = getResources(
+          infraTemplate,
+          RESOURCE_TYPES.SSM_ASSOCIATION
+        );
+      });
 
-      // Verify SSM associations exist for EFS mounting
-      const associations = infraTemplate.findResources(
-        RESOURCE_TYPES.SSM_ASSOCIATION
-      );
-      expect(Object.keys(associations).length).toBeGreaterThan(0);
-    });
-
-    test("Service stack references resources from Infra stack", () => {
-      const template = getTemplate("serviceStack");
-      const services = template.findResources(RESOURCE_TYPES.ECS_SERVICE);
-
-      expect(Object.keys(services).length).toBeGreaterThan(0);
-
-      Object.values(services).forEach((service) => {
-        validateResourceProperties(service, ["Cluster"]);
+      test("Infra stack can access EFS from EFS stack", () => {
+        expect(efsFileSystems.length).toBeGreaterThan(0);
+        expect(asgs.length).toBeGreaterThan(0);
+        expect(associations.length).toBeGreaterThan(0);
       });
     });
 
-    test("all stacks use same VPC for connectivity", () => {
-      const efsTemplate = getTemplate("efsStack");
-      const infraTemplate = getTemplate("infraStack");
+    describe("Service Stack Dependencies", () => {
+      let services: unknown[];
 
-      const efsSecurityGroups = efsTemplate.findResources(
-        RESOURCE_TYPES.SECURITY_GROUP
-      );
-      const infraSecurityGroups = infraTemplate.findResources(
-        RESOURCE_TYPES.SECURITY_GROUP
-      );
-
-      // All security groups should reference the same VPC
-      const vpcIds = new Set<string>();
-
-      [
-        ...Object.values(efsSecurityGroups),
-        ...Object.values(infraSecurityGroups),
-      ].forEach((sg) => {
-        const properties = (sg as Record<string, Record<string, unknown>>)
-          .Properties;
-        vpcIds.add(JSON.stringify(properties.VpcId));
+      beforeAll(() => {
+        const template = getTemplate(IAM_TEST_STACKS[3]);
+        services = getResources(template, RESOURCE_TYPES.ECS_SERVICE);
       });
 
-      // All should be in the same VPC
-      expect(vpcIds.size).toBe(1);
+      test("Service stack references resources from Infra stack", () => {
+        expect(services.length).toBeGreaterThan(0);
+
+        services.forEach((service) => {
+          const validation = validateResourceProperties(service, ["Cluster"]);
+          expect(validation.valid).toBe(true);
+        });
+      });
+    });
+
+    describe("VPC Consistency Across Stacks", () => {
+      let vpcIds: Set<string>;
+
+      beforeAll(() => {
+        const efsTemplate = getTemplate(STORAGE_TEST_STACKS[0]);
+        const infraTemplate = getTemplate(INSTANCE_TEST_STACKS[0]);
+
+        const efsSecurityGroups = getResources(
+          efsTemplate,
+          RESOURCE_TYPES.SECURITY_GROUP
+        );
+        const infraSecurityGroups = getResources(
+          infraTemplate,
+          RESOURCE_TYPES.SECURITY_GROUP
+        );
+
+        vpcIds = new Set<string>();
+
+        [...efsSecurityGroups, ...infraSecurityGroups].forEach((sg) => {
+          const properties = getResourceProperties<{ VpcId: unknown }>(sg);
+          vpcIds.add(JSON.stringify(properties.VpcId));
+        });
+      });
+
+      test("all stacks use same VPC for connectivity", () => {
+        expect(vpcIds.size).toBe(1);
+      });
     });
   });
 });
