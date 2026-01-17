@@ -2,14 +2,12 @@
 /// <reference types="jest" />
 
 import * as cdk from "aws-cdk-lib";
-import * as ec2 from "aws-cdk-lib/aws-ec2";
 import { Annotations, Match, Template } from "aws-cdk-lib/assertions";
 
 import { PrometheusConstruct } from "../../../../../../lib/constructs/services/monitoring/prometheus";
 
 import {
   createPrometheusConstruct,
-  getFargateNetworkConfig,
   TEST_CONFIG,
   TEST_CONSTANTS,
   TestFixtures,
@@ -54,6 +52,9 @@ describe("PrometheusConstruct - Launch Type", () => {
       });
 
       const template = Template.fromStack(stack);
+      
+      // Guard assertion: Template must be defined
+      expect(template).toBeDefined();
 
       template.hasResourceProperties("AWS::ECS::TaskDefinition", {
         Volumes: Match.arrayWith([
@@ -88,6 +89,9 @@ describe("PrometheusConstruct - Launch Type", () => {
       });
 
       const template = Template.fromStack(stack);
+      
+      // Guard assertion: Template must be defined
+      expect(template).toBeDefined();
 
       // Both volumes should use the same host path
       template.hasResourceProperties("AWS::ECS::TaskDefinition", {
@@ -120,6 +124,9 @@ describe("PrometheusConstruct - Launch Type", () => {
       createPrometheusConstruct(stack);
 
       const template = Template.fromStack(stack);
+      
+      // Guard assertion: Template must be defined
+      expect(template).toBeDefined();
 
       template.hasResourceProperties("AWS::ECS::TaskDefinition", {
         RequiresCompatibilities: ["FARGATE"],
@@ -146,6 +153,10 @@ describe("PrometheusConstruct - Launch Type", () => {
       });
 
       const annotations = Annotations.fromStack(stack);
+      
+      // Guard assertion: Annotations must be defined
+      expect(annotations).toBeDefined();
+      
       annotations.hasWarning(
         "/TestStack/Prometheus",
         Match.stringLikeRegexp("Fargate requires awsvpc networking")

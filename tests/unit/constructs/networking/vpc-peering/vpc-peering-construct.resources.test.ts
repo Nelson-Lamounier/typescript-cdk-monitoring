@@ -6,6 +6,7 @@ import { Template, Match } from "aws-cdk-lib/assertions";
 
 import { VpcConstruct } from "../../../../../lib/constructs/networking/vpc/vpc-construct";
 import { createTestApp, extendExpectWithCdkMatchers } from "../../../utils/stack-test-utils";
+
 import {
   TEST_CONSTANTS,
   createTestStack,
@@ -275,7 +276,12 @@ describe("VpcPeeringConstruct - Resources & Integration", () => {
       );
 
       // Verify outputs exist
-      const outputs = template.toJSON().Outputs || {};
+      const json = template.toJSON();
+      
+      // Guard assertion: Outputs must exist
+      expect(json.Outputs).toBeDefined();
+      
+      const outputs = json.Outputs;
       expect(Object.keys(outputs).length).toBeGreaterThanOrEqual(
         TEST_CONSTANTS.RESOURCE_COUNTS.MIN_OUTPUTS
       );
