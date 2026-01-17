@@ -190,3 +190,35 @@ export const getFileSystems = (template: Template): unknown[] => {
 export const getAccessPoints = (template: Template): unknown[] => {
   return getResources(template, "AWS::EFS::AccessPoint");
 };
+
+/**
+ * Check if output contains keyword
+ */
+export const hasOutputWithKeyword = (
+  template: Template,
+  keyword: string
+): boolean => {
+  const outputs = template.findOutputs("*");
+  return Object.values(outputs).some((output) =>
+    JSON.stringify(output).toLowerCase().includes(keyword.toLowerCase())
+  );
+};
+
+/**
+ * Get all outputs with exports
+ */
+export const getOutputsWithExports = (
+  template: Template
+): Array<Record<string, unknown>> => {
+  const outputs = template.findOutputs("*");
+  return Object.values(outputs).filter(
+    (output) => (output as Record<string, unknown>).Export !== undefined
+  );
+};
+
+/**
+ * Get SSM parameters from template
+ */
+export const getSsmParameters = (template: Template): unknown[] => {
+  return getResources(template, "AWS::SSM::Parameter");
+};

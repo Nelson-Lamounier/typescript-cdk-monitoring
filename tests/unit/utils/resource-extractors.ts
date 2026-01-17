@@ -533,3 +533,16 @@ export const getPermissions = (
 ): string | undefined => {
   return creationInfo.Permissions;
 };
+
+// =============================================================================
+// SSM Parameter Extractors
+// =============================================================================
+
+/**
+ * Extract SSM parameter properties
+ */
+export const getSsmParameterProperties = (
+  parameter: unknown
+): Record<string, string> => {
+  return getResourceProperties<Record<string, string>>(parameter);
+};

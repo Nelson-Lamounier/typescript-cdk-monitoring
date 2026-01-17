@@ -27,8 +27,29 @@ import {
   countResourcesOfType,
   validateStackDependencies,
 } from "../utils/test-utils";
+// Import shared utilities - functions
+import {
+  getResources,
+  getResourceProperties,
+  getSsmParameters,
+  getOutputsWithExports,
+  hasOutputWithKeyword,
+  getResourceTags,
+  validateResourceProperties,
+  validateTags,
+  getSsmParameterProperties,
+} from "../utils";
 
-import { ConnectivityTestStacks, RESOURCE_TYPES } from "./test-config";
+import {
+  ConnectivityTestStacks,
+  RESOURCE_TYPES,
+  EXPORT_TEST_STACKS,
+  INSTANCE_TEST_STACKS,
+  STORAGE_TEST_STACKS,
+  IAM_TEST_STACKS,
+  NETWORKING_TEST_STACKS,
+} from "./test-config";
+
 
 // ============================================================================
 // TEST SUITES
@@ -41,10 +62,6 @@ describe("Integration: Cross-Stack Connectivity Tests", () => {
     stacks = createConnectivityTestStacks();
   });
 
-  // ==========================================================================
-  // HELPER FUNCTIONS (defined as arrow functions)
-  // ==========================================================================
-
   /**
    * Get template from stack name
    */
@@ -56,69 +73,12 @@ describe("Integration: Cross-Stack Connectivity Tests", () => {
   };
 
   /**
-   * Check if output contains keyword
+   * Get all templates from multiple stacks
    */
-  const hasOutputWithKeyword = (template: Template, keyword: string) => {
-    const outputs = template.findOutputs("*");
-    return Object.values(outputs).some((output) =>
-      JSON.stringify(output).toLowerCase().includes(keyword.toLowerCase())
-    );
-  };
-
-  /**
-   * Validate SSM parameter structure
-   */
-  const validateSsmParameters = (
-    template: Template,
-    validationFn?: (properties: Record<string, string>) => void
-  ) => {
-    const parameters = template.findResources("AWS::SSM::Parameter");
-
-    Object.values(parameters).forEach((param) => {
-      const properties = (param as Record<string, Record<string, string>>)
-        .Properties;
-
-      // Basic validation
-      expect(properties.Name).toBeDefined();
-      expect(properties.Type).toBeDefined();
-      expect(properties.Value).toBeDefined();
-
-      // Custom validation if provided
-      if (validationFn) {
-        validationFn(properties);
-      }
-    });
-  };
-
-  /**
-   * Validate resource has required properties
-   */
-  const validateResourceProperties = (
-    resource: unknown,
-    requiredProps: string[]
-  ) => {
-    const properties = (resource as Record<string, Record<string, unknown>>)
-      .Properties;
-
-    requiredProps.forEach((prop) => {
-      expect(properties[prop]).toBeDefined();
-    });
-  };
-
-  /**
-   * Validate tags structure
-   */
-  const validateTags = (
-    properties: Record<string, unknown>,
-    minTagCount = 0
-  ) => {
-    if (properties.Tags) {
-      const tags = properties.Tags as Array<Record<string, string>>;
-      expect(Array.isArray(tags)).toBe(true);
-      if (minTagCount > 0) {
-        expect(tags.length).toBeGreaterThanOrEqual(minTagCount);
-      }
-    }
+  const getTemplates = (
+    stackNames: ReadonlyArray<keyof ConnectivityTestStacks>
+  ): Template[] => {
+    return stackNames.map((name) => getTemplate(name));
   };
 
   // ==========================================================================
@@ -127,47 +87,75 @@ describe("Integration: Cross-Stack Connectivity Tests", () => {
 
   describe("CloudFormation Outputs", () => {
     test("Networking stack exports VPC ID", () => {
-      const template = getTemplate("networkingStack");
+      const template = getTemplate(NETWORKING_TEST_STACKS[0]);
       expect(hasOutputWithKeyword(template, "vpc")).toBe(true);
     });
 
     test("EFS stack exports file system information", () => {
-      const template = getTemplate("efsStack");
+      const template = getTemplate(STORAGE_TEST_STACKS[0]);
       expect(hasOutputWithKeyword(template, "filesystem")).toBe(true);
     });
 
-    test("Infra stack exports cluster and ALB information", () => {
-      const template = getTemplate("infraStack");
+    describe("Infra Stack Exports", () => {
+      let hasCluster: boolean;
+      let hasAlb: boolean;
+      let hasRequiredOutput: boolean;
 
-      const hasCluster = hasOutputWithKeyword(template, "cluster");
-      const hasAlb = hasOutputWithKeyword(template, "loadbalancer");
+      beforeAll(() => {
+        const template = getTemplate(INSTANCE_TEST_STACKS[0]);
+        hasCluster = hasOutputWithKeyword(template, "cluster");
+        hasAlb = hasOutputWithKeyword(template, "loadbalancer");
 
-      expect(hasCluster || hasAlb).toBe(true);
+        // Pre-compute: at least one of cluster or ALB outputs should exist
+        const outputsExist = [hasCluster, hasAlb];
+        hasRequiredOutput = outputsExist.some((exists) => exists === true);
+      });
+
+      test("Infra stack exports cluster and ALB information", () => {
+        expect(hasRequiredOutput).toBe(true);
+      });
     });
 
-    test("outputs have descriptive export names", () => {
-      const stacksToTest = [
-        { name: "Networking", key: "networkingStack" },
-        { name: "EFS", key: "efsStack" },
-        { name: "Infra", key: "infraStack" },
-      ] as const;
+    describe("Export Name Validation", () => {
+      let allExports: Array<{
+        stackName: keyof ConnectivityTestStacks;
+        output: Record<string, unknown>;
+        exportValue: Record<string, unknown>;
+      }>;
 
-      stacksToTest.forEach(({ key }) => {
-        const template = getTemplate(key);
-        const outputs = template.findOutputs("*");
+      beforeAll(() => {
+        const templates = getTemplates(EXPORT_TEST_STACKS);
 
-        Object.values(outputs).forEach((output) => {
-          const exportValue = (output as Record<string, unknown>).Export;
+        // Pre-compute all exports with their stack names
+        allExports = templates.flatMap((template, index) => {
+          const stackName = EXPORT_TEST_STACKS[index];
+          const outputsWithExports = getOutputsWithExports(template);
+          return outputsWithExports.map((output) => {
+            const exportValue = (output as Record<string, unknown>).Export as
+              | Record<string, unknown>
+              | undefined;
+            return {
+              stackName,
+              output,
+              exportValue: exportValue || {},
+            };
+          });
+        });
+      });
 
-          if (exportValue) {
-            expect(exportValue).toBeDefined();
+      test("outputs exist", () => {
+        expect(allExports.length).toBeGreaterThan(0);
+      });
 
-            if (typeof exportValue === "object" && exportValue !== null) {
-              expect(
-                (exportValue as Record<string, unknown>).Name
-              ).toBeDefined();
-            }
-          }
+      test("outputs have descriptive export names", () => {
+        expect(allExports).toBeDefined();
+        expect(Array.isArray(allExports)).toBe(true);
+
+        allExports.forEach(({ exportValue }) => {
+          expect(exportValue).toBeDefined();
+          expect(exportValue).not.toBeNull();
+          expect(typeof exportValue).toBe("object");
+          expect(exportValue.Name).toBeDefined();
         });
       });
     });
@@ -178,52 +166,126 @@ describe("Integration: Cross-Stack Connectivity Tests", () => {
   // ==========================================================================
 
   describe("SSM Parameter Configuration", () => {
-    test("EFS stack creates SSM parameters for configuration", () => {
-      const template = getTemplate("efsStack");
+    describe("EFS Stack Parameters", () => {
+      let efsParameters: unknown[];
 
-      expect(
-        countResourcesOfType(template, "AWS::SSM::Parameter")
-      ).toBeGreaterThan(0);
-
-      validateSsmParameters(template);
-    });
-
-    test("Infra stack creates SSM parameters for cluster configuration", () => {
-      const template = getTemplate("infraStack");
-      const parameters = template.findResources("AWS::SSM::Parameter");
-
-      const hasClusterParam = Object.values(parameters).some((param) => {
-        const properties = (param as Record<string, Record<string, string>>)
-          .Properties;
-        return properties.Name?.includes("cluster");
+      beforeAll(() => {
+        const template = getTemplate(STORAGE_TEST_STACKS[0]);
+        efsParameters = getSsmParameters(template);
       });
 
-      expect(hasClusterParam).toBe(true);
+      test("EFS stack creates SSM parameters for configuration", () => {
+        expect(efsParameters.length).toBeGreaterThan(0);
+
+        efsParameters.forEach((param) => {
+          const properties = getSsmParameterProperties(param);
+          expect(properties.Name).toBeDefined();
+          expect(properties.Type).toBeDefined();
+          expect(properties.Value).toBeDefined();
+        });
+      });
     });
 
-    test("SSM parameters use hierarchical naming structure", () => {
-      const stacksToTest = ["efsStack", "infraStack"] as const;
+    describe("Infra Stack Cluster Parameters", () => {
+      let infraParameters: unknown[];
+      let parametersWithCluster: Array<{
+        parameter: unknown;
+        properties: Record<string, string>;
+      }>;
 
-      stacksToTest.forEach((stackKey) => {
-        const template = getTemplate(stackKey);
+      beforeAll(() => {
+        const template = getTemplate(INSTANCE_TEST_STACKS[0]);
+        infraParameters = getSsmParameters(template);
 
-        validateSsmParameters(template, (properties) => {
+        // Pre-filter parameters with "cluster" in name
+        parametersWithCluster = infraParameters
+          .map((param) => ({
+            parameter: param,
+            properties: getSsmParameterProperties(param),
+          }))
+          .filter((item) => item.properties.Name?.includes("cluster"));
+      });
+
+      test("Infra stack creates SSM parameters for cluster configuration", () => {
+        expect(parametersWithCluster.length).toBeGreaterThan(0);
+      });
+    });
+
+    describe("SSM Parameter Naming Structure", () => {
+      let allParameters: Array<{
+        stackName: keyof ConnectivityTestStacks;
+        properties: Record<string, string>;
+      }>;
+
+      beforeAll(() => {
+        const stacksToTest: ReadonlyArray<keyof ConnectivityTestStacks> = [
+          STORAGE_TEST_STACKS[0],
+          INSTANCE_TEST_STACKS[0],
+        ];
+        const templates = getTemplates(stacksToTest);
+
+        // Pre-compute all parameters with their stack names
+        allParameters = templates.flatMap((template, index) => {
+          const stackName = stacksToTest[index];
+          const parameters = getSsmParameters(template);
+          return parameters.map((param) => ({
+            stackName,
+            properties: getSsmParameterProperties(param),
+          }));
+        });
+      });
+
+      test("parameters exist", () => {
+        expect(allParameters.length).toBeGreaterThan(0);
+      });
+
+      test("SSM parameters use hierarchical naming structure", () => {
+        expect(allParameters).toBeDefined();
+        expect(Array.isArray(allParameters)).toBe(true);
+
+        allParameters.forEach(({ properties }) => {
           // Parameters should follow /service/environment/category pattern
           expect(properties.Name).toMatch(/^\/[^/]+\/[^/]+\/.+/);
         });
       });
     });
 
-    test("SSM parameters have descriptive descriptions (if provided)", () => {
-      const stacksToTest = ["efsStack", "infraStack"] as const;
+    describe("SSM Parameter Descriptions", () => {
+      let parametersWithDescription: Array<{
+        stackName: keyof ConnectivityTestStacks;
+        properties: Record<string, string>;
+      }>;
 
-      stacksToTest.forEach((stackKey) => {
-        const template = getTemplate(stackKey);
+      beforeAll(() => {
+        const stacksToTest: ReadonlyArray<keyof ConnectivityTestStacks> = [
+          STORAGE_TEST_STACKS[0],
+          INSTANCE_TEST_STACKS[0],
+        ];
+        const templates = getTemplates(stacksToTest);
 
-        validateSsmParameters(template, (properties) => {
-          if (properties.Description) {
-            expect(properties.Description.length).toBeGreaterThan(10);
-          }
+        // Pre-filter parameters with descriptions
+        parametersWithDescription = templates.flatMap((template, index) => {
+          const stackName = stacksToTest[index];
+          const parameters = getSsmParameters(template);
+          return parameters
+            .map((param) => ({
+              stackName,
+              properties: getSsmParameterProperties(param),
+            }))
+            .filter((item) => item.properties.Description !== undefined);
+        });
+      });
+
+      test("SSM parameters have descriptive descriptions (if provided)", () => {
+        // This test validates configuration IF descriptions are provided
+        // Empty array is valid - means no parameters have descriptions
+        expect(parametersWithDescription).toBeDefined();
+        expect(Array.isArray(parametersWithDescription)).toBe(true);
+
+        // If descriptions exist, validate they are descriptive
+        parametersWithDescription.forEach(({ properties }) => {
+          expect(properties.Description).toBeDefined();
+          expect(properties.Description.length).toBeGreaterThan(10);
         });
       });
     });
@@ -234,68 +296,115 @@ describe("Integration: Cross-Stack Connectivity Tests", () => {
   // ==========================================================================
 
   describe("Stack Dependency Chain", () => {
-    test("EFS stack depends on Networking stack for VPC", () => {
-      const template = getTemplate("efsStack");
-      const securityGroups = template.findResources(
-        RESOURCE_TYPES.SECURITY_GROUP
-      );
+    describe("EFS Stack Dependencies", () => {
+      let efsSecurityGroups: unknown[];
 
-      Object.values(securityGroups).forEach((sg) => {
-        validateResourceProperties(sg, ["VpcId"]);
+      beforeAll(() => {
+        const template = getTemplate(STORAGE_TEST_STACKS[0]);
+        efsSecurityGroups = getResources(
+          template,
+          RESOURCE_TYPES.SECURITY_GROUP
+        );
+      });
+
+      test("EFS stack depends on Networking stack for VPC", () => {
+        expect(efsSecurityGroups.length).toBeGreaterThan(0);
+
+        efsSecurityGroups.forEach((sg) => {
+          const validation = validateResourceProperties(sg, ["VpcId"]);
+          expect(validation.valid).toBe(true);
+        });
       });
     });
 
-    test("Infra stack depends on both Networking and EFS stacks", () => {
-      const template = getTemplate("infraStack");
+    describe("Infra Stack Dependencies", () => {
+      let infraSecurityGroups: unknown[];
+      let infraLaunchTemplates: unknown[];
 
-      // Infra should reference VPC (from networking)
-      expect(
-        countResourcesOfType(template, RESOURCE_TYPES.SECURITY_GROUP)
-      ).toBeGreaterThan(0);
+      beforeAll(() => {
+        const template = getTemplate(INSTANCE_TEST_STACKS[0]);
+        infraSecurityGroups = getResources(
+          template,
+          RESOURCE_TYPES.SECURITY_GROUP
+        );
+        infraLaunchTemplates = getResources(
+          template,
+          RESOURCE_TYPES.LAUNCH_TEMPLATE
+        );
+      });
 
-      // Infra should have launch templates
-      expect(
-        countResourcesOfType(template, RESOURCE_TYPES.LAUNCH_TEMPLATE)
-      ).toBeGreaterThan(0);
-    });
-
-    test("Service stack depends on Infra stack for cluster and ALB", () => {
-      const template = getTemplate("serviceStack");
-      const services = template.findResources(RESOURCE_TYPES.ECS_SERVICE);
-
-      Object.values(services).forEach((service) => {
-        validateResourceProperties(service, ["Cluster", "TaskDefinition"]);
+      test("Infra stack depends on both Networking and EFS stacks", () => {
+        expect(infraSecurityGroups.length).toBeGreaterThan(0);
+        expect(infraLaunchTemplates.length).toBeGreaterThan(0);
       });
     });
 
-    test("stacks are deployed in correct order", () => {
-      // Verify that resources exist that require the correct order
-      const checks = [
-        {
-          stack: "networkingStack",
-          resourceType: RESOURCE_TYPES.VPC,
-          description: "Networking has VPC",
-        },
-        {
-          stack: "efsStack",
-          resourceType: RESOURCE_TYPES.EFS_FILE_SYSTEM,
-          description: "EFS has file system",
-        },
-        {
-          stack: "infraStack",
-          resourceType: RESOURCE_TYPES.ECS_CLUSTER,
-          description: "Infra has ECS cluster",
-        },
-        {
-          stack: "serviceStack",
-          resourceType: RESOURCE_TYPES.ECS_TASK_DEFINITION,
-          description: "Service has task definition",
-        },
-      ] as const;
+    describe("Service Stack Dependencies", () => {
+      let serviceServices: unknown[];
 
-      checks.forEach(({ stack, resourceType }) => {
-        const template = getTemplate(stack);
-        expect(hasResourceOfType(template, resourceType)).toBe(true);
+      beforeAll(() => {
+        const template = getTemplate(IAM_TEST_STACKS[3]);
+        serviceServices = getResources(template, RESOURCE_TYPES.ECS_SERVICE);
+      });
+
+      test("Service stack depends on Infra stack for cluster and ALB", () => {
+        expect(serviceServices.length).toBeGreaterThan(0);
+
+        serviceServices.forEach((service) => {
+          const validation = validateResourceProperties(service, [
+            "Cluster",
+            "TaskDefinition",
+          ]);
+          expect(validation.valid).toBe(true);
+        });
+      });
+    });
+
+    describe("Stack Deployment Order", () => {
+      let stackChecks: Array<{
+        stack: keyof ConnectivityTestStacks;
+        resourceType: string;
+        hasResource: boolean;
+      }>;
+
+      beforeAll(() => {
+        const checks = [
+          {
+            stack: NETWORKING_TEST_STACKS[0],
+            resourceType: RESOURCE_TYPES.VPC,
+          },
+          {
+            stack: STORAGE_TEST_STACKS[0],
+            resourceType: RESOURCE_TYPES.EFS_FILE_SYSTEM,
+          },
+          {
+            stack: INSTANCE_TEST_STACKS[0],
+            resourceType: RESOURCE_TYPES.ECS_CLUSTER,
+          },
+          {
+            stack: IAM_TEST_STACKS[3],
+            resourceType: RESOURCE_TYPES.ECS_TASK_DEFINITION,
+          },
+        ] as const;
+
+        // Pre-compute resource existence checks
+        stackChecks = checks.map(({ stack, resourceType }) => {
+          const template = getTemplate(stack);
+          return {
+            stack,
+            resourceType,
+            hasResource: hasResourceOfType(template, resourceType),
+          };
+        });
+      });
+
+      test("stacks are deployed in correct order", () => {
+        expect(stackChecks).toBeDefined();
+        expect(Array.isArray(stackChecks)).toBe(true);
+
+        stackChecks.forEach(({ hasResource }) => {
+          expect(hasResource).toBe(true);
+        });
       });
     });
 
@@ -309,61 +418,120 @@ describe("Integration: Cross-Stack Connectivity Tests", () => {
   // ==========================================================================
 
   describe("Cross-Stack Resource References", () => {
-    test("EFS stack references VPC from Networking stack", () => {
-      const template = getTemplate("efsStack");
-      const securityGroups = template.findResources(
-        RESOURCE_TYPES.SECURITY_GROUP
-      );
+    describe("EFS VPC References", () => {
+      let efsSecurityGroups: unknown[];
 
-      Object.values(securityGroups).forEach((sg) => {
-        validateResourceProperties(sg, ["VpcId"]);
+      beforeAll(() => {
+        const template = getTemplate(STORAGE_TEST_STACKS[0]);
+        efsSecurityGroups = getResources(
+          template,
+          RESOURCE_TYPES.SECURITY_GROUP
+        );
+      });
+
+      test("EFS stack references VPC from Networking stack", () => {
+        expect(efsSecurityGroups.length).toBeGreaterThan(0);
+
+        efsSecurityGroups.forEach((sg) => {
+          const validation = validateResourceProperties(sg, ["VpcId"]);
+          expect(validation.valid).toBe(true);
+        });
       });
     });
 
-    test("Infra stack can access EFS from EFS stack", () => {
-      const infraTemplate = getTemplate("infraStack");
-      const efsTemplate = getTemplate("efsStack");
+    describe("Infra Stack EFS Access", () => {
+      let efsFileSystems: unknown[];
+      let infraAssociations: unknown[];
+      let infraAsgs: unknown[];
 
-      // Verify EFS resources exist in EFS stack
-      expect(
-        countResourcesOfType(efsTemplate, RESOURCE_TYPES.EFS_FILE_SYSTEM)
-      ).toBeGreaterThan(0);
+      beforeAll(() => {
+        const efsTemplate = getTemplate(STORAGE_TEST_STACKS[0]);
+        const infraTemplate = getTemplate(INSTANCE_TEST_STACKS[0]);
 
-      // Verify Infra stack has SSM associations for EFS mounting
-      expect(
-        countResourcesOfType(infraTemplate, RESOURCE_TYPES.SSM_ASSOCIATION)
-      ).toBeGreaterThan(0);
+        efsFileSystems = getResources(
+          efsTemplate,
+          RESOURCE_TYPES.EFS_FILE_SYSTEM
+        );
+        infraAssociations = getResources(
+          infraTemplate,
+          RESOURCE_TYPES.SSM_ASSOCIATION
+        );
+        infraAsgs = getResources(infraTemplate, RESOURCE_TYPES.ASG);
+      });
 
-      // Verify ECS instances exist that can mount EFS
-      expect(
-        countResourcesOfType(infraTemplate, RESOURCE_TYPES.ASG)
-      ).toBeGreaterThan(0);
-    });
-
-    test("Service stack references cluster from Infra stack", () => {
-      const template = getTemplate("serviceStack");
-      const services = template.findResources(RESOURCE_TYPES.ECS_SERVICE);
-
-      Object.values(services).forEach((service) => {
-        validateResourceProperties(service, ["Cluster"]);
+      test("Infra stack can access EFS from EFS stack", () => {
+        expect(efsFileSystems.length).toBeGreaterThan(0);
+        expect(infraAssociations.length).toBeGreaterThan(0);
+        expect(infraAsgs.length).toBeGreaterThan(0);
       });
     });
 
-    test("Service stack references load balancer from Infra stack (if load balancers exist)", () => {
-      const template = getTemplate("serviceStack");
-      const services = template.findResources(RESOURCE_TYPES.ECS_SERVICE);
+    describe("Service Stack Cluster References", () => {
+      let serviceServices: unknown[];
 
-      Object.values(services).forEach((service) => {
-        const properties = (
-          service as Record<string, Record<string, unknown[]>>
-        ).Properties;
+      beforeAll(() => {
+        const template = getTemplate(IAM_TEST_STACKS[3]);
+        serviceServices = getResources(template, RESOURCE_TYPES.ECS_SERVICE);
+      });
 
-        const loadBalancers = properties.LoadBalancers;
+      test("Service stack references cluster from Infra stack", () => {
+        expect(serviceServices.length).toBeGreaterThan(0);
 
-        // Only validate if load balancers are configured
-        if (loadBalancers && loadBalancers.length > 0) {
+        serviceServices.forEach((service) => {
+          const validation = validateResourceProperties(service, ["Cluster"]);
+          expect(validation.valid).toBe(true);
+        });
+      });
+    });
+
+    describe("Service Stack Load Balancer References", () => {
+      let servicesWithLoadBalancers: Array<{
+        service: unknown;
+        properties: Record<string, unknown[]>;
+        loadBalancers: unknown[];
+      }>;
+
+      beforeAll(() => {
+        const template = getTemplate(IAM_TEST_STACKS[3]);
+        const services = getResources(template, RESOURCE_TYPES.ECS_SERVICE);
+
+        // Pre-filter and pre-compute services with load balancers
+        servicesWithLoadBalancers = services
+          .map((service) => {
+            const properties = getResourceProperties<{
+              LoadBalancers?: unknown[];
+            }>(service);
+            return {
+              service,
+              properties: properties as Record<string, unknown[]>,
+              loadBalancers: properties.LoadBalancers || [],
+            };
+          })
+          .filter(
+            (item) =>
+              item.loadBalancers !== undefined &&
+              Array.isArray(item.loadBalancers) &&
+              item.loadBalancers.length > 0
+          )
+          .map((item) => ({
+            service: item.service,
+            properties: item.properties,
+            loadBalancers: item.loadBalancers,
+          }));
+      });
+
+      test("Service stack references load balancer from Infra stack (if load balancers exist)", () => {
+        // This test validates configuration IF load balancers exist
+        // Empty array is valid - means no services have load balancers
+        expect(servicesWithLoadBalancers).toBeDefined();
+        expect(Array.isArray(servicesWithLoadBalancers)).toBe(true);
+
+        // If load balancers exist, validate they are properly configured
+        servicesWithLoadBalancers.forEach(({ loadBalancers }) => {
+          expect(loadBalancers).toBeDefined();
+          expect(loadBalancers.length).toBeGreaterThan(0);
           expect(loadBalancers[0]).toBeDefined();
-        }
+        });
       });
     });
   });
@@ -373,19 +541,23 @@ describe("Integration: Cross-Stack Connectivity Tests", () => {
   // ==========================================================================
 
   describe("Configuration Propagation", () => {
-    test("environment configuration is applied to stacks", () => {
-      const stacksToTest = [
-        { name: "Networking", key: "networkingStack" },
-        { name: "EFS", key: "efsStack" },
-        { name: "Infra", key: "infraStack" },
-        { name: "Service", key: "serviceStack" },
-      ] as const;
+    describe("Environment Configuration", () => {
+      let allResources: Array<{
+        stackName: keyof ConnectivityTestStacks;
+        resource: unknown;
+        properties: Record<string, unknown>;
+      }>;
 
-      stacksToTest.forEach(({ key }) => {
-        const template = getTemplate(key);
+      beforeAll(() => {
+        const stacksToTest: ReadonlyArray<keyof ConnectivityTestStacks> = [
+          NETWORKING_TEST_STACKS[0],
+          STORAGE_TEST_STACKS[0],
+          INSTANCE_TEST_STACKS[0],
+          IAM_TEST_STACKS[3],
+        ];
+        const templates = getTemplates(stacksToTest);
 
-        // Get all major resource types for this stack
-        const resourceTypesToCheck = [
+        const resourceTypes = [
           RESOURCE_TYPES.VPC,
           RESOURCE_TYPES.EFS_FILE_SYSTEM,
           RESOURCE_TYPES.ECS_CLUSTER,
@@ -393,71 +565,123 @@ describe("Integration: Cross-Stack Connectivity Tests", () => {
           RESOURCE_TYPES.ASG,
         ];
 
-        const allResources = resourceTypesToCheck.reduce((acc, type) => {
-          return { ...acc, ...template.findResources(type) };
-        }, {});
-
-        // If resources exist, validate their tag structure
-        if (Object.keys(allResources).length > 0) {
-          Object.values(allResources).forEach((resource) => {
-            const properties = (
-              resource as Record<string, Record<string, unknown>>
-            ).Properties;
-
-            validateTags(properties);
+        // Pre-compute all resources with their stack names
+        allResources = templates.flatMap((template, index) => {
+          const stackName = stacksToTest[index];
+          return resourceTypes.flatMap((type) => {
+            const resources = getResources(template, type);
+            return resources.map((resource) => ({
+              stackName,
+              resource,
+              properties: getResourceProperties(resource),
+            }));
           });
-        }
+        });
+      });
+
+      test("environment configuration is applied to stacks", () => {
+        expect(allResources).toBeDefined();
+        expect(Array.isArray(allResources)).toBe(true);
+
+        allResources.forEach(({ properties }) => {
+          expect(validateTags(properties)).toBe(true);
+        });
       });
     });
 
-    test("project name is applied to resources", () => {
-      const stacksToTest = [
-        { name: "Networking", key: "networkingStack" },
-        { name: "EFS", key: "efsStack" },
-        { name: "Infra", key: "infraStack" },
-      ] as const;
+    describe("Project Name Tagging", () => {
+      let taggedResources: Array<{
+        stackName: keyof ConnectivityTestStacks;
+        resource: unknown;
+        properties: Record<string, unknown>;
+        tags: Array<{ Key: string; Value: string }>;
+        tagCount: number;
+      }>;
 
-      const resourceTypes = [
-        RESOURCE_TYPES.VPC,
-        RESOURCE_TYPES.EFS_FILE_SYSTEM,
-        RESOURCE_TYPES.ECS_CLUSTER,
-        RESOURCE_TYPES.ASG,
-      ];
+      beforeAll(() => {
+        const stacksToTest: ReadonlyArray<keyof ConnectivityTestStacks> = [
+          NETWORKING_TEST_STACKS[0],
+          STORAGE_TEST_STACKS[0],
+          INSTANCE_TEST_STACKS[0],
+        ];
+        const templates = getTemplates(stacksToTest);
 
-      stacksToTest.forEach(({ key }) => {
-        const template = getTemplate(key);
+        const resourceTypes = [
+          RESOURCE_TYPES.VPC,
+          RESOURCE_TYPES.EFS_FILE_SYSTEM,
+          RESOURCE_TYPES.ECS_CLUSTER,
+          RESOURCE_TYPES.ASG,
+        ];
 
-        const allResources = resourceTypes.reduce((acc, type) => {
-          return { ...acc, ...template.findResources(type) };
-        }, {});
-
-        // Verify resources exist and have proper tagging structure
-        if (Object.keys(allResources).length > 0) {
-          Object.values(allResources).forEach((resource) => {
-            const properties = (
-              resource as Record<string, Record<string, unknown>>
-            ).Properties;
-
-            validateTags(properties, 1);
+        // Pre-compute resources with tags
+        taggedResources = templates.flatMap((template, index) => {
+          const stackName = stacksToTest[index];
+          return resourceTypes.flatMap((type) => {
+            const resources = getResources(template, type);
+            return resources
+              .map((resource) => {
+                const properties = getResourceProperties(resource);
+                const tags = getResourceTags(resource);
+                return {
+                  stackName,
+                  resource,
+                  properties,
+                  tags,
+                  tagCount: tags.length,
+                };
+              })
+              .filter((item) => item.tagCount > 0);
           });
-        }
+        });
+      });
+
+      test("project name is applied to resources", () => {
+        expect(taggedResources.length).toBeGreaterThan(0);
+
+        taggedResources.forEach(({ tags }) => {
+          expect(Array.isArray(tags)).toBe(true);
+          expect(tags.length).toBeGreaterThanOrEqual(1);
+        });
       });
     });
 
-    test("region configuration is consistent across stacks", () => {
-      const stacksToTest = [
-        "networkingStack",
-        "efsStack",
-        "infraStack",
-        "serviceStack",
-      ] as const;
+    describe("Region Configuration", () => {
+      let stackTemplates: Array<{
+        stackName: keyof ConnectivityTestStacks;
+        template: Template;
+        hasResources: boolean;
+      }>;
 
-      stacksToTest.forEach((stackKey) => {
-        const template = getTemplate(stackKey);
-        const json = template.toJSON();
+      beforeAll(() => {
+        const stacksToTest: ReadonlyArray<keyof ConnectivityTestStacks> = [
+          NETWORKING_TEST_STACKS[0],
+          STORAGE_TEST_STACKS[0],
+          INSTANCE_TEST_STACKS[0],
+          IAM_TEST_STACKS[3],
+        ];
+        const templates = getTemplates(stacksToTest);
 
-        expect(json.Resources).toBeDefined();
-        expect(Object.keys(json.Resources).length).toBeGreaterThan(0);
+        // Pre-compute template resource checks
+        stackTemplates = templates.map((template, index) => {
+          const stackName = stacksToTest[index];
+          const json = template.toJSON();
+          return {
+            stackName,
+            template,
+            hasResources:
+              json.Resources !== undefined &&
+              Object.keys(json.Resources).length > 0,
+          };
+        });
+      });
+
+      test("region configuration is consistent across stacks", () => {
+        expect(stackTemplates).toBeDefined();
+        expect(Array.isArray(stackTemplates)).toBe(true);
+
+        stackTemplates.forEach(({ hasResources }) => {
+          expect(hasResources).toBe(true);
+        });
       });
     });
   });
@@ -467,47 +691,102 @@ describe("Integration: Cross-Stack Connectivity Tests", () => {
   // ==========================================================================
 
   describe("Parameter Store Connectivity", () => {
-    test("parameters follow consistent naming convention", () => {
-      const stacksToTest = ["efsStack", "infraStack"] as const;
+    describe("Parameter Naming Convention", () => {
+      let allParameters: Array<{
+        stackName: keyof ConnectivityTestStacks;
+        properties: Record<string, string>;
+        nameParts: string[];
+      }>;
 
-      stacksToTest.forEach((stackKey) => {
-        const template = getTemplate(stackKey);
+      beforeAll(() => {
+        const stacksToTest: ReadonlyArray<keyof ConnectivityTestStacks> = [
+          STORAGE_TEST_STACKS[0],
+          INSTANCE_TEST_STACKS[0],
+        ];
+        const templates = getTemplates(stacksToTest);
 
-        validateSsmParameters(template, (properties) => {
-          // Should follow /service/environment/category/name pattern
-          const nameParts = properties.Name?.split("/").filter(Boolean);
-          expect(nameParts && nameParts.length).toBeGreaterThanOrEqual(3);
+        // Pre-compute parameters with name parts
+        allParameters = templates.flatMap((template, index) => {
+          const stackName = stacksToTest[index];
+          const parameters = getSsmParameters(template);
+          return parameters.map((param) => {
+            const properties = getSsmParameterProperties(param);
+            const nameParts = properties.Name?.split("/").filter(Boolean) || [];
+            return {
+              stackName,
+              properties,
+              nameParts,
+            };
+          });
+        });
+      });
+
+      test("parameters follow consistent naming convention", () => {
+        expect(allParameters.length).toBeGreaterThan(0);
+
+        allParameters.forEach(({ nameParts }) => {
+          expect(nameParts).toBeDefined();
+          expect(nameParts.length).toBeGreaterThanOrEqual(3);
         });
       });
     });
 
-    test("parameters include environment context", () => {
-      const stacksToTest = ["efsStack", "infraStack"] as const;
+    describe("Parameter Environment Context", () => {
+      let allParameters: Array<{
+        stackName: keyof ConnectivityTestStacks;
+        properties: Record<string, string>;
+        nameParts: string[];
+      }>;
 
-      stacksToTest.forEach((stackKey) => {
-        const template = getTemplate(stackKey);
+      beforeAll(() => {
+        const stacksToTest: ReadonlyArray<keyof ConnectivityTestStacks> = [
+          STORAGE_TEST_STACKS[0],
+          INSTANCE_TEST_STACKS[0],
+        ];
+        const templates = getTemplates(stacksToTest);
 
-        validateSsmParameters(template, (properties) => {
-          // Parameter names should include environment
+        // Pre-compute parameters with name parts
+        allParameters = templates.flatMap((template, index) => {
+          const stackName = stacksToTest[index];
+          const parameters = getSsmParameters(template);
+          return parameters.map((param) => {
+            const properties = getSsmParameterProperties(param);
+            const nameParts = properties.Name?.split("/").filter(Boolean) || [];
+            return {
+              stackName,
+              properties,
+              nameParts,
+            };
+          });
+        });
+      });
+
+      test("parameters include environment context", () => {
+        expect(allParameters.length).toBeGreaterThan(0);
+
+        allParameters.forEach(({ properties, nameParts }) => {
           expect(properties.Name).toBeDefined();
-          expect(properties.Name.split("/").length).toBeGreaterThan(2);
+          expect(nameParts.length).toBeGreaterThan(2);
         });
       });
     });
 
-    test("service stack can access infrastructure parameters", () => {
-      const infraTemplate = getTemplate("infraStack");
-      const serviceTemplate = getTemplate("serviceStack");
+    describe("Service Stack Parameter Access", () => {
+      let infraParameters: unknown[];
+      let serviceServices: unknown[];
 
-      // Infra creates parameters
-      expect(
-        countResourcesOfType(infraTemplate, "AWS::SSM::Parameter")
-      ).toBeGreaterThan(0);
+      beforeAll(() => {
+        const infraTemplate = getTemplate(INSTANCE_TEST_STACKS[0]);
+        const serviceTemplate = getTemplate(IAM_TEST_STACKS[3]);
 
-      // Service stack references cluster (which may use parameters)
-      expect(
-        countResourcesOfType(serviceTemplate, RESOURCE_TYPES.ECS_SERVICE)
-      ).toBeGreaterThan(0);
+        infraParameters = getSsmParameters(infraTemplate);
+        serviceServices = getResources(serviceTemplate, RESOURCE_TYPES.ECS_SERVICE);
+      });
+
+      test("service stack can access infrastructure parameters", () => {
+        expect(infraParameters.length).toBeGreaterThan(0);
+        expect(serviceServices.length).toBeGreaterThan(0);
+      });
     });
   });
 
@@ -516,51 +795,80 @@ describe("Integration: Cross-Stack Connectivity Tests", () => {
   // ==========================================================================
 
   describe("Dependency Validation", () => {
-    test("circular dependencies do not exist between stacks", () => {
-      // Networking should not reference EFS or Infra
-      const networkingTemplate = getTemplate("networkingStack");
-      const networkingStr = JSON.stringify(networkingTemplate.toJSON());
+    describe("Circular Dependency Prevention", () => {
+      let networkingStr: string;
+      let efsStr: string;
+      let infraJson: Record<string, unknown>;
+      let serviceJson: Record<string, unknown>;
 
-      expect(networkingStr).not.toMatch(/AWS::EFS::/);
-      expect(networkingStr).not.toMatch(new RegExp(RESOURCE_TYPES.ECS_CLUSTER));
+      beforeAll(() => {
+        const networkingTemplate = getTemplate(NETWORKING_TEST_STACKS[0]);
+        const efsTemplate = getTemplate(STORAGE_TEST_STACKS[0]);
+        const infraTemplate = getTemplate(INSTANCE_TEST_STACKS[0]);
+        const serviceTemplate = getTemplate(IAM_TEST_STACKS[3]);
 
-      // EFS should not reference Infra or Service
-      const efsTemplate = getTemplate("efsStack");
-      const efsStr = JSON.stringify(efsTemplate.toJSON());
+        networkingStr = JSON.stringify(networkingTemplate.toJSON());
+        efsStr = JSON.stringify(efsTemplate.toJSON());
+        infraJson = infraTemplate.toJSON();
+        serviceJson = serviceTemplate.toJSON();
+      });
 
-      expect(efsStr).not.toMatch(new RegExp(RESOURCE_TYPES.ECS_CLUSTER));
-      expect(efsStr).not.toMatch(new RegExp(RESOURCE_TYPES.ECS_SERVICE));
+      test("circular dependencies do not exist between stacks", () => {
+        // Networking should not reference EFS or Infra
+        expect(networkingStr).not.toMatch(/AWS::EFS::/);
+        expect(networkingStr).not.toMatch(new RegExp(RESOURCE_TYPES.ECS_CLUSTER));
 
-      // Infra and Service should exist
-      const infraJson = getTemplate("infraStack").toJSON();
-      const serviceJson = getTemplate("serviceStack").toJSON();
+        // EFS should not reference Infra or Service
+        expect(efsStr).not.toMatch(new RegExp(RESOURCE_TYPES.ECS_CLUSTER));
+        expect(efsStr).not.toMatch(new RegExp(RESOURCE_TYPES.ECS_SERVICE));
 
-      expect(infraJson.Resources).toBeDefined();
-      expect(serviceJson.Resources).toBeDefined();
+        // Infra and Service should exist
+        expect(infraJson.Resources).toBeDefined();
+        expect(serviceJson.Resources).toBeDefined();
+      });
     });
 
-    test("dependent stacks reference required resources", () => {
-      const dependencies = [
-        {
-          stack: "efsStack",
-          resourceType: RESOURCE_TYPES.SECURITY_GROUP,
-          description: "EFS depends on Networking (VPC)",
-        },
-        {
-          stack: "infraStack",
-          resourceType: RESOURCE_TYPES.SECURITY_GROUP,
-          description: "Infra depends on Networking and EFS",
-        },
-        {
-          stack: "serviceStack",
-          resourceType: RESOURCE_TYPES.ECS_SERVICE,
-          description: "Service depends on Infra",
-        },
-      ] as const;
+    describe("Required Resource Dependencies", () => {
+      let dependencyChecks: Array<{
+        stack: keyof ConnectivityTestStacks;
+        resourceType: string;
+        count: number;
+      }>;
 
-      dependencies.forEach(({ stack, resourceType }) => {
-        const template = getTemplate(stack);
-        expect(countResourcesOfType(template, resourceType)).toBeGreaterThan(0);
+      beforeAll(() => {
+        const dependencies = [
+          {
+            stack: STORAGE_TEST_STACKS[0],
+            resourceType: RESOURCE_TYPES.SECURITY_GROUP,
+          },
+          {
+            stack: INSTANCE_TEST_STACKS[0],
+            resourceType: RESOURCE_TYPES.SECURITY_GROUP,
+          },
+          {
+            stack: IAM_TEST_STACKS[3],
+            resourceType: RESOURCE_TYPES.ECS_SERVICE,
+          },
+        ] as const;
+
+        // Pre-compute resource counts
+        dependencyChecks = dependencies.map(({ stack, resourceType }) => {
+          const template = getTemplate(stack);
+          return {
+            stack,
+            resourceType,
+            count: countResourcesOfType(template, resourceType),
+          };
+        });
+      });
+
+      test("dependent stacks reference required resources", () => {
+        expect(dependencyChecks).toBeDefined();
+        expect(Array.isArray(dependencyChecks)).toBe(true);
+
+        dependencyChecks.forEach(({ count }) => {
+          expect(count).toBeGreaterThan(0);
+        });
       });
     });
   });

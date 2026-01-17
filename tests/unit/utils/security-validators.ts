@@ -203,6 +203,30 @@ export const isPrivateSubnet = (subnet: unknown): boolean => {
 };
 
 // =============================================================================
+// Resource Validation
+// =============================================================================
+
+/**
+ * Validate tags structure
+ */
+export const validateTags = (
+  properties: Record<string, unknown>,
+  minTagCount = 0
+): boolean => {
+  if (properties.Tags) {
+    const tags = properties.Tags as Array<Record<string, string>>;
+    if (!Array.isArray(tags)) {
+      return false;
+    }
+    if (minTagCount > 0 && tags.length < minTagCount) {
+      return false;
+    }
+    return true;
+  }
+  return minTagCount === 0;
+};
+
+// =============================================================================
 // EFS Validation
 // =============================================================================
 
