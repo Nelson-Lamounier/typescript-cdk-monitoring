@@ -159,3 +159,175 @@ export const SUBNET_TYPES = {
   PRIVATE: "Private",
   ISOLATED: "Isolated",
 } as const;
+
+// ============================================================================
+// EFS TEST CONSTANTS
+// ============================================================================
+
+/**
+ * EFS-specific test constants
+ */
+export const EFS_TEST_CONSTANTS = {
+  MOUNT_PATH: "/monitoring",
+  NFS_PORT: 2049,
+  OWNER_UID: "1000",
+  OWNER_GID: "1000",
+  PERMISSIONS: "755",
+  AVAILABILITY_ZONE: "eu-west-1a",
+} as const;
+
+// ============================================================================
+// RESOURCE COUNT CONSTANTS
+// ============================================================================
+
+/**
+ * Expected resource counts for EFS stack tests
+ */
+export const EFS_RESOURCE_COUNTS = {
+  FILE_SYSTEM: 1,
+  ACCESS_POINT: 1,
+  SECURITY_GROUP: 1,
+  SSM_DOCUMENT: 1,
+  SSM_ASSOCIATION: 1,
+  LAMBDA_FUNCTION: 0,
+  CUSTOM_RESOURCE: 0,
+} as const;
+
+// ============================================================================
+// SSM PARAMETER PATHS
+// ============================================================================
+
+/**
+ * SSM parameter paths for monitoring configuration
+ */
+export const SSM_PARAMETER_PATHS = {
+  PROMETHEUS_CONFIG: "/monitoring/development/prometheus-config",
+  PROMETHEUS_CONFIG_YAML: "/monitoring/development/prometheus-config-yaml",
+  GRAFANA_DATASOURCE_CONFIG:
+    "/monitoring/development/grafana-datasource-config",
+  GRAFANA_DATASOURCE_CONFIG_YAML:
+    "/monitoring/development/grafana-datasource-config-yaml",
+  GRAFANA_DASHBOARD_CONFIG:
+    "/monitoring/development/grafana-dashboard-config",
+  GRAFANA_DASHBOARD_CONFIG_YAML:
+    "/monitoring/development/grafana-dashboard-config-yaml",
+  EFS_CONFIG_PREFIX: "/monitoring/.*/efs/config/.*",
+} as const;
+
+// ============================================================================
+// OUTPUT NAMES
+// ============================================================================
+
+/**
+ * CloudFormation output names for EFS stack
+ */
+export const EFS_OUTPUT_NAMES = {
+  FILE_SYSTEM_ID: "FileSystemId",
+  ACCESS_POINT_ID: "AccessPointId",
+  SECURITY_GROUP_ID: "SecurityGroupId",
+} as const;
+
+// ============================================================================
+// SSM DOCUMENT CONSTANTS
+// ============================================================================
+
+/**
+ * SSM document configuration constants
+ */
+export const SSM_DOCUMENT_CONFIG = {
+  TYPE: "Automation",
+  FORMAT: "YAML",
+} as const;
+
+// ============================================================================
+// LIFECYCLE POLICY CONSTANTS
+// ============================================================================
+
+/**
+ * EFS lifecycle policy transition values
+ */
+export const EFS_LIFECYCLE_POLICIES = {
+  AFTER_7_DAYS: "AFTER_7_DAYS",
+  AFTER_14_DAYS: "AFTER_14_DAYS",
+  AFTER_30_DAYS: "AFTER_30_DAYS",
+  AFTER_60_DAYS: "AFTER_60_DAYS",
+  AFTER_90_DAYS: "AFTER_90_DAYS",
+} as const;
+
+// ============================================================================
+// MONITORING INFRA CONSTANTS
+// ============================================================================
+
+export const MONITORING_INFRA_CONSTANTS = {
+  EFS_STACK_NAME: "MonitoringEfsStack",
+  CERTIFICATE_ARN:
+    "arn:aws:acm:eu-west-1:123456789012:certificate/12345678-1234-1234-1234-123456789012",
+  LOG_SUFFIXES: {
+    TASKS: "/tasks",
+    EVENTS: "/events",
+  },
+  DESCRIPTIONS: {
+    EFS_SECURITY_GROUP: "Security group for EFS",
+    LOAD_BALANCER: "load balancer",
+  },
+  SSM_ASSOCIATION_NAMES: {
+    RUN_SHELL_SCRIPT: "AWS-RunShellScript",
+    CONFIGURE_AWS_PACKAGE: "AWS-ConfigureAWSPackage",
+  },
+} as const;
+
+export const MONITORING_INFRA_RESOURCE_COUNTS = {
+  ECS_CLUSTER: 1,
+  LOAD_BALANCER: 1,
+  AUTO_SCALING_GROUP: 1,
+  LOG_GROUPS: 2,
+  SSM_PARAMETERS: 5,
+} as const;
+
+export const MONITORING_INFRA_SSM_PATHS = {
+  CLUSTER_NAME: "/monitoring/development/infra/config/cluster-name",
+  CLUSTER_ARN: "/monitoring/development/infra/config/cluster-arn",
+  ALB_DNS: "/monitoring/development/infra/config/alb-dns",
+  LISTENER_ARN: "/monitoring/development/infra/config/listener-arn",
+  ASG_NAME: "/monitoring/development/infra/config/asg-name",
+} as const;
+
+// ============================================================================
+// MONITORING SERVICE CONSTANTS
+// ============================================================================
+
+export const MONITORING_SERVICE_RESOURCE_COUNTS = {
+  ECS_SERVICES: 3,
+  TARGET_GROUPS: 2,
+  LISTENER_RULES: 2,
+  SECRETS: 1,
+  SSM_PARAMETERS: 5,
+  OUTPUTS: 6,
+} as const;
+
+export const MONITORING_SERVICE_NAMES = {
+  PROMETHEUS: "prometheus",
+  GRAFANA: "grafana",
+  NODE_EXPORTER: "node-exporter",
+} as const;
+
+export const MONITORING_SERVICE_SECRET_NAMES = {
+  GRAFANA_ADMIN: "grafana-admin-password",
+} as const;
+
+export const MONITORING_SERVICE_SSM_PARAMETER_NAMES = {
+  PROMETHEUS_SERVICE_ARN: "prometheus-service-arn",
+  GRAFANA_SERVICE_ARN: "grafana-service-arn",
+  NODE_EXPORTER_SERVICE_ARN: "node-exporter-service-arn",
+  PROMETHEUS_TARGET_GROUP_ARN: "prometheus-target-group-arn",
+  GRAFANA_TARGET_GROUP_ARN: "grafana-target-group-arn",
+} as const;
+
+export const MONITORING_SERVICE_OUTPUT_NAMES = {
+  PROMETHEUS_SERVICE_ARN: "PrometheusServiceArn",
+  GRAFANA_SERVICE_ARN: "GrafanaServiceArn",
+  NODE_EXPORTER_SERVICE_ARN: "NodeExporterServiceArn",
+  PROMETHEUS_TARGET_GROUP_ARN: "PrometheusTargetGroupArn",
+  GRAFANA_TARGET_GROUP_ARN: "GrafanaTargetGroupArn",
+  GRAFANA_ADMIN_SECRET_ARN: "GrafanaAdminSecretArn",
+} as const;

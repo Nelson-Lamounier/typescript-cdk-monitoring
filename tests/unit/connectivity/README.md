@@ -144,26 +144,82 @@ describe("Connectivity Tests", () => {
 });
 ```
 
-#### 2. Helper Function Pattern
+#### 2. Pre-computation Pattern (beforeAll)
 
-Reusable helpers eliminate duplication and improve readability:
+All filtering and conditional logic is moved to `beforeAll` blocks to comply with `jest/no-conditional-in-test` rule:
 
 ```typescript
-// Arrow function helper (defined in beforeAll context)
-const getTemplate = (stackName: keyof ConnectivityTestStacks) => {
-  return Template.fromStack(stacks[stackName]);
-};
+describe("Service Port Configuration", () => {
+  let prometheusContainers: Array<{
+    container: ContainerDefinition;
+    hasCorrectPort: boolean;
+  }>;
 
-const validateServicePort = (
-  template: Template,
-  serviceName: string,
-  port: number
-) => {
-  // Reusable validation logic
-};
+  beforeAll(() => {
+    const template = getTemplate(IAM_TEST_STACKS[3]);
+    const taskDefs = getResources(template, RESOURCE_TYPES.ECS_TASK_DEFINITION);
+    const allContainers = taskDefs.flatMap((taskDef) =>
+      getContainersFromTaskDef(taskDef)
+    );
+
+    // Pre-compute all data in beforeAll
+    prometheusContainers = allContainers
+      .filter((container) =>
+        container.Name?.toLowerCase().includes("prometheus")
+      )
+      .map((container) => ({
+        container,
+        hasCorrectPort: containerHasPort(container, PORT_CONFIG.PROMETHEUS),
+      }));
+  });
+
+  test("Prometheus service uses correct port", () => {
+    expect(prometheusContainers.length).toBeGreaterThan(0);
+    prometheusContainers.forEach(({ hasCorrectPort }) => {
+      expect(hasCorrectPort).toBe(true);
+    });
+  });
+});
 ```
 
-#### 3. Layered Validation
+#### 3. Centralised Stack Configuration
+
+Tests use type-safe stack constants from `test-config.ts` instead of hardcoded stack names:
+
+```typescript
+import {
+  STORAGE_TEST_STACKS,
+  IAM_TEST_STACKS,
+  INSTANCE_TEST_STACKS,
+  NETWORKING_TEST_STACKS,
+} from "./test-config";
+
+// Use constants instead of hardcoded strings
+const template = getTemplate(STORAGE_TEST_STACKS[0]); // EFS stack
+const template = getTemplate(IAM_TEST_STACKS[3]); // Service stack
+const template = getTemplate(INSTANCE_TEST_STACKS[0]); // Infra stack
+```
+
+#### 4. Utility Function Pattern
+
+Tests import reusable utilities from `../utils` instead of defining inline helpers:
+
+```typescript
+import {
+  getResources,
+  getResourceProperties,
+  getContainersFromTaskDef,
+  getTaskDefNetworkMode,
+  getSecurityGroupIngressRules,
+  getIngressRules,
+  validateResourceProperties,
+  isInRange,
+  isValidNetworkMode,
+  isNfsPortRule,
+} from "../utils";
+```
+
+#### 5. Layered Validation
 
 Tests validate from bottom-up (infrastructure → application):
 
@@ -248,6 +304,23 @@ export const RESOURCE_TYPES = {
   SECURITY_GROUP: "AWS::EC2::SecurityGroup",
   // ... all CloudFormation resource types
 };
+
+// Stack Configuration Constants (Type-Safe)
+export const IAM_TEST_STACKS: ReadonlyArray<
+  keyof Omit<ConnectivityTestStacks, "app">
+> = ["networkingStack", "efsStack", "infraStack", "serviceStack"] as const;
+
+export const STORAGE_TEST_STACKS: ReadonlyArray<
+  keyof Omit<ConnectivityTestStacks, "app">
+> = ["efsStack"] as const;
+
+export const INSTANCE_TEST_STACKS: ReadonlyArray<
+  keyof Omit<ConnectivityTestStacks, "app">
+> = ["infraStack"] as const;
+
+export const NETWORKING_TEST_STACKS: ReadonlyArray<
+  keyof Omit<ConnectivityTestStacks, "app">
+> = ["networkingStack", "efsStack", "infraStack"] as const;
 ```
 
 ### Mock Resources
@@ -306,24 +379,39 @@ test("Networking stack exports VPC ID", () => {
 ### How to Validate Security Group Rules
 
 ```typescript
-test("EFS security group allows NFS from ECS", () => {
-  const template = Template.fromStack(stacks.efsStack);
+describe("EFS Security Group Configuration", () => {
+  let securityGroups: unknown[];
+  let nfsRules: Array<Record<string, unknown>>;
 
-  // Method 1: Using template assertions
-  template.hasResourceProperties("AWS::EC2::SecurityGroupIngress", {
-    IpProtocol: "tcp",
-    FromPort: PORT_CONFIG.NFS,
-    ToPort: PORT_CONFIG.NFS,
-    SourceSecurityGroupId: Match.anyValue(),
+  beforeAll(() => {
+    const template = getTemplate(STORAGE_TEST_STACKS[0]);
+    securityGroups = getResources(template, RESOURCE_TYPES.SECURITY_GROUP);
+
+    // Get all ingress rules from SecurityGroupIngress resources
+    const standaloneRules = getSecurityGroupIngressRules(template);
+    const standaloneNfsRules = standaloneRules
+      .map((rule) => getResourceProperties(rule))
+      .filter((properties) => isNfsPortRule(properties));
+
+    // Also get ingress rules from security groups' SecurityGroupIngress property
+    const securityGroupNfsRules = securityGroups.flatMap((sg) => {
+      try {
+        const ingressRules = getIngressRules(sg);
+        return ingressRules.filter((rule) => isNfsPortRule(rule));
+      } catch {
+        return [];
+      }
+    });
+
+    nfsRules = [...standaloneNfsRules, ...securityGroupNfsRules];
   });
 
-  // Method 2: Using dynamic validation
-  const rules = template.findResources("AWS::EC2::SecurityGroupIngress");
-  Object.values(rules).forEach((rule) => {
-    const props = rule.Properties;
-    if (props.FromPort === PORT_CONFIG.NFS) {
-      expect(props.SourceSecurityGroupId).toBeDefined();
-    }
+  test("EFS security group allows NFS from ECS", () => {
+    expect(securityGroups.length).toBeGreaterThan(0);
+    expect(nfsRules.length).toBeGreaterThan(0);
+    nfsRules.forEach((rule) => {
+      expect(rule.IpProtocol).toBe("tcp");
+    });
   });
 });
 ```
@@ -364,9 +452,21 @@ test("public subnets route to Internet Gateway", () => {
 1. **Import dependencies:**
 
 ```typescript
-import { Template } from "aws-cdk-lib/assertions";
+import { Template, Match } from "aws-cdk-lib/assertions";
 import { createConnectivityTestStacks } from "../utils/test-utils";
-import { ConnectivityTestStacks, RESOURCE_TYPES } from "./test-config";
+import {
+  getResources,
+  getResourceProperties,
+  validateResourceProperties,
+} from "../utils";
+import {
+  ConnectivityTestStacks,
+  RESOURCE_TYPES,
+  PORT_CONFIG,
+  STORAGE_TEST_STACKS,
+  IAM_TEST_STACKS,
+  INSTANCE_TEST_STACKS,
+} from "./test-config";
 ```
 
 2. **Initialize stacks:**
@@ -379,8 +479,11 @@ describe("New Connectivity Tests", () => {
     stacks = createConnectivityTestStacks();
   });
 
-  // Helper functions (arrow functions)
+  // Helper function (arrow function)
   const getTemplate = (stackName: keyof ConnectivityTestStacks) => {
+    if (stackName === "app") {
+      throw new Error("Cannot get template for app");
+    }
     return Template.fromStack(stacks[stackName]);
   };
 });
@@ -391,27 +494,34 @@ describe("New Connectivity Tests", () => {
 ```typescript
 describe("New Service Connectivity", () => {
   let stacks: ConnectivityTestStacks;
+  let serviceContainers: Array<{
+    container: ContainerDefinition;
+    hasCorrectPort: boolean;
+  }>;
 
   beforeAll(() => {
     stacks = createConnectivityTestStacks();
+    const template = getTemplate(IAM_TEST_STACKS[3]);
+    const taskDefs = getResources(template, RESOURCE_TYPES.ECS_TASK_DEFINITION);
+
+    // Pre-compute all data in beforeAll (no conditionals in tests)
+    const allContainers = taskDefs.flatMap((taskDef) =>
+      getContainersFromTaskDef(taskDef)
+    );
+
+    serviceContainers = allContainers
+      .filter((container) =>
+        container.Name?.toLowerCase().includes("my-service")
+      )
+      .map((container) => ({
+        container,
+        hasCorrectPort: containerHasPort(container, 8080),
+      }));
   });
 
   test("new service uses correct port", () => {
-    // Arrange
-    const template = Template.fromStack(stacks.serviceStack);
-    const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
-
-    // Act
-    const containers = Object.values(taskDefs)
-      .flatMap((td) => td.Properties.ContainerDefinitions)
-      .filter((c) => c.Name.includes("my-service"));
-
-    // Assert
-    expect(containers.length).toBeGreaterThan(0);
-    containers.forEach((container) => {
-      const hasCorrectPort = container.PortMappings.some(
-        (pm) => pm.ContainerPort === 8080
-      );
+    expect(serviceContainers.length).toBeGreaterThan(0);
+    serviceContainers.forEach(({ hasCorrectPort }) => {
       expect(hasCorrectPort).toBe(true);
     });
   });
@@ -449,7 +559,7 @@ Validates core networking infrastructure and connectivity patterns.
 
 ### 2. Service Connectivity Tests (`service-connectivity.test.ts`)
 
-**Lines:** 762 | **Test Cases:** 30+
+**Lines:** 814 | **Test Cases:** 30+
 
 Validates connectivity between application services and infrastructure components.
 
@@ -599,27 +709,66 @@ test("subnets span multiple availability zones", () => {
 });
 ```
 
-### 4. Use Helper Functions
+### 4. Use Utility Functions from `../utils`
 
-Extract common validation logic:
+Import and use shared utilities instead of defining inline helpers:
 
 ```typescript
-const validateServicePort = (
-  template: Template,
-  serviceName: string,
-  port: number
-) => {
-  const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
-  // ... validation logic
-};
+import {
+  getResources,
+  getResourceProperties,
+  getContainersFromTaskDef,
+  validateResourceProperties,
+  isInRange,
+  isValidNetworkMode,
+} from "../utils";
 
 // Use in tests
 test("Prometheus uses correct port", () => {
-  validateServicePort(getTemplate("serviceStack"), "prometheus", 9090);
+  const template = getTemplate(IAM_TEST_STACKS[3]);
+  const taskDefs = getResources(template, RESOURCE_TYPES.ECS_TASK_DEFINITION);
+  const containers = taskDefs.flatMap((td) =>
+    getContainersFromTaskDef(td)
+  );
+  // ... validation logic
 });
 ```
 
-### 5. Never Access Template During Initialization
+### 5. Pre-compute Data in beforeAll (No Conditionals in Tests)
+
+**❌ Bad (Conditional in test):**
+
+```typescript
+test("validate NFS rules", () => {
+  const rules = getIngressRules(template);
+  const nfsRules = rules.filter((rule) => {
+    if (rule.FromPort === 2049) { // Conditional in test!
+      return true;
+    }
+    return false;
+  });
+  expect(nfsRules.length).toBeGreaterThan(0);
+});
+```
+
+**✅ Good (Pre-compute in beforeAll):**
+
+```typescript
+describe("NFS Rules", () => {
+  let nfsRules: Array<Record<string, unknown>>;
+
+  beforeAll(() => {
+    const rules = getIngressRules(template);
+    nfsRules = rules.filter((rule) => isNfsPortRule(rule));
+  });
+
+  test("NFS rules exist", () => {
+    expect(nfsRules.length).toBeGreaterThan(0);
+  });
+});
+```
+
+### 6. Never Access Template During Initialization
 
 **❌ Bad:**
 
@@ -633,10 +782,15 @@ describe("Tests", () => {
 
 ```typescript
 describe("Tests", () => {
-  const getCount = () => countResourcesOfType(template, "AWS::EC2::VPC");
+  let vpcCount: number;
+
+  beforeAll(() => {
+    const template = getTemplate(NETWORKING_TEST_STACKS[0]);
+    vpcCount = getResources(template, RESOURCE_TYPES.VPC).length;
+  });
 
   test("should have VPC", () => {
-    expect(getCount()).toBe(1);
+    expect(vpcCount).toBe(1);
   });
 });
 ```
@@ -765,9 +919,12 @@ See [TROUBLESHOOTING_CONSOLIDATED.md](../../docs/TROUBLESHOOTING_CONSOLIDATED.md
 When adding new connectivity tests:
 
 1. Follow the existing pattern and structure
-2. Use helper functions to eliminate duplication
-3. Test both positive (works) and negative (doesn't work) cases
-4. Include descriptive test names that explain what is being validated
-5. Add documentation for complex connectivity patterns
-6. Update this README with new test categories
-7. Ensure tests follow [unit test best practices](../../prompts.txt)
+2. Use utility functions from `../utils` to eliminate duplication
+3. Use stack constants from `test-config.ts` (e.g., `STORAGE_TEST_STACKS[0]`) instead of hardcoded stack names
+4. Pre-compute all data in `beforeAll` blocks (no conditionals in tests)
+5. Add guard assertions before `forEach` loops
+6. Test both positive (works) and negative (doesn't work) cases
+7. Include descriptive test names that explain what is being validated
+8. Add documentation for complex connectivity patterns
+9. Update this README with new test categories
+10. Ensure tests follow [unit test best practices](../../prompts/tests/unit-test.txt)

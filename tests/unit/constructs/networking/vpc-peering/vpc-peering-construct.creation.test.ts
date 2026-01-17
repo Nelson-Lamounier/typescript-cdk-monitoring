@@ -4,8 +4,9 @@
 import * as cdk from "aws-cdk-lib";
 import { Template, Match } from "aws-cdk-lib/assertions";
 
-import { VpcPeeringConstruct } from "../../../../../lib/constructs/networking/vpc/vpc-peering-construct";
+
 import { createTestApp, extendExpectWithCdkMatchers } from "../../../utils/stack-test-utils";
+
 import {
   TEST_CONSTANTS,
   createTestStack,

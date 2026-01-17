@@ -262,7 +262,7 @@ export function saveTemplatesToDisk(
     saveTemplateToFile(template, name, config.environment, outputDir);
   });
 
-  // eslint-disable-next-line no-console
+   
   console.log(`✅ Templates saved to: ${outputDir}`);
 }
 
@@ -390,10 +390,10 @@ export function validateStackSynthesis(stacks: IntegrationTestStacks): void {
       throw new Error("Service stack has no resources");
     }
 
-    // eslint-disable-next-line no-console
+     
     console.log("✅ All stacks synthesised successfully");
   } catch (error) {
-    // eslint-disable-next-line no-console
+     
     console.error("❌ Stack synthesis failed:", error);
     throw error;
   }
@@ -425,14 +425,14 @@ export function validateResourceCounts(stacks: IntegrationTestStacks): {
 
   counts.total = counts.networking + counts.efs + counts.infra + counts.service;
 
-  /* eslint-disable no-console */
+   
   console.log("📊 Resource Counts:");
   console.log(`  Networking: ${counts.networking}`);
   console.log(`  EFS:        ${counts.efs}`);
   console.log(`  Infra:      ${counts.infra}`);
   console.log(`  Service:    ${counts.service}`);
   console.log(`  Total:      ${counts.total}`);
-  /* eslint-enable no-console */
+   
 
   return counts;
 }
@@ -475,7 +475,7 @@ export function cleanupGeneratedTemplates(
 ): void {
   if (fs.existsSync(outputDir)) {
     fs.rmSync(outputDir, { recursive: true, force: true });
-    // eslint-disable-next-line no-console
+     
     console.log(`🧹 Cleaned up: ${outputDir}`);
   }
 }
@@ -485,7 +485,7 @@ export function cleanupGeneratedTemplates(
  */
 export function cleanupTestArtifacts(): void {
   cleanupGeneratedTemplates();
-  // eslint-disable-next-line no-console
+   
   console.log("✅ All test artifacts cleaned up");
 }
 
@@ -499,7 +499,7 @@ export function cleanupTestArtifacts(): void {
  * @param stacks - Integration test stacks
  */
 export function printStackSummary(stacks: IntegrationTestStacks): void {
-  /* eslint-disable no-console */
+   
   console.log("\n" + "=".repeat(80));
   console.log("Stack Summary");
   console.log("=".repeat(80));
@@ -519,7 +519,7 @@ export function printStackSummary(stacks: IntegrationTestStacks): void {
     });
 
   console.log("\n" + "=".repeat(80));
-  /* eslint-enable no-console */
+   
 }
 
 /**
@@ -535,7 +535,7 @@ export function printResourceDetails(
   const json = template.toJSON();
   const resources = json.Resources || {};
 
-  /* eslint-disable no-console */
+   
   console.log(`\n${stackName} Stack Resources:`);
   console.log("-".repeat(80));
 
@@ -546,7 +546,7 @@ export function printResourceDetails(
 
   console.log("-".repeat(80));
   console.log(`Total: ${Object.keys(resources).length} resources\n`);
-  /* eslint-enable no-console */
+   
 }
 
 // ============================================================================
@@ -599,7 +599,7 @@ export function setupIntegrationTests(): void {
 
   // Use try-catch to handle when Jest globals are not available
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const jestGlobal = global as any;
 
     // Set default test timeout for CDK synthesis
@@ -610,7 +610,7 @@ export function setupIntegrationTests(): void {
     // Clean up before tests
     if (jestGlobal.beforeAll && typeof jestGlobal.beforeAll === "function") {
       jestGlobal.beforeAll(() => {
-        // eslint-disable-next-line no-console
+         
         console.log("🧪 Setting up integration tests...");
       });
     }
