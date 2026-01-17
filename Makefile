@@ -537,6 +537,32 @@ test-constructs: test-constructs-ecs test-constructs-storage test-constructs-net
 	@echo "$(GREEN)All construct tests completed$(NC)"
 
 # ============================================================================
+# HELPER TESTS
+# ============================================================================
+
+test-helpers-subnet-config-basic: ## Run subnet configuration helper basic tests
+	@echo "$(BLUE)Running subnet configuration helper basic tests...$(NC)"
+	yarn test tests/unit/helpers/subnet-configuration/subnet-configuration-helper.basic.test.ts
+
+test-helpers-subnet-config-tiers: ## Run subnet configuration helper tier tests
+	@echo "$(BLUE)Running subnet configuration helper tier tests...$(NC)"
+	yarn test tests/unit/helpers/subnet-configuration/subnet-configuration-helper.tiers.test.ts
+
+test-helpers-subnet-config-eks: ## Run subnet configuration helper EKS tests
+	@echo "$(BLUE)Running subnet configuration helper EKS tests...$(NC)"
+	yarn test tests/unit/helpers/subnet-configuration/subnet-configuration-helper.eks.test.ts
+
+test-helpers-subnet-config-specialized: ## Run subnet configuration helper specialized tests
+	@echo "$(BLUE)Running subnet configuration helper specialized tests...$(NC)"
+	yarn test tests/unit/helpers/subnet-configuration/subnet-configuration-helper.specialized.test.ts
+
+test-helpers-subnet-config: test-helpers-subnet-config-basic test-helpers-subnet-config-tiers test-helpers-subnet-config-eks test-helpers-subnet-config-specialized ## Run all subnet configuration helper tests
+	@echo "$(GREEN)All subnet configuration helper tests completed$(NC)"
+
+test-helpers: test-helpers-subnet-config ## Run all helper tests
+	@echo "$(GREEN)All helper tests completed$(NC)"
+
+# ============================================================================
 # LINTING & BUILD
 # ============================================================================
 
