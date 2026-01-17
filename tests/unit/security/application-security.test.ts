@@ -19,9 +19,36 @@ import { Template, Match } from "aws-cdk-lib/assertions";
 import {
   RESOURCE_TYPES,
   type ConnectivityTestStacks,
+  INSTANCE_TEST_STACKS,
+  IAM_TEST_STACKS,
 } from "../connectivity/test-config";
-
 import { SecurityTestFixtures } from "../utils/test-utils";
+// Import shared utilities - functions
+import {
+  getResources,
+  getResourceProperties,
+  findAlbAttribute,
+  findTargetGroupAttribute,
+  getContainersFromTaskDef,
+  getTaskDefNetworkMode,
+  getSsmTargets,
+  secretNameMatches,
+  hasHardcodedSecrets,
+  usesSecretsManager,
+  prepareContainerData,
+  prepareTargetGroupData,
+  prepareSecretData,
+  validateResourceProperties,
+  isInRange,
+  isValidNetworkMode,
+  isValidComplianceSeverity,
+} from "../utils";
+// Import shared utilities - types
+import type {
+  PreparedContainerData,
+  PreparedTargetGroupData,
+  PreparedSecretData,
+} from "../utils";
 
 describe("Security Posture: Application Security", () => {
   let stacks: ConnectivityTestStacks;
@@ -29,10 +56,6 @@ describe("Security Posture: Application Security", () => {
   beforeAll(() => {
     stacks = SecurityTestFixtures.getDevelopmentStacks();
   });
-
-  // ==========================================================================
-  // HELPER FUNCTIONS (defined as arrow functions)
-  // ==========================================================================
 
   /**
    * Get template from stack name
@@ -44,122 +67,14 @@ describe("Security Posture: Application Security", () => {
     return Template.fromStack(stacks[stackName]);
   };
 
-  /**
-   * Get resources of a specific type
-   */
-  const getResources = (template: Template, resourceType: string) => {
-    return Object.values(template.findResources(resourceType));
-  };
-
-  /**
-   * Extract ALB attributes
-   */
-  const getAlbAttributes = (alb: unknown): Array<Record<string, string>> => {
-    const properties = (alb as Record<string, Record<string, unknown>>)
-      .Properties;
-    return (properties.LoadBalancerAttributes || []) as Array<
-      Record<string, string>
-    >;
-  };
-
-  /**
-   * Find attribute by key in ALB attributes
-   */
-  const findAlbAttribute = (
-    alb: unknown,
-    key: string
-  ): Record<string, string> | undefined => {
-    const attributes = getAlbAttributes(alb);
-    return attributes.find((attr) => attr.Key === key);
-  };
-
-  /**
-   * Extract target group attributes
-   */
-  const getTargetGroupAttributes = (
-    targetGroup: unknown
-  ): Array<Record<string, string>> => {
-    const properties = (targetGroup as Record<string, Record<string, unknown>>)
-      .Properties;
-    return (properties.TargetGroupAttributes || []) as Array<
-      Record<string, string>
-    >;
-  };
-
-  /**
-   * Find attribute by key in target group attributes
-   */
-  const findTargetGroupAttribute = (
-    targetGroup: unknown,
-    key: string
-  ): Record<string, string> | undefined => {
-    const attributes = getTargetGroupAttributes(targetGroup);
-    return attributes.find((attr) => attr.Key === key);
-  };
-
-  /**
-   * Extract containers from task definition
-   */
-  const getContainersFromTaskDef = (
-    taskDef: unknown
-  ): Array<Record<string, unknown>> => {
-    const properties = (taskDef as Record<string, Record<string, unknown>>)
-      .Properties;
-    return (properties.ContainerDefinitions || []) as Array<
-      Record<string, unknown>
-    >;
-  };
-
-  /**
-   * Validate resource has required properties
-   */
-  const validateResourceProperties = (
-    resource: unknown,
-    requiredProps: string[]
-  ) => {
-    const properties = (resource as Record<string, Record<string, unknown>>)
-      .Properties;
-
-    requiredProps.forEach((prop) => {
-      expect(properties[prop]).toBeDefined();
-    });
-  };
-
-  /**
-   * Check if task definition contains hardcoded secrets
-   */
-  const hasHardcodedSecrets = (taskDef: unknown): boolean => {
-    const taskDefStr = JSON.stringify(taskDef);
-
-    // Check for obvious hardcoded secrets
-    const hasPassword = /password\s*["']\s*:\s*["'][^'"]+["']/i.test(
-      taskDefStr
-    );
-    const hasSecret = /secret\s*["']\s*:\s*["'][^'"]+["']/i.test(taskDefStr);
-    const hasAccessKey = /AKIA[0-9A-Z]{16}/.test(taskDefStr);
-
-    return hasPassword || hasSecret || hasAccessKey;
-  };
-
-  /**
-   * Check if task definition uses Secrets Manager
-   */
-  const usesSecretsManager = (taskDef: unknown): boolean => {
-    const taskDefStr = JSON.stringify(taskDef);
-    return (
-      taskDefStr.includes("Secrets") ||
-      taskDefStr.includes("ValueFrom") ||
-      taskDefStr.includes("secretsmanager")
-    );
-  };
-
   // ==========================================================================
   // LOAD BALANCER CONFIGURATION
   // ==========================================================================
 
   describe("Load Balancer Configuration", () => {
+    // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
     test("ALB has drop invalid header fields enabled", () => {
-      const template = getTemplate("infraStack");
+      const template = getTemplate(INSTANCE_TEST_STACKS[0]);
 
       template.hasResourceProperties(RESOURCE_TYPES.ALB, {
         LoadBalancerAttributes: Match.arrayWith([
@@ -173,9 +88,10 @@ describe("Security Posture: Application Security", () => {
 
     test("ALB has deletion protection configured for production", () => {
       const prodStacks = SecurityTestFixtures.getProductionStacks();
-      const template = Template.fromStack(prodStacks.infraStack);
+      const template = Template.fromStack(prodStacks[INSTANCE_TEST_STACKS[0]]);
       const albs = getResources(template, RESOURCE_TYPES.ALB);
 
+      expect(albs.length).toBeGreaterThan(0);
       albs.forEach((alb) => {
         const deletionProtection = findAlbAttribute(
           alb,
@@ -187,8 +103,9 @@ describe("Security Posture: Application Security", () => {
       });
     });
 
+    // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
     test("ALB is internet-facing with proper security groups", () => {
-      const template = getTemplate("infraStack");
+      const template = getTemplate(INSTANCE_TEST_STACKS[0]);
 
       template.hasResourceProperties(RESOURCE_TYPES.ALB, {
         Scheme: "internet-facing",
@@ -196,24 +113,38 @@ describe("Security Posture: Application Security", () => {
       });
     });
 
-    test("ALB has access logs configured (if enabled)", () => {
-      const template = getTemplate("infraStack");
-      const albs = getResources(template, RESOURCE_TYPES.ALB);
+    describe("ALB Access Logs Configuration", () => {
+      let albsWithAccessLogs: Array<{
+        alb: unknown;
+        accessLogsEnabled: string | undefined;
+      }>;
 
-      const albsWithAccessLogs = albs.filter((alb) => {
-        const accessLogsAttr = findAlbAttribute(alb, "access_logs.s3.enabled");
-        return accessLogsAttr !== undefined;
+      beforeAll(() => {
+        const template = getTemplate(INSTANCE_TEST_STACKS[0]);
+        const albs = getResources(template, RESOURCE_TYPES.ALB);
+
+        // Pre-filter and extract in beforeAll
+        albsWithAccessLogs = albs
+          .map((alb) => {
+            const accessLogsAttr = findAlbAttribute(alb, "access_logs.s3.enabled");
+            return {
+              alb,
+              accessLogsEnabled: accessLogsAttr?.Value,
+            };
+          })
+          .filter((item) => item.accessLogsEnabled !== undefined);
       });
 
-      // Skip test if no ALBs have access logs configured
-      if (albsWithAccessLogs.length === 0) {
-        return;
-      }
+      test("ALBs with access logs have valid configuration values", () => {
+        // This test validates configuration IF access logs are configured
+        // Empty array is valid - means access logs are not configured
+        expect(albsWithAccessLogs).toBeDefined();
+        expect(Array.isArray(albsWithAccessLogs)).toBe(true);
 
-      albsWithAccessLogs.forEach((alb) => {
-        const accessLogsAttr = findAlbAttribute(alb, "access_logs.s3.enabled");
-        expect(accessLogsAttr).toBeDefined();
-        expect(["false", "true"]).toContain(accessLogsAttr?.Value);
+        // If configured, values must be valid
+        albsWithAccessLogs.forEach(({ accessLogsEnabled }) => {
+          expect(["false", "true"]).toContain(accessLogsEnabled);
+        });
       });
     });
   });
@@ -223,72 +154,72 @@ describe("Security Posture: Application Security", () => {
   // ==========================================================================
 
   describe("Target Group Health Checks", () => {
-    test("target groups have health checks configured", () => {
-      const template = getTemplate("serviceStack");
-      const targetGroups = getResources(template, RESOURCE_TYPES.TARGET_GROUP);
+    describe("Health Check Configuration", () => {
+      let preparedTargetGroups: PreparedTargetGroupData[];
 
-      targetGroups.forEach((targetGroup) => {
-        const properties = (
-          targetGroup as Record<string, Record<string, unknown>>
-        ).Properties;
+      beforeAll(() => {
+        const template = getTemplate(IAM_TEST_STACKS[3]);
+        const targetGroups = getResources(template, RESOURCE_TYPES.TARGET_GROUP);
 
-        expect(properties.HealthCheckPath).toBeDefined();
-        expect(properties.HealthCheckIntervalSeconds).toBeDefined();
+        // Pre-compute all health check data
+        preparedTargetGroups = targetGroups.map(prepareTargetGroupData);
+      });
 
-        // Health check is configured if path or protocol is defined
-        expect(
-          properties.HealthCheckPath !== undefined ||
-            properties.HealthCheckProtocol !== undefined
-        ).toBe(true);
+      test("target groups exist", () => {
+        expect(preparedTargetGroups.length).toBeGreaterThan(0);
+      });
+
+      test("target groups have health checks configured", () => {
+        preparedTargetGroups.forEach(({ hasHealthCheck }) => {
+          expect(hasHealthCheck).toBe(true);
+        });
+      });
+
+      test("target groups have appropriate health check thresholds", () => {
+        preparedTargetGroups.forEach(({ healthyThreshold, unhealthyThreshold }) => {
+          expect(healthyThreshold).toBeDefined();
+          expect(unhealthyThreshold).toBeDefined();
+
+          // Thresholds should be reasonable (2-10)
+          expect(isInRange(healthyThreshold!, 2, 10)).toBe(true);
+          expect(isInRange(unhealthyThreshold!, 2, 10)).toBe(true);
+        });
       });
     });
 
-    test("target groups have appropriate health check thresholds", () => {
-      const template = getTemplate("serviceStack");
-      const targetGroups = getResources(template, RESOURCE_TYPES.TARGET_GROUP);
+    describe("Deregistration Delay Configuration", () => {
+      let targetGroupsWithDelay: Array<{
+        targetGroup: unknown;
+        delaySeconds: number;
+      }>;
 
-      targetGroups.forEach((targetGroup) => {
-        const properties = (
-          targetGroup as Record<string, Record<string, number>>
-        ).Properties;
+      beforeAll(() => {
+        const template = getTemplate(IAM_TEST_STACKS[3]);
+        const targetGroups = getResources(template, RESOURCE_TYPES.TARGET_GROUP);
 
-        expect(properties.HealthyThresholdCount).toBeDefined();
-        expect(properties.UnhealthyThresholdCount).toBeDefined();
-
-        // Thresholds should be reasonable (2-10)
-        expect(properties.HealthyThresholdCount).toBeGreaterThanOrEqual(2);
-        expect(properties.HealthyThresholdCount).toBeLessThanOrEqual(10);
-        expect(properties.UnhealthyThresholdCount).toBeGreaterThanOrEqual(2);
-        expect(properties.UnhealthyThresholdCount).toBeLessThanOrEqual(10);
-      });
-    });
-
-    test("target groups have deregistration delay configured (if configured)", () => {
-      const template = getTemplate("serviceStack");
-      const targetGroups = getResources(template, RESOURCE_TYPES.TARGET_GROUP);
-
-      const targetGroupsWithDelay = targetGroups.filter((targetGroup) => {
-        const deregDelayAttr = findTargetGroupAttribute(
-          targetGroup,
-          "deregistration_delay.timeout_seconds"
-        );
-        return deregDelayAttr !== undefined;
+        // Pre-filter and extract in beforeAll
+        targetGroupsWithDelay = targetGroups
+          .map((targetGroup) => {
+            const deregDelayAttr = findTargetGroupAttribute(
+              targetGroup,
+              "deregistration_delay.timeout_seconds"
+            );
+            return {
+              targetGroup,
+              delaySeconds: deregDelayAttr ? parseInt(deregDelayAttr.Value || "0") : -1,
+            };
+          })
+          .filter((item) => item.delaySeconds >= 0);
       });
 
-      // Skip test if no target groups have deregistration delay configured
-      if (targetGroupsWithDelay.length === 0) {
-        return;
-      }
+      test("target groups have deregistration delay configured", () => {
+        expect(targetGroupsWithDelay.length).toBeGreaterThan(0);
+      });
 
-      targetGroupsWithDelay.forEach((targetGroup) => {
-        const deregDelayAttr = findTargetGroupAttribute(
-          targetGroup,
-          "deregistration_delay.timeout_seconds"
-        );
-        expect(deregDelayAttr).toBeDefined();
-        const delaySeconds = parseInt(deregDelayAttr?.Value || "0");
-        expect(delaySeconds).toBeGreaterThanOrEqual(0);
-        expect(delaySeconds).toBeLessThanOrEqual(300);
+      test("deregistration delay is within acceptable range", () => {
+        targetGroupsWithDelay.forEach(({ delaySeconds }) => {
+          expect(isInRange(delaySeconds, 0, 300)).toBe(true);
+        });
       });
     });
   });
@@ -298,118 +229,109 @@ describe("Security Posture: Application Security", () => {
   // ==========================================================================
 
   describe("Container Security", () => {
-    test("ECS containers log to CloudWatch", () => {
-      const template = getTemplate("serviceStack");
-      const taskDefs = getResources(
-        template,
-        RESOURCE_TYPES.ECS_TASK_DEFINITION
-      );
+    describe("Container Configuration", () => {
+      let preparedContainers: PreparedContainerData[];
 
-      taskDefs.forEach((taskDef) => {
-        const containers = getContainersFromTaskDef(taskDef);
+      beforeAll(() => {
+        const template = getTemplate(IAM_TEST_STACKS[3]);
+        const taskDefs = getResources(template, RESOURCE_TYPES.ECS_TASK_DEFINITION);
 
-        containers.forEach((container) => {
-          const logConfig = container.LogConfiguration as Record<
-            string,
-            string
-          >;
-          expect(logConfig).toBeDefined();
-          expect(logConfig.LogDriver).toBe("awslogs");
-        });
-      });
-    });
-
-    test("ECS task definitions do not run privileged containers", () => {
-      const template = getTemplate("serviceStack");
-      const taskDefs = getResources(
-        template,
-        RESOURCE_TYPES.ECS_TASK_DEFINITION
-      );
-
-      taskDefs.forEach((taskDef) => {
-        const containers = getContainersFromTaskDef(taskDef);
-
-        containers.forEach((container) => {
-          const privileged = container.Privileged as boolean | undefined;
-          expect(privileged).not.toBe(true);
-        });
-      });
-    });
-
-    test("ECS containers do not run as root user (if user is specified)", () => {
-      const template = getTemplate("serviceStack");
-      const taskDefs = getResources(
-        template,
-        RESOURCE_TYPES.ECS_TASK_DEFINITION
-      );
-
-      const containersWithUser = taskDefs.flatMap((taskDef) => {
-        const containers = getContainersFromTaskDef(taskDef);
-        return containers.filter((container) => container.User !== undefined);
-      });
-
-      // Skip test if no containers have user specified
-      if (containersWithUser.length === 0) {
-        return;
-      }
-
-      containersWithUser.forEach((container) => {
-        const user = container.User;
-        expect(user).toBeDefined();
-        const userStr = String(user);
-        expect(userStr).not.toBe("0");
-        expect(userStr).not.toBe("root");
-      });
-    });
-
-    test("ECS containers have resource limits configured", () => {
-      const template = getTemplate("serviceStack");
-      const taskDefs = getResources(
-        template,
-        RESOURCE_TYPES.ECS_TASK_DEFINITION
-      );
-
-      taskDefs.forEach((taskDef) => {
-        const containers = getContainersFromTaskDef(taskDef);
-
-        containers.forEach((container) => {
-          const memory = container.Memory as number | undefined;
-          const memoryReservation = container.MemoryReservation as
-            | number
-            | undefined;
-
-          // Should have either memory or memoryReservation
-          expect(memory !== undefined || memoryReservation !== undefined).toBe(
-            true
+        // Pre-compute all container data
+        preparedContainers = taskDefs.flatMap((taskDef) => {
+          const containers = getContainersFromTaskDef(taskDef);
+          return containers.map((container) =>
+            prepareContainerData(container as Record<string, unknown>)
           );
         });
       });
-    });
 
-    test("ECS tasks use valid network modes (if network mode is specified)", () => {
-      const template = getTemplate("serviceStack");
-      const taskDefs = getResources(
-        template,
-        RESOURCE_TYPES.ECS_TASK_DEFINITION
-      );
-
-      const taskDefsWithNetworkMode = taskDefs.filter((taskDef) => {
-        const properties = (taskDef as Record<string, Record<string, string>>)
-          .Properties;
-        return properties.NetworkMode !== undefined;
+      test("containers exist", () => {
+        expect(preparedContainers.length).toBeGreaterThan(0);
       });
 
-      // Skip test if no task definitions have network mode specified
-      if (taskDefsWithNetworkMode.length === 0) {
-        return;
-      }
+      test("ECS containers log to CloudWatch", () => {
+        preparedContainers.forEach(({ container, hasLogConfiguration }) => {
+          expect(hasLogConfiguration).toBe(true);
+          const logConfig = (container as Record<string, Record<string, string>>)
+            .LogConfiguration;
+          expect(logConfig.LogDriver).toBe("awslogs");
+        });
+      });
 
-      taskDefsWithNetworkMode.forEach((taskDef) => {
-        const properties = (taskDef as Record<string, Record<string, string>>)
-          .Properties;
-        const networkMode = properties.NetworkMode;
-        expect(networkMode).toBeDefined();
-        expect(["awsvpc", "bridge", "host", "none"]).toContain(networkMode);
+      test("ECS task definitions do not run privileged containers", () => {
+        preparedContainers.forEach(({ isPrivileged }) => {
+          expect(isPrivileged).toBe(false);
+        });
+      });
+
+      test("ECS containers have resource limits configured", () => {
+        preparedContainers.forEach(({ hasMemoryLimits }) => {
+          expect(hasMemoryLimits).toBe(true);
+        });
+      });
+    });
+
+    describe("Container User Configuration", () => {
+      let containersWithUser: PreparedContainerData[];
+
+      beforeAll(() => {
+        const template = getTemplate(IAM_TEST_STACKS[3]);
+        const taskDefs = getResources(template, RESOURCE_TYPES.ECS_TASK_DEFINITION);
+
+        // Pre-filter containers with user specified
+        const allContainers = taskDefs.flatMap((taskDef) => {
+          const containers = getContainersFromTaskDef(taskDef);
+          return containers.map((container) =>
+            prepareContainerData(container as Record<string, unknown>)
+          );
+        });
+
+        containersWithUser = allContainers.filter((c) => c.hasUser);
+      });
+
+      test("containers with user specified do not run as root", () => {
+        // This test validates that IF user is specified, it's not root
+        // Empty array is valid - means no containers explicitly set a user
+        expect(containersWithUser).toBeDefined();
+        expect(Array.isArray(containersWithUser)).toBe(true);
+
+        // If user is specified, it must not be root
+        containersWithUser.forEach(({ runsAsRoot }) => {
+          expect(runsAsRoot).toBe(false);
+        });
+      });
+    });
+
+    describe("Task Definition Network Mode", () => {
+      let taskDefsWithNetworkMode: Array<{
+        taskDef: unknown;
+        networkMode: string;
+      }>;
+
+      beforeAll(() => {
+        const template = getTemplate(IAM_TEST_STACKS[3]);
+        const taskDefs = getResources(template, RESOURCE_TYPES.ECS_TASK_DEFINITION);
+
+        // Pre-filter and extract in beforeAll
+        taskDefsWithNetworkMode = taskDefs
+          .map((taskDef) => ({
+            taskDef,
+            networkMode: getTaskDefNetworkMode(taskDef),
+          }))
+          .filter(
+            (item): item is { taskDef: unknown; networkMode: string } =>
+              item.networkMode !== undefined
+          );
+      });
+
+      test("task definitions with network mode exist", () => {
+        expect(taskDefsWithNetworkMode.length).toBeGreaterThan(0);
+      });
+
+      test("ECS tasks use valid network modes", () => {
+        taskDefsWithNetworkMode.forEach(({ networkMode }) => {
+          expect(isValidNetworkMode(networkMode)).toBe(true);
+        });
       });
     });
   });
@@ -419,59 +341,93 @@ describe("Security Posture: Application Security", () => {
   // ==========================================================================
 
   describe("Secrets Management", () => {
-    test("Grafana admin password stored in Secrets Manager", () => {
-      const template = getTemplate("serviceStack");
-      const secrets = getResources(template, "AWS::SecretsManager::Secret");
+    describe("Grafana Secret Configuration", () => {
+      let secrets: unknown[];
+      let hasGrafanaSecret: boolean;
 
-      const hasGrafanaSecret = secrets.some((secret) => {
-        const properties = (
-          secret as Record<string, Record<string, string | undefined>>
-        ).Properties;
-        return properties.Name?.includes("grafana");
-      });
+      beforeAll(() => {
+        const template = getTemplate(IAM_TEST_STACKS[3]);
+        secrets = getResources(template, "AWS::SecretsManager::Secret");
 
-      expect(hasGrafanaSecret).toBe(true);
-    });
-
-    test("secrets have automatic rotation configuration available", () => {
-      const template = getTemplate("serviceStack");
-      const secrets = getResources(template, "AWS::SecretsManager::Secret");
-
-      secrets.forEach((secret) => {
-        const properties = (secret as Record<string, Record<string, unknown>>)
-          .Properties;
-
-        // Secrets should have GenerateSecretString or SecretString
-        expect(
-          properties.GenerateSecretString || properties.SecretString
-        ).toBeDefined();
-      });
-    });
-
-    test("no hardcoded secrets in task definitions", () => {
-      const template = getTemplate("serviceStack");
-      const taskDefs = getResources(
-        template,
-        RESOURCE_TYPES.ECS_TASK_DEFINITION
-      );
-
-      taskDefs.forEach((taskDef) => {
-        // Should not have hardcoded secrets
-        expect(hasHardcodedSecrets(taskDef)).toBe(false);
-      });
-
-      // Test password-related fields use Secrets Manager
-      const taskDefsWithPassword = taskDefs.filter((taskDef) => {
-        const taskDefStr = JSON.stringify(taskDef);
-        return (
-          taskDefStr.includes("ADMIN_PASSWORD") ||
-          taskDefStr.includes("password")
+        // Pre-compute in beforeAll
+        hasGrafanaSecret = secrets.some((secret) =>
+          secretNameMatches(secret, "grafana")
         );
       });
 
-      // If password-related fields exist, should use Secrets Manager
-      taskDefsWithPassword.forEach((taskDef) => {
-        expect(usesSecretsManager(taskDef)).toBe(true);
+      test("secrets exist", () => {
+        expect(secrets.length).toBeGreaterThan(0);
+      });
+
+      test("Grafana admin password stored in Secrets Manager", () => {
+        expect(hasGrafanaSecret).toBe(true);
+      });
+    });
+
+    describe("Secret Rotation Configuration", () => {
+      let preparedSecrets: PreparedSecretData[];
+
+      beforeAll(() => {
+        const template = getTemplate(IAM_TEST_STACKS[3]);
+        const secrets = getResources(template, "AWS::SecretsManager::Secret");
+
+        // Pre-compute all secret data
+        preparedSecrets = secrets.map(prepareSecretData);
+      });
+
+      test("secrets have configuration defined", () => {
+        expect(preparedSecrets.length).toBeGreaterThan(0);
+
+        preparedSecrets.forEach(({ hasSecretConfiguration }) => {
+          expect(hasSecretConfiguration).toBe(true);
+        });
+      });
+    });
+
+    describe("Task Definition Secrets", () => {
+      let taskDefs: unknown[];
+      let taskDefsWithPassword: Array<{
+        taskDef: unknown;
+        usesSecretsManagerForPassword: boolean;
+      }>;
+
+      beforeAll(() => {
+        const template = getTemplate(IAM_TEST_STACKS[3]);
+        taskDefs = getResources(template, RESOURCE_TYPES.ECS_TASK_DEFINITION);
+
+        // Pre-filter and pre-compute in beforeAll
+        taskDefsWithPassword = taskDefs
+          .map((taskDef) => {
+            const taskDefStr = JSON.stringify(taskDef);
+            const hasPasswordField =
+              taskDefStr.includes("ADMIN_PASSWORD") ||
+              taskDefStr.includes("password");
+            return {
+              taskDef,
+              hasPasswordField,
+              usesSecretsManagerForPassword: hasPasswordField
+                ? usesSecretsManager(taskDef)
+                : true, // Mark as valid if no password field
+            };
+          })
+          .filter((item) => item.hasPasswordField);
+      });
+
+      test("no hardcoded secrets in task definitions", () => {
+        expect(taskDefs.length).toBeGreaterThan(0);
+
+        taskDefs.forEach((taskDef) => {
+          expect(hasHardcodedSecrets(taskDef)).toBe(false);
+        });
+      });
+
+      test("password fields use Secrets Manager", () => {
+        // This test documents the state - may have zero password fields
+        expect(taskDefsWithPassword).toBeDefined();
+
+        taskDefsWithPassword.forEach(({ usesSecretsManagerForPassword }) => {
+          expect(usesSecretsManagerForPassword).toBe(true);
+        });
       });
     });
   });
@@ -482,68 +438,67 @@ describe("Security Posture: Application Security", () => {
 
   describe("SSM State Manager Security", () => {
     test("SSM associations target specific resources", () => {
-      const template = getTemplate("infraStack");
-      const associations = getResources(
-        template,
-        RESOURCE_TYPES.SSM_ASSOCIATION
-      );
+      const template = getTemplate(INSTANCE_TEST_STACKS[0]);
+      const associations = getResources(template, RESOURCE_TYPES.SSM_ASSOCIATION);
+
+      expect(associations.length).toBeGreaterThan(0);
 
       associations.forEach((association) => {
-        validateResourceProperties(association, ["Targets"]);
+        const validation = validateResourceProperties(association, ["Targets"]);
+        expect(validation.valid).toBe(true);
 
-        const properties = (
-          association as Record<string, Record<string, unknown[]>>
-        ).Properties;
-        expect(Array.isArray(properties.Targets)).toBe(true);
-        expect(properties.Targets.length).toBeGreaterThan(0);
+        const targets = getSsmTargets(association);
+        expect(Array.isArray(targets)).toBe(true);
+        expect(targets.length).toBeGreaterThan(0);
       });
     });
 
     test("SSM documents use specific run command document type", () => {
-      const template = getTemplate("infraStack");
+      const template = getTemplate(INSTANCE_TEST_STACKS[0]);
       const documents = getResources(template, "AWS::SSM::Document");
 
-      documents.forEach((document) => {
-        const properties = (document as Record<string, Record<string, string>>)
-          .Properties;
+      expect(documents.length).toBeGreaterThan(0);
 
+      documents.forEach((document) => {
+        const properties = getResourceProperties<{ DocumentType: string }>(document);
         expect(properties.DocumentType).toBeDefined();
         expect(["Command", "Automation"]).toContain(properties.DocumentType);
       });
     });
 
-    test("SSM associations have compliance severity configured (if configured)", () => {
-      const template = getTemplate("infraStack");
-      const associations = getResources(
-        template,
-        RESOURCE_TYPES.SSM_ASSOCIATION
-      );
+    describe("SSM Association Compliance Severity", () => {
+      let associationsWithSeverity: Array<{
+        association: unknown;
+        complianceSeverity: string;
+      }>;
 
-      const associationsWithSeverity = associations.filter((association) => {
-        const properties = (
-          association as Record<string, Record<string, string>>
-        ).Properties;
-        return properties.ComplianceSeverity !== undefined;
+      beforeAll(() => {
+        const template = getTemplate(INSTANCE_TEST_STACKS[0]);
+        const associations = getResources(template, RESOURCE_TYPES.SSM_ASSOCIATION);
+
+        // Pre-filter and extract in beforeAll
+        associationsWithSeverity = associations
+          .map((association) => {
+            const properties = getResourceProperties<{ ComplianceSeverity?: string }>(association);
+            return {
+              association,
+              complianceSeverity: properties.ComplianceSeverity,
+            };
+          })
+          .filter(
+            (item): item is { association: unknown; complianceSeverity: string } =>
+              item.complianceSeverity !== undefined
+          );
       });
 
-      // Skip test if no associations have compliance severity configured
-      if (associationsWithSeverity.length === 0) {
-        return;
-      }
+      test("associations with compliance severity exist", () => {
+        expect(associationsWithSeverity.length).toBeGreaterThan(0);
+      });
 
-      associationsWithSeverity.forEach((association) => {
-        const properties = (
-          association as Record<string, Record<string, string>>
-        ).Properties;
-        const complianceSeverity = properties.ComplianceSeverity;
-        expect(complianceSeverity).toBeDefined();
-        expect([
-          "CRITICAL",
-          "HIGH",
-          "MEDIUM",
-          "LOW",
-          "UNSPECIFIED",
-        ]).toContain(complianceSeverity);
+      test("compliance severity values are valid", () => {
+        associationsWithSeverity.forEach(({ complianceSeverity }) => {
+          expect(isValidComplianceSeverity(complianceSeverity)).toBe(true);
+        });
       });
     });
   });
@@ -554,15 +509,13 @@ describe("Security Posture: Application Security", () => {
 
   describe("API Security", () => {
     test("listener rules have appropriate priorities", () => {
-      const template = getTemplate("serviceStack");
-      const listenerRules = getResources(
-        template,
-        RESOURCE_TYPES.LISTENER_RULE
-      );
+      const template = getTemplate(IAM_TEST_STACKS[3]);
+      const listenerRules = getResources(template, RESOURCE_TYPES.LISTENER_RULE);
+
+      expect(listenerRules.length).toBeGreaterThan(0);
 
       const priorities = listenerRules.map((rule) => {
-        const properties = (rule as Record<string, Record<string, number>>)
-          .Properties;
+        const properties = getResourceProperties<{ Priority: number }>(rule);
         return properties.Priority;
       });
 
@@ -572,17 +525,16 @@ describe("Security Posture: Application Security", () => {
     });
 
     test("listener rules have conditions configured", () => {
-      const template = getTemplate("serviceStack");
-      const listenerRules = getResources(
-        template,
-        RESOURCE_TYPES.LISTENER_RULE
-      );
+      const template = getTemplate(IAM_TEST_STACKS[3]);
+      const listenerRules = getResources(template, RESOURCE_TYPES.LISTENER_RULE);
+
+      expect(listenerRules.length).toBeGreaterThan(0);
 
       listenerRules.forEach((rule) => {
-        validateResourceProperties(rule, ["Conditions"]);
+        const validation = validateResourceProperties(rule, ["Conditions"]);
+        expect(validation.valid).toBe(true);
 
-        const properties = (rule as Record<string, Record<string, unknown[]>>)
-          .Properties;
+        const properties = getResourceProperties<{ Conditions: unknown[] }>(rule);
         expect(Array.isArray(properties.Conditions)).toBe(true);
         expect(properties.Conditions.length).toBeGreaterThan(0);
       });

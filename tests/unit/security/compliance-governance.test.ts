@@ -19,8 +19,10 @@ import { Template, Match } from "aws-cdk-lib/assertions";
 import {
   RESOURCE_TYPES,
   type ConnectivityTestStacks,
+  INSTANCE_TEST_STACKS,
+  IAM_TEST_STACKS,
+  EXPORT_TEST_STACKS,
 } from "../connectivity/test-config";
-
 import { SecurityTestFixtures } from "../utils/test-utils";
 
 describe("Security Posture: Compliance & Governance", () => {
@@ -212,18 +214,20 @@ describe("Security Posture: Compliance & Governance", () => {
 
   describe("Resource Tagging", () => {
     test("ECS cluster has Environment tag", () => {
-      const template = getTemplate("infraStack");
+      const template = getTemplate(INSTANCE_TEST_STACKS[0]);
       const clusters = getResources(template, RESOURCE_TYPES.ECS_CLUSTER);
 
+      expect(clusters.length).toBeGreaterThan(0);
       clusters.forEach((cluster) => {
         expect(hasTag(cluster, "Environment")).toBe(true);
       });
     });
 
     test("ECS cluster has Project tag", () => {
-      const template = getTemplate("infraStack");
+      const template = getTemplate(INSTANCE_TEST_STACKS[0]);
       const clusters = getResources(template, RESOURCE_TYPES.ECS_CLUSTER);
 
+      expect(clusters.length).toBeGreaterThan(0);
       clusters.forEach((cluster) => {
         expect(hasTag(cluster, "Project")).toBe(true);
       });
@@ -236,19 +240,18 @@ describe("Security Posture: Compliance & Governance", () => {
         RESOURCE_TYPES.AUTO_SCALING_GROUP,
       ];
 
-      const template = getTemplate("infraStack");
+      const template = getTemplate(INSTANCE_TEST_STACKS[0]);
 
-      resourceTypes.forEach((resourceType) => {
-        const resources = getResources(template, resourceType);
+      const allResources = resourceTypes.flatMap((resourceType) =>
+        getResources(template, resourceType)
+      );
 
-        resources.forEach((resource) => {
-          const tags = getResourceTags(resource);
+      expect(allResources.length).toBeGreaterThan(0);
 
-          // If resource has Tags property, it should have at least one tag
-          if (tags.length > 0) {
-            expect(tags.length).toBeGreaterThan(0);
-          }
-        });
+      allResources.forEach((resource) => {
+        const tags = getResourceTags(resource);
+        // Tags array exists and is an array
+        expect(Array.isArray(tags)).toBe(true);
       });
     });
   });
@@ -266,6 +269,7 @@ describe("Security Posture: Compliance & Governance", () => {
         RESOURCE_TYPES.EFS_FILE_SYSTEM
       );
 
+      expect(fileSystems.length).toBeGreaterThan(0);
       fileSystems.forEach((fileSystem) => {
         const deletionPolicy = getDeletionPolicy(fileSystem);
         expect(deletionPolicy).toBe("Retain");
@@ -277,6 +281,7 @@ describe("Security Posture: Compliance & Governance", () => {
       const template = Template.fromStack(prodStacks.infraStack);
       const albs = getResources(template, RESOURCE_TYPES.ALB);
 
+      expect(albs.length).toBeGreaterThan(0);
       albs.forEach((alb) => {
         const deletionProtection = findAlbAttribute(
           alb,
@@ -293,6 +298,7 @@ describe("Security Posture: Compliance & Governance", () => {
       const template = Template.fromStack(prodStacks.infraStack);
       const logGroups = getResources(template, RESOURCE_TYPES.LOG_GROUP);
 
+      expect(logGroups.length).toBeGreaterThan(0);
       logGroups.forEach((logGroup) => {
         const deletionPolicy = getDeletionPolicy(logGroup);
 
@@ -301,19 +307,19 @@ describe("Security Posture: Compliance & Governance", () => {
       });
     });
 
-    test("non-production resources allow deletion for cost management (if configured)", () => {
-      const template = getTemplate("infraStack");
+    test("non-production ALBs have deletion protection disabled for cost management", () => {
+      const template = getTemplate(INSTANCE_TEST_STACKS[0]);
       const albs = getResources(template, RESOURCE_TYPES.ALB);
 
+      expect(albs.length).toBeGreaterThan(0);
       albs.forEach((alb) => {
         const deletionProtection = findAlbAttribute(
           alb,
           "deletion_protection.enabled"
         );
 
-        if (deletionProtection) {
-          expect(deletionProtection.Value).toBe("false");
-        }
+        expect(deletionProtection).toBeDefined();
+        expect(deletionProtection?.Value).toBe("false");
       });
     });
   });
@@ -324,52 +330,108 @@ describe("Security Posture: Compliance & Governance", () => {
 
   describe("Update Policies", () => {
     test("Auto Scaling Groups have update policies configured", () => {
-      const template = getTemplate("infraStack");
+      const template = getTemplate(INSTANCE_TEST_STACKS[0]);
       const asgs = getResources(template, RESOURCE_TYPES.AUTO_SCALING_GROUP);
 
+      expect(asgs.length).toBeGreaterThan(0);
       asgs.forEach((asg) => {
         const updatePolicy = getUpdatePolicy(asg);
         expect(updatePolicy).toBeDefined();
       });
     });
 
-    test("Auto Scaling Groups have rolling update configuration (if configured)", () => {
-      const template = getTemplate("infraStack");
-      const asgs = getResources(template, RESOURCE_TYPES.AUTO_SCALING_GROUP);
+    describe("Auto Scaling Groups Rolling Update Configuration", () => {
+      let asgsWithRollingUpdate: Array<{
+        name: string;
+        rollingUpdate: Record<string, unknown>;
+        hasMinInstanceRequirement: boolean;
+      }>;
 
-      asgs.forEach((asg) => {
-        const updatePolicy = getUpdatePolicy(asg);
+      beforeAll(() => {
+        const template = getTemplate(INSTANCE_TEST_STACKS[0]);
+        const asgs = getResources(template, RESOURCE_TYPES.AUTO_SCALING_GROUP);
 
-        if (updatePolicy) {
-          const rollingUpdate = getRollingUpdate(updatePolicy);
+        asgsWithRollingUpdate = asgs
+          .map((asg, index) => {
+            const updatePolicy = getUpdatePolicy(asg);
+            const rollingUpdate = updatePolicy
+              ? getRollingUpdate(updatePolicy)
+              : undefined;
 
-          if (rollingUpdate) {
-            expect(rollingUpdate.PauseTime).toBeDefined();
-
-            expect(
+            // Pre-compute the requirement check here
+            const hasMinInstanceRequirement = rollingUpdate !== undefined && (
               rollingUpdate.MinInstancesInService !== undefined ||
-                rollingUpdate.MinSuccessfulInstancesPercent !== undefined
-            ).toBe(true);
-          }
-        }
+              rollingUpdate.MinSuccessfulInstancesPercent !== undefined
+            );
+
+            return { name: `ASG-${index}`, rollingUpdate, hasMinInstanceRequirement };
+          })
+          .filter(
+            (
+              item
+            ): item is {
+              name: string;
+              rollingUpdate: Record<string, unknown>;
+              hasMinInstanceRequirement: boolean;
+            } => item.rollingUpdate !== undefined
+          );
+      });
+
+      test("rolling updates have PauseTime configured", () => {
+        expect(asgsWithRollingUpdate).toBeDefined();
+        expect(Array.isArray(asgsWithRollingUpdate)).toBe(true);
+
+        asgsWithRollingUpdate.forEach(({ rollingUpdate }) => {
+          expect(rollingUpdate.PauseTime).toBeDefined();
+        });
+      });
+
+      test("rolling updates have minimum instance requirements", () => {
+        expect(asgsWithRollingUpdate).toBeDefined();
+        expect(Array.isArray(asgsWithRollingUpdate)).toBe(true);
+
+        asgsWithRollingUpdate.forEach(({ hasMinInstanceRequirement }) => {
+          expect(hasMinInstanceRequirement).toBe(true);
+        });
       });
     });
 
-    test("ECS services have circuit breaker configured (if configured)", () => {
-      const template = getTemplate("serviceStack");
-      const services = getResources(template, RESOURCE_TYPES.ECS_SERVICE);
+    describe("ECS Service Circuit Breaker Configuration", () => {
+      let servicesWithCircuitBreaker: Array<{
+        name: string;
+        circuitBreaker: Record<string, boolean>;
+      }>;
 
-      services.forEach((service) => {
-        const deployConfig = getDeploymentConfiguration(service);
+      beforeAll(() => {
+        const template = getTemplate(IAM_TEST_STACKS[3]);
+        const services = getResources(template, RESOURCE_TYPES.ECS_SERVICE);
 
-        if (deployConfig) {
-          const circuitBreaker = getCircuitBreaker(deployConfig);
+        servicesWithCircuitBreaker = services
+          .map((service, index) => {
+            const deployConfig = getDeploymentConfiguration(service);
+            const circuitBreaker = deployConfig
+              ? getCircuitBreaker(deployConfig)
+              : undefined;
+            return { name: `Service-${index}`, circuitBreaker };
+          })
+          .filter(
+            (
+              item
+            ): item is {
+              name: string;
+              circuitBreaker: Record<string, boolean>;
+            } => item.circuitBreaker !== undefined
+          );
+      });
 
-          if (circuitBreaker) {
-            expect(circuitBreaker.Enable).toBeDefined();
-            expect(typeof circuitBreaker.Enable).toBe("boolean");
-          }
-        }
+      test("circuit breakers have Enable property defined", () => {
+        expect(servicesWithCircuitBreaker).toBeDefined();
+        expect(Array.isArray(servicesWithCircuitBreaker)).toBe(true);
+
+        servicesWithCircuitBreaker.forEach(({ circuitBreaker }) => {
+          expect(circuitBreaker.Enable).toBeDefined();
+          expect(typeof circuitBreaker.Enable).toBe("boolean");
+        });
       });
     });
   });
@@ -379,8 +441,8 @@ describe("Security Posture: Compliance & Governance", () => {
   // ==========================================================================
 
   describe("Environment-Specific Configurations", () => {
-    test("production has higher capacity than development", () => {
-      const devTemplate = getTemplate("infraStack");
+    test("production has higher or equal capacity compared to development", () => {
+      const devTemplate = getTemplate(INSTANCE_TEST_STACKS[0]);
       const prodStacks = SecurityTestFixtures.getProductionStacks();
       const prodTemplate = Template.fromStack(prodStacks.infraStack);
 
@@ -393,14 +455,20 @@ describe("Security Posture: Compliance & Governance", () => {
         RESOURCE_TYPES.AUTO_SCALING_GROUP
       );
 
+      // Guard assertions - ensure we have data to compare
+      expect(devAsgs.length).toBeGreaterThan(0);
+      expect(prodAsgs.length).toBeGreaterThan(0);
+
       const devCapacity = devAsgs.map(getAsgCapacity);
       const prodCapacity = prodAsgs.map(getAsgCapacity);
 
       const minDevCapacity = Math.min(...devCapacity);
       const minProdCapacity = Math.min(...prodCapacity);
+
       expect(minProdCapacity).toBeGreaterThanOrEqual(minDevCapacity);
     });
 
+    // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
     test("production has Container Insights enabled", () => {
       const prodStacks = SecurityTestFixtures.getProductionStacks();
       const template = Template.fromStack(prodStacks.infraStack);
@@ -415,16 +483,40 @@ describe("Security Posture: Compliance & Governance", () => {
       });
     });
 
-    test("Container Insights is explicitly configured per environment (if configured)", () => {
-      const template = getTemplate("infraStack");
-      const clusters = getResources(template, RESOURCE_TYPES.ECS_CLUSTER);
+    describe("Container Insights Configuration", () => {
+      let clusters: unknown[];
+      let clustersWithInsightsSetting: Array<{
+        name: string;
+        containerInsights: Record<string, string>;
+      }>;
 
-      clusters.forEach((cluster) => {
-        const containerInsights = getContainerInsightsSetting(cluster);
+      beforeAll(() => {
+        const template = getTemplate(INSTANCE_TEST_STACKS[0]);
+        clusters = getResources(template, RESOURCE_TYPES.ECS_CLUSTER);
 
-        if (containerInsights) {
+        clustersWithInsightsSetting = clusters
+          .map((cluster, index) => ({
+            name: `Cluster-${index}`,
+            containerInsights: getContainerInsightsSetting(cluster),
+          }))
+          .filter(
+            (item): item is {
+              name: string;
+              containerInsights: Record<string, string>;
+            } => item.containerInsights !== undefined
+          );
+      });
+
+      test("all clusters have Container Insights explicitly configured", () => {
+        expect(clusters.length).toBeGreaterThan(0);
+        expect(clustersWithInsightsSetting.length).toBe(clusters.length);
+      });
+
+      test("Container Insights values are valid", () => {
+        expect(clustersWithInsightsSetting.length).toBeGreaterThan(0);
+        clustersWithInsightsSetting.forEach(({ containerInsights }) => {
           expect(["enabled", "disabled"]).toContain(containerInsights.Value);
-        }
+        });
       });
     });
   });
@@ -434,53 +526,95 @@ describe("Security Posture: Compliance & Governance", () => {
   // ==========================================================================
 
   describe("Resource Naming", () => {
-    test("resources have descriptive names with environment context", () => {
-      const resourceTypes = [
-        RESOURCE_TYPES.ECS_CLUSTER,
-        RESOURCE_TYPES.ALB,
-        RESOURCE_TYPES.LOG_GROUP,
-      ];
+    describe("Environment Context in Resource Names", () => {
+      let substantialResources: Array<{
+        resource: unknown;
+        hasContext: boolean;
+      }>;
 
-      const template = getTemplate("infraStack");
+      beforeAll(() => {
+        const resourceTypes = [
+          RESOURCE_TYPES.ECS_CLUSTER,
+          RESOURCE_TYPES.ALB,
+          RESOURCE_TYPES.LOG_GROUP,
+        ];
 
-      resourceTypes.forEach((resourceType) => {
-        const resources = getResources(template, resourceType);
+        const template = getTemplate(INSTANCE_TEST_STACKS[0]);
 
-        resources.forEach((resource) => {
-          const resourceStr = JSON.stringify(resource);
+        const allResources = resourceTypes.flatMap((resourceType) =>
+          getResources(template, resourceType)
+        );
 
-          // Only check substantial resources
-          if (resourceStr.length > 100) {
-            expect(
-              hasEnvironmentContext(resourceStr) || resourceStr.length > 0
-            ).toBe(true);
-          }
+        // Filter to substantial resources and pre-compute context check
+        substantialResources = allResources
+          .map((resource) => {
+            const resourceStr = JSON.stringify(resource);
+            return {
+              resource,
+              resourceLength: resourceStr.length,
+              hasContext: hasEnvironmentContext(resourceStr),
+            };
+          })
+          .filter((item) => item.resourceLength > 100);
+      });
+
+      test("substantial resources exist", () => {
+        expect(substantialResources.length).toBeGreaterThan(0);
+      });
+
+      test("resources have environment context", () => {
+        expect(substantialResources.length).toBeGreaterThan(0);
+        substantialResources.forEach(({ hasContext }) => {
+          // Resources should have environment context in their configuration
+          expect(hasContext).toBe(true);
         });
       });
     });
 
-    test("CloudFormation exports are properly configured", () => {
-      const templates = [
-        getTemplate("networkingStack"),
-        getTemplate("efsStack"),
-        getTemplate("infraStack"),
-      ];
+    describe("CloudFormation Export Validation", () => {
+      let allExports: Array<{
+        outputKey: string;
+        exportConfig: Record<string, unknown>;
+      }>;
 
-      templates.forEach((template) => {
-        const outputs = getOutputs(template);
+      beforeAll(() => {
+        const templates = EXPORT_TEST_STACKS.map((stackName) =>
+          getTemplate(stackName)
+        );
 
-        Object.values(outputs).forEach((output) => {
-          const exportName = (output as Record<string, unknown>).Export;
+        // Collect all exports across templates in beforeAll
+        allExports = templates.flatMap((template) => {
+          const outputs = getOutputs(template);
+          return Object.entries(outputs)
+            .map(([key, output]) => ({
+              outputKey: key,
+              exportConfig: (output as Record<string, unknown>).Export as
+                | Record<string, unknown>
+                | undefined,
+            }))
+            .filter(
+              (item): item is {
+                outputKey: string;
+                exportConfig: Record<string, unknown>;
+              } => item.exportConfig !== undefined
+            );
+        });
+      });
 
-          if (exportName) {
-            expect(exportName).toBeDefined();
+      test("exports collection is defined", () => {
+        expect(allExports).toBeDefined();
+        expect(Array.isArray(allExports)).toBe(true);
+      });
 
-            if (typeof exportName === "object" && exportName !== null) {
-              expect(
-                (exportName as Record<string, unknown>).Name
-              ).toBeDefined();
-            }
-          }
+      test("all exports have valid structure", () => {
+        // Guard: ensure we have exports to validate
+        // If no exports exist, this documents that state
+        expect(allExports).toBeDefined();
+        
+        allExports.forEach(({ exportConfig }) => {
+          expect(exportConfig).not.toBeNull();
+          expect(typeof exportConfig).toBe("object");
+          expect(exportConfig.Name).toBeDefined();
         });
       });
     });
@@ -491,25 +625,42 @@ describe("Security Posture: Compliance & Governance", () => {
   // ==========================================================================
 
   describe("Cost Management", () => {
-    test("development uses smaller instance types than production (if instance type is specified)", () => {
-      const template = getTemplate("infraStack");
-      const launchTemplates = getResources(
-        template,
-        RESOURCE_TYPES.LAUNCH_TEMPLATE
-      );
+    describe("Instance Type Configuration", () => {
+      let launchTemplates: unknown[];
+      let instanceTypes: string[];
 
-      launchTemplates.forEach((lt) => {
-        const instanceType = getInstanceType(lt);
+      beforeAll(() => {
+        const template = getTemplate(INSTANCE_TEST_STACKS[0]);
+        launchTemplates = getResources(
+          template,
+          RESOURCE_TYPES.LAUNCH_TEMPLATE
+        );
 
-        if (instanceType) {
-          // Development should use smaller instances (t3/t2)
+        // Extract instance types in beforeAll
+        instanceTypes = launchTemplates
+          .map((lt) => getInstanceType(lt))
+          .filter((type): type is string => type !== undefined);
+      });
+
+      test("launch templates exist", () => {
+        expect(launchTemplates.length).toBeGreaterThan(0);
+      });
+
+      test("instance types are defined", () => {
+        expect(instanceTypes.length).toBeGreaterThan(0);
+      });
+
+      test("development uses appropriate instance types (t3/t2)", () => {
+        expect(instanceTypes.length).toBeGreaterThan(0);
+        instanceTypes.forEach((instanceType) => {
           expect(instanceType).toMatch(/^(t3|t2)/);
-        }
+        });
       });
     });
 
+    // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
     test("GP3 volumes used for cost optimization", () => {
-      const template = getTemplate("infraStack");
+      const template = getTemplate(INSTANCE_TEST_STACKS[0]);
 
       template.hasResourceProperties(RESOURCE_TYPES.LAUNCH_TEMPLATE, {
         LaunchTemplateData: {

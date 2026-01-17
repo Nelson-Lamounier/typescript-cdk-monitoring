@@ -17,10 +17,6 @@ import { NetworkingStack } from "../../../lib/stacks/foundation/networking-stack
 import { MonitoringEfsStack } from "../../../lib/stacks/monitoring/efs-stack";
 import { MonitoringInfraStack } from "../../../lib/stacks/monitoring/infra-stack";
 import { MonitoringServiceStack } from "../../../lib/stacks/monitoring/service-stack";
-
-import type { ResourceProperties } from "../types/test-types";
-
-// Import constants for use in this file
 import {
   AWS_CONFIG,
   ENVIRONMENT_CONFIG,
@@ -234,3 +230,76 @@ export function getResourceTypeName(resourceType: string): string {
 
   return typeMap[resourceType] || resourceType;
 }
+
+// ============================================================================
+// STACK CONFIGURATION FOR TESTING
+// ============================================================================
+
+/**
+ * Stack names that contain IAM roles for security testing
+ * Update this array when new stacks with IAM roles are added
+ */
+export const IAM_TEST_STACKS: ReadonlyArray<
+  keyof Omit<ConnectivityTestStacks, "app">
+> = [
+  "networkingStack",
+  "efsStack",
+  "infraStack",
+  "serviceStack",
+] as const;
+
+/**
+ * Stack names that contain networking resources for testing
+ * Update this array when new networking stacks are added
+ */
+export const NETWORKING_TEST_STACKS: ReadonlyArray<
+  keyof Omit<ConnectivityTestStacks, "app">
+> = [
+  "networkingStack",
+  "efsStack",
+  "infraStack",
+] as const;
+
+/**
+ * Stack names that contain monitoring/logging resources for testing
+ * Update this array when new monitoring stacks are added
+ */
+export const MONITORING_TEST_STACKS: ReadonlyArray<
+  keyof Omit<ConnectivityTestStacks, "app">
+> = [
+  "networkingStack",
+  "infraStack",
+  "serviceStack",
+] as const;
+
+/**
+ * Stack names that contain CloudFormation exports for testing
+ * Update this array when new stacks with exports are added
+ */
+export const EXPORT_TEST_STACKS: ReadonlyArray<
+  keyof Omit<ConnectivityTestStacks, "app">
+> = [
+  "networkingStack",
+  "efsStack",
+  "infraStack",
+] as const;
+
+/**
+ * Stack names that contain EC2 instances, launch templates, and Auto Scaling Groups for testing
+ * Update this array when new stacks with EC2 instances are added
+ */
+export const INSTANCE_TEST_STACKS: ReadonlyArray<
+  keyof Omit<ConnectivityTestStacks, "app">
+> = [
+  "infraStack",
+] as const;
+
+/**
+ * Stack names that contain storage resources (EFS, EBS, S3) for testing
+ * Update this array when new stacks with storage resources are added
+ */
+export const STORAGE_TEST_STACKS: ReadonlyArray<
+  keyof Omit<ConnectivityTestStacks, "app">
+> = [
+  "efsStack",
+] as const;

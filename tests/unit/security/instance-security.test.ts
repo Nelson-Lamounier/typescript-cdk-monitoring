@@ -16,9 +16,25 @@
 
 import { Template, Match } from "aws-cdk-lib/assertions";
 
-import { type ConnectivityTestStacks } from "../connectivity/test-config";
-
+import {
+  type ConnectivityTestStacks,
+  INSTANCE_TEST_STACKS,
+} from "../connectivity/test-config";
 import { SecurityTestFixtures } from "../utils/test-utils";
+// Import shared utilities - functions
+import {
+  getAssociations,
+  getLaunchTemplates,
+  getAutoScalingGroups,
+  getAssociationCommands,
+  getAsgProperties,
+  getUserDataString,
+  hasImdsAccess,
+  usesImdsv2,
+  hasImdsv2Token,
+  hasHardcodedCredentials,
+  hasSensitiveApiKeys,
+} from "../utils";
 
 describe("Security Posture: Instance Security", () => {
   let stacks: ConnectivityTestStacks;
@@ -26,10 +42,6 @@ describe("Security Posture: Instance Security", () => {
   beforeAll(() => {
     stacks = SecurityTestFixtures.getDevelopmentStacks();
   });
-
-  // ==========================================================================
-  // HELPER FUNCTIONS (defined as arrow functions)
-  // ==========================================================================
 
   /**
    * Get template from stack name
@@ -41,123 +53,14 @@ describe("Security Posture: Instance Security", () => {
     return Template.fromStack(stacks[stackName]);
   };
 
-  /**
-   * Get resources of a specific type
-   */
-  const getResources = (template: Template, resourceType: string) => {
-    return Object.values(template.findResources(resourceType));
-  };
-
-  /**
-   * Get SSM associations from template
-   */
-  const getAssociations = (template: Template) => {
-    return getResources(template, "AWS::SSM::Association");
-  };
-
-  /**
-   * Get launch templates from template
-   */
-  const getLaunchTemplates = (template: Template) => {
-    return getResources(template, "AWS::EC2::LaunchTemplate");
-  };
-
-  /**
-   * Get Auto Scaling Groups from template
-   */
-  const getAutoScalingGroups = (template: Template) => {
-    return getResources(template, "AWS::AutoScaling::AutoScalingGroup");
-  };
-
-  /**
-   * Extract parameters from SSM association
-   */
-  const getAssociationParameters = (
-    association: unknown
-  ): Record<string, unknown[]> | undefined => {
-    const properties = (association as Record<string, Record<string, unknown>>)
-      .Properties;
-    return properties.Parameters as Record<string, unknown[]> | undefined;
-  };
-
-  /**
-   * Extract commands from SSM association
-   */
-  const getAssociationCommands = (association: unknown): string | undefined => {
-    const parameters = getAssociationParameters(association);
-    if (parameters?.commands) {
-      return JSON.stringify(parameters.commands);
-    }
-    return undefined;
-  };
-
-  /**
-   * Check if commands access IMDS
-   */
-  const hasImdsAccess = (commands: string): boolean => {
-    return commands.includes("169.254.169.254");
-  };
-
-  /**
-   * Check if commands use IMDSv2 (token-based auth)
-   */
-  const usesImdsv2 = (commands: string): boolean => {
-    return (
-      /X-aws-ec2-metadata-token/i.test(commands) &&
-      /PUT.*api\/token/i.test(commands)
-    );
-  };
-
-  /**
-   * Check if commands have IMDSv2 token auth
-   */
-  const hasImdsv2Token = (commands: string): boolean => {
-    return commands.includes("X-aws-ec2-metadata-token");
-  };
-
-  /**
-   * Extract user data string from launch template
-   */
-  const getUserDataString = (launchTemplate: unknown): string => {
-    return JSON.stringify(launchTemplate);
-  };
-
-  /**
-   * Check if user data contains hardcoded credentials
-   */
-  const hasHardcodedCredentials = (userData: string): boolean => {
-    return (
-      /password\s*=\s*['"][^'"]+['"]/i.test(userData) ||
-      /secret\s*=\s*['"][^'"]+['"]/i.test(userData) ||
-      /AKIA[0-9A-Z]{16}/.test(userData)
-    );
-  };
-
-  /**
-   * Check if user data contains sensitive API keys
-   */
-  const hasSensitiveApiKeys = (userData: string): boolean => {
-    return (
-      /api_key\s*=\s*['"][^'"]+['"]/i.test(userData) ||
-      /apikey\s*=\s*['"][^'"]+['"]/i.test(userData) ||
-      /api-key\s*=\s*['"][^'"]+['"]/i.test(userData)
-    );
-  };
-
-  /**
-   * Extract ASG properties
-   */
-  const getAsgProperties = (asg: unknown): Record<string, unknown> => {
-    return (asg as Record<string, Record<string, unknown>>).Properties;
-  };
-
   // ==========================================================================
   // IMDSV2 ENFORCEMENT
   // ==========================================================================
 
   describe("IMDSv2 Enforcement", () => {
+    // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
     test("launch template enforces IMDSv2", () => {
-      const template = getTemplate("infraStack");
+      const template = getTemplate(INSTANCE_TEST_STACKS[0]);
 
       template.hasResourceProperties("AWS::EC2::LaunchTemplate", {
         LaunchTemplateData: {
@@ -168,29 +71,58 @@ describe("Security Posture: Instance Security", () => {
       });
     });
 
-    test("SSM associations use IMDSv2 for metadata retrieval (if IMDS is accessed)", () => {
-      const template = getTemplate("infraStack");
-      const associations = getAssociations(template);
+    describe("SSM Association IMDSv2 Usage", () => {
+      let associationsWithImds: Array<{
+        association: unknown;
+        commands: string;
+        usesImdsv2: boolean;
+        hasImdsv2Token: boolean;
+      }>;
 
-      associations.forEach((association) => {
-        const commands = getAssociationCommands(association);
+      beforeAll(() => {
+        const template = getTemplate(INSTANCE_TEST_STACKS[0]);
+        const associations = getAssociations(template);
 
-        if (commands && hasImdsAccess(commands)) {
-          expect(usesImdsv2(commands)).toBe(true);
-        }
+        // Pre-filter and pre-compute associations that access IMDS
+        associationsWithImds = associations
+          .map((association) => {
+            const commands = getAssociationCommands(association);
+            return {
+              association,
+              commands: commands || "",
+            };
+          })
+          .filter((item) => item.commands && hasImdsAccess(item.commands))
+          .map((item) => ({
+            association: item.association,
+            commands: item.commands,
+            usesImdsv2: usesImdsv2(item.commands),
+            hasImdsv2Token: hasImdsv2Token(item.commands),
+          }));
       });
-    });
 
-    test("no scripts use IMDSv1 (token-less metadata access) (if IMDS is accessed)", () => {
-      const template = getTemplate("infraStack");
-      const associations = getAssociations(template);
+      test("SSM associations use IMDSv2 for metadata retrieval (if IMDS is accessed)", () => {
+        // This test validates configuration IF IMDS is accessed
+        // Empty array is valid - means no associations access IMDS
+        expect(associationsWithImds).toBeDefined();
+        expect(Array.isArray(associationsWithImds)).toBe(true);
 
-      associations.forEach((association) => {
-        const commands = getAssociationCommands(association);
+        // If associations access IMDS, they must use IMDSv2
+        associationsWithImds.forEach(({ usesImdsv2: usesV2 }) => {
+          expect(usesV2).toBe(true);
+        });
+      });
 
-        if (commands && hasImdsAccess(commands)) {
-          expect(hasImdsv2Token(commands)).toBe(true);
-        }
+      test("no scripts use IMDSv1 (token-less metadata access) (if IMDS is accessed)", () => {
+        // This test validates configuration IF IMDS is accessed
+        // Empty array is valid - means no associations access IMDS
+        expect(associationsWithImds).toBeDefined();
+        expect(Array.isArray(associationsWithImds)).toBe(true);
+
+        // If associations access IMDS, they must have IMDSv2 token
+        associationsWithImds.forEach(({ hasImdsv2Token: hasToken }) => {
+          expect(hasToken).toBe(true);
+        });
       });
     });
   });
@@ -200,8 +132,9 @@ describe("Security Posture: Instance Security", () => {
   // ==========================================================================
 
   describe("EBS Encryption", () => {
+    // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
     test("launch template enables EBS encryption", () => {
-      const template = getTemplate("infraStack");
+      const template = getTemplate(INSTANCE_TEST_STACKS[0]);
 
       template.hasResourceProperties("AWS::EC2::LaunchTemplate", {
         LaunchTemplateData: {
@@ -216,8 +149,9 @@ describe("Security Posture: Instance Security", () => {
       });
     });
 
+    // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
     test("launch template uses GP3 volumes for cost optimization", () => {
-      const template = getTemplate("infraStack");
+      const template = getTemplate(INSTANCE_TEST_STACKS[0]);
 
       template.hasResourceProperties("AWS::EC2::LaunchTemplate", {
         LaunchTemplateData: {
@@ -232,8 +166,9 @@ describe("Security Posture: Instance Security", () => {
       });
     });
 
+    // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
     test("EBS volumes have delete on termination enabled", () => {
-      const template = getTemplate("infraStack");
+      const template = getTemplate(INSTANCE_TEST_STACKS[0]);
 
       template.hasResourceProperties("AWS::EC2::LaunchTemplate", {
         LaunchTemplateData: {
@@ -254,9 +189,20 @@ describe("Security Posture: Instance Security", () => {
   // ==========================================================================
 
   describe("User Data Security", () => {
+    let launchTemplates: unknown[];
+
+    beforeAll(() => {
+      const template = getTemplate(INSTANCE_TEST_STACKS[0]);
+      launchTemplates = getLaunchTemplates(template);
+    });
+
+    test("launch templates exist", () => {
+      expect(launchTemplates.length).toBeGreaterThan(0);
+    });
+
     test("user data does not contain hardcoded credentials", () => {
-      const template = getTemplate("infraStack");
-      const launchTemplates = getLaunchTemplates(template);
+      expect(launchTemplates).toBeDefined();
+      expect(Array.isArray(launchTemplates)).toBe(true);
 
       launchTemplates.forEach((launchTemplate) => {
         const userData = getUserDataString(launchTemplate);
@@ -265,8 +211,8 @@ describe("Security Posture: Instance Security", () => {
     });
 
     test("user data does not contain sensitive API keys", () => {
-      const template = getTemplate("infraStack");
-      const launchTemplates = getLaunchTemplates(template);
+      expect(launchTemplates).toBeDefined();
+      expect(Array.isArray(launchTemplates)).toBe(true);
 
       launchTemplates.forEach((launchTemplate) => {
         const userData = getUserDataString(launchTemplate);
@@ -280,22 +226,36 @@ describe("Security Posture: Instance Security", () => {
   // ==========================================================================
 
   describe("Instance Configuration", () => {
+    // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
     test("instances are launched in private subnets", () => {
-      const template = getTemplate("infraStack");
+      const template = getTemplate(INSTANCE_TEST_STACKS[0]);
 
       template.hasResourceProperties("AWS::AutoScaling::AutoScalingGroup", {
         VPCZoneIdentifier: Match.anyValue(),
       });
     });
 
-    test("Auto Scaling Groups have health checks enabled", () => {
-      const template = getTemplate("infraStack");
-      const asgs = getAutoScalingGroups(template);
+    describe("Auto Scaling Group Health Checks", () => {
+      let asgs: unknown[];
 
-      asgs.forEach((asg) => {
-        const properties = getAsgProperties(asg);
-        expect(properties.HealthCheckType).toBeDefined();
-        expect(properties.HealthCheckGracePeriod).toBeDefined();
+      beforeAll(() => {
+        const template = getTemplate(INSTANCE_TEST_STACKS[0]);
+        asgs = getAutoScalingGroups(template);
+      });
+
+      test("Auto Scaling Groups exist", () => {
+        expect(asgs.length).toBeGreaterThan(0);
+      });
+
+      test("Auto Scaling Groups have health checks enabled", () => {
+        expect(asgs).toBeDefined();
+        expect(Array.isArray(asgs)).toBe(true);
+
+        asgs.forEach((asg) => {
+          const properties = getAsgProperties(asg);
+          expect(properties.HealthCheckType).toBeDefined();
+          expect(properties.HealthCheckGracePeriod).toBeDefined();
+        });
       });
     });
   });

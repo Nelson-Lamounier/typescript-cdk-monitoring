@@ -16,9 +16,27 @@
 
 import { Template, Match } from "aws-cdk-lib/assertions";
 
-import { type ConnectivityTestStacks } from "../connectivity/test-config";
-
+import {
+  type ConnectivityTestStacks,
+  MONITORING_TEST_STACKS,
+} from "../connectivity/test-config";
 import { SecurityTestFixtures } from "../utils/test-utils";
+// Import shared utilities - functions
+import {
+  getLogGroups,
+  getClusters,
+  getEventBridgeRules,
+  getTaskDefinitions,
+  getAssociations,
+  getDeletionPolicy,
+  getLogGroupProperties,
+  getContainerInsightsSetting,
+  getContainersFromTaskDef,
+  getLogConfiguration,
+  getLogOptions,
+  getRuleProperties,
+  getAssociationProperties,
+} from "../utils";
 
 describe("Security Posture: Monitoring & Logging", () => {
   let stacks: ConnectivityTestStacks;
@@ -26,10 +44,6 @@ describe("Security Posture: Monitoring & Logging", () => {
   beforeAll(() => {
     stacks = SecurityTestFixtures.getDevelopmentStacks();
   });
-
-  // ==========================================================================
-  // HELPER FUNCTIONS (defined as arrow functions)
-  // ==========================================================================
 
   /**
    * Get template from stack name
@@ -45,137 +59,9 @@ describe("Security Posture: Monitoring & Logging", () => {
    * Get all templates from multiple stacks
    */
   const getTemplates = (
-    stackNames: Array<keyof ConnectivityTestStacks>
+    stackNames: ReadonlyArray<keyof ConnectivityTestStacks>
   ): Template[] => {
     return stackNames.map((name) => getTemplate(name));
-  };
-
-  /**
-   * Get resources of a specific type
-   */
-  const getResources = (template: Template, resourceType: string) => {
-    return Object.values(template.findResources(resourceType));
-  };
-
-  /**
-   * Get log groups from template
-   */
-  const getLogGroups = (template: Template) => {
-    return getResources(template, "AWS::Logs::LogGroup");
-  };
-
-  /**
-   * Get ECS clusters from template
-   */
-  const getClusters = (template: Template) => {
-    return getResources(template, "AWS::ECS::Cluster");
-  };
-
-  /**
-   * Get EventBridge rules from template
-   */
-  const getEventBridgeRules = (template: Template) => {
-    return getResources(template, "AWS::Events::Rule");
-  };
-
-  /**
-   * Get task definitions from template
-   */
-  const getTaskDefinitions = (template: Template) => {
-    return getResources(template, "AWS::ECS::TaskDefinition");
-  };
-
-  /**
-   * Get SSM associations from template
-   */
-  const getAssociations = (template: Template) => {
-    return getResources(template, "AWS::SSM::Association");
-  };
-
-  /**
-   * Extract deletion policy from resource
-   */
-  const getDeletionPolicy = (resource: unknown): string | undefined => {
-    return (resource as Record<string, string | undefined>).DeletionPolicy;
-  };
-
-  /**
-   * Extract log group properties
-   */
-  const getLogGroupProperties = (
-    logGroup: unknown
-  ): Record<string, unknown> => {
-    return (logGroup as Record<string, Record<string, unknown>>).Properties;
-  };
-
-  /**
-   * Extract cluster settings
-   */
-  const getClusterSettings = (
-    cluster: unknown
-  ): Array<Record<string, string>> => {
-    const properties = (cluster as Record<string, Record<string, unknown>>)
-      .Properties;
-    return (properties.ClusterSettings || []) as Array<Record<string, string>>;
-  };
-
-  /**
-   * Extract container insights setting from cluster
-   */
-  const getContainerInsightsSetting = (
-    cluster: unknown
-  ): Record<string, string> | undefined => {
-    const settings = getClusterSettings(cluster);
-    return settings.find((setting) => setting.Name === "containerInsights");
-  };
-
-  /**
-   * Extract container definitions from task definition
-   */
-  const getContainerDefinitions = (
-    taskDef: unknown
-  ): Array<Record<string, unknown>> => {
-    const properties = (taskDef as Record<string, Record<string, unknown>>)
-      .Properties;
-    return (properties.ContainerDefinitions || []) as Array<
-      Record<string, unknown>
-    >;
-  };
-
-  /**
-   * Extract log configuration from container
-   */
-  const getLogConfiguration = (
-    container: unknown
-  ): Record<string, unknown> | undefined => {
-    return (container as Record<string, Record<string, unknown>>)
-      .LogConfiguration;
-  };
-
-  /**
-   * Extract log configuration options
-   */
-  const getLogOptions = (
-    container: unknown
-  ): Record<string, string> | undefined => {
-    const logConfig = getLogConfiguration(container);
-    return logConfig?.Options as Record<string, string> | undefined;
-  };
-
-  /**
-   * Extract rule properties
-   */
-  const getRuleProperties = (rule: unknown): Record<string, unknown> => {
-    return (rule as Record<string, Record<string, unknown>>).Properties;
-  };
-
-  /**
-   * Extract association properties
-   */
-  const getAssociationProperties = (
-    association: unknown
-  ): Record<string, unknown> => {
-    return (association as Record<string, Record<string, unknown>>).Properties;
   };
 
   // ==========================================================================
@@ -183,64 +69,143 @@ describe("Security Posture: Monitoring & Logging", () => {
   // ==========================================================================
 
   describe("CloudWatch Logs", () => {
+    // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
     test("log groups have retention configured", () => {
-      const template = getTemplate("infraStack");
+      const template = getTemplate(MONITORING_TEST_STACKS[1]);
 
       template.hasResourceProperties("AWS::Logs::LogGroup", {
         RetentionInDays: Match.anyValue(),
       });
     });
 
-    test("log groups have deletion policy configured for production", () => {
-      const prodStacks = SecurityTestFixtures.getProductionStacks();
-      const template = Template.fromStack(prodStacks.infraStack);
-      const logGroups = getLogGroups(template);
+    describe("Production Log Group Deletion Policies", () => {
+      let prodLogGroups: unknown[];
 
-      logGroups.forEach((logGroup) => {
-        const deletionPolicy = getDeletionPolicy(logGroup);
+      beforeAll(() => {
+        const prodStacks = SecurityTestFixtures.getProductionStacks();
+        const template = Template.fromStack(prodStacks.infraStack);
+        prodLogGroups = getLogGroups(template);
+      });
 
-        expect(deletionPolicy).toBeDefined();
-        expect(["Retain", "Delete", "Snapshot"]).toContain(deletionPolicy);
+      test("log groups exist", () => {
+        expect(prodLogGroups.length).toBeGreaterThan(0);
+      });
+
+      test("log groups have deletion policy configured for production", () => {
+        expect(prodLogGroups).toBeDefined();
+        expect(Array.isArray(prodLogGroups)).toBe(true);
+
+        prodLogGroups.forEach((logGroup) => {
+          const deletionPolicy = getDeletionPolicy(logGroup);
+
+          expect(deletionPolicy).toBeDefined();
+          expect(["Retain", "Delete", "Snapshot"]).toContain(deletionPolicy);
+        });
       });
     });
 
-    test("all log groups have retention set to prevent indefinite storage", () => {
-      const templates = getTemplates([
-        "networkingStack",
-        "infraStack",
-        "serviceStack",
-      ]);
+    describe("Log Group Retention Configuration", () => {
+      let allLogGroups: Array<{
+        logGroup: unknown;
+        properties: Record<string, unknown>;
+      }>;
 
-      templates.forEach((template) => {
-        const logGroups = getLogGroups(template);
+      beforeAll(() => {
+        const templates = getTemplates(MONITORING_TEST_STACKS);
 
-        logGroups.forEach((logGroup) => {
-          const properties = getLogGroupProperties(logGroup);
+        // Pre-compute all log groups with their properties
+        allLogGroups = templates.flatMap((template) => {
+          const logGroups = getLogGroups(template);
+          return logGroups.map((logGroup) => ({
+            logGroup,
+            properties: getLogGroupProperties(logGroup),
+          }));
+        });
+      });
+
+      test("log groups exist", () => {
+        expect(allLogGroups.length).toBeGreaterThan(0);
+      });
+
+      test("all log groups have retention set to prevent indefinite storage", () => {
+        expect(allLogGroups).toBeDefined();
+        expect(Array.isArray(allLogGroups)).toBe(true);
+
+        allLogGroups.forEach(({ properties }) => {
           expect(properties.RetentionInDays).toBeDefined();
           expect(properties.RetentionInDays).not.toBe(null);
         });
       });
     });
 
-    test("log group names follow consistent naming pattern", () => {
-      const templates = getTemplates([
-        "networkingStack",
-        "infraStack",
-        "serviceStack",
-      ]);
+    describe("Log Group Naming", () => {
+      let stringLogGroupNames: Array<{
+        logGroup: unknown;
+        logGroupName: string;
+      }>;
+      let objectLogGroupNames: Array<{
+        logGroup: unknown;
+        logGroupName: unknown;
+      }>;
 
-      templates.forEach((template) => {
-        const logGroups = getLogGroups(template);
+      beforeAll(() => {
+        const templates = getTemplates(MONITORING_TEST_STACKS);
 
-        logGroups.forEach((logGroup) => {
-          const properties = getLogGroupProperties(logGroup);
-          const logGroupName = properties.LogGroupName;
+        // Pre-compute and separate log groups by name type
+        const allLogGroups = templates.flatMap((template) => {
+          const logGroups = getLogGroups(template);
+          return logGroups.map((logGroup) => {
+            const properties = getLogGroupProperties(logGroup);
+            return {
+              logGroup,
+              logGroupName: properties.LogGroupName,
+            };
+          });
+        });
 
-          if (typeof logGroupName === "string") {
-            expect(logGroupName.length).toBeGreaterThan(0);
-          } else if (logGroupName && typeof logGroupName === "object") {
-            expect(logGroupName).toBeDefined();
-          }
+        // Pre-filter string and object log group names
+        stringLogGroupNames = allLogGroups
+          .filter(
+            (item): item is { logGroup: unknown; logGroupName: string } =>
+              typeof item.logGroupName === "string"
+          )
+          .map((item) => ({
+            logGroup: item.logGroup,
+            logGroupName: item.logGroupName,
+          }));
+
+        objectLogGroupNames = allLogGroups
+          .filter(
+            (item) =>
+              item.logGroupName !== null &&
+              typeof item.logGroupName === "object"
+          )
+          .map((item) => ({
+            logGroup: item.logGroup,
+            logGroupName: item.logGroupName,
+          }));
+      });
+
+      test("log groups exist", () => {
+        expect(
+          stringLogGroupNames.length + objectLogGroupNames.length
+        ).toBeGreaterThan(0);
+      });
+
+      test("log group names follow consistent naming pattern", () => {
+        expect(stringLogGroupNames).toBeDefined();
+        expect(Array.isArray(stringLogGroupNames)).toBe(true);
+        expect(objectLogGroupNames).toBeDefined();
+        expect(Array.isArray(objectLogGroupNames)).toBe(true);
+
+        // Validate string log group names
+        stringLogGroupNames.forEach(({ logGroupName }) => {
+          expect(logGroupName.length).toBeGreaterThan(0);
+        });
+
+        // Validate object log group names
+        objectLogGroupNames.forEach(({ logGroupName }) => {
+          expect(logGroupName).toBeDefined();
         });
       });
     });
@@ -251,6 +216,7 @@ describe("Security Posture: Monitoring & Logging", () => {
   // ==========================================================================
 
   describe("VPC Flow Logs", () => {
+    // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
     test("VPC Flow Logs capture all traffic types", () => {
       const template = getTemplate("networkingStack");
 
@@ -259,6 +225,7 @@ describe("Security Posture: Monitoring & Logging", () => {
       });
     });
 
+    // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
     test("VPC Flow Logs have IAM role for CloudWatch Logs delivery", () => {
       const template = getTemplate("networkingStack");
 
@@ -267,6 +234,7 @@ describe("Security Posture: Monitoring & Logging", () => {
       });
     });
 
+    // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
     test("VPC Flow Logs are sent to CloudWatch Logs", () => {
       const template = getTemplate("networkingStack");
 
@@ -282,6 +250,7 @@ describe("Security Posture: Monitoring & Logging", () => {
   // ==========================================================================
 
   describe("Container Insights", () => {
+    // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
     test("ECS cluster has Container Insights enabled for production", () => {
       const prodStacks = SecurityTestFixtures.getProductionStacks();
       const template = Template.fromStack(prodStacks.infraStack);
@@ -296,16 +265,54 @@ describe("Security Posture: Monitoring & Logging", () => {
       });
     });
 
-    test("Container Insights is explicitly configured (if configured)", () => {
-      const template = getTemplate("infraStack");
-      const clusters = getClusters(template);
+    describe("Container Insights Configuration", () => {
+      let clustersWithInsights: Array<{
+        cluster: unknown;
+        containerInsights: { Name: string; Value: string } | undefined;
+      }>;
+      let clustersWithConfiguredInsights: Array<{
+        cluster: unknown;
+        containerInsights: { Name: string; Value: string };
+      }>;
 
-      clusters.forEach((cluster) => {
-        const containerInsights = getContainerInsightsSetting(cluster);
+      beforeAll(() => {
+        const template = getTemplate(MONITORING_TEST_STACKS[1]);
+        const clusters = getClusters(template);
 
-        if (containerInsights) {
+        // Pre-compute clusters with container insights setting
+        clustersWithInsights = clusters.map((cluster) => ({
+          cluster,
+          containerInsights: getContainerInsightsSetting(cluster),
+        }));
+
+        // Pre-filter to only clusters that have Container Insights configured
+        clustersWithConfiguredInsights = clustersWithInsights
+          .filter(
+            (item): item is {
+              cluster: unknown;
+              containerInsights: { Name: string; Value: string };
+            } => item.containerInsights !== undefined
+          )
+          .map((item) => ({
+            cluster: item.cluster,
+            containerInsights: item.containerInsights,
+          }));
+      });
+
+      test("clusters exist", () => {
+        expect(clustersWithInsights.length).toBeGreaterThan(0);
+      });
+
+      test("Container Insights is explicitly configured (if configured)", () => {
+        // This test validates configuration IF Container Insights is configured
+        // Empty array is valid - means no clusters have Container Insights
+        expect(clustersWithConfiguredInsights).toBeDefined();
+        expect(Array.isArray(clustersWithConfiguredInsights)).toBe(true);
+
+        // If Container Insights is configured, validate the value
+        clustersWithConfiguredInsights.forEach(({ containerInsights }) => {
           expect(["enabled", "disabled"]).toContain(containerInsights.Value);
-        }
+        });
       });
     });
   });
@@ -315,8 +322,9 @@ describe("Security Posture: Monitoring & Logging", () => {
   // ==========================================================================
 
   describe("EventBridge Rules", () => {
+    // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
     test("ECS state change events are captured", () => {
-      const template = getTemplate("infraStack");
+      const template = getTemplate(MONITORING_TEST_STACKS[1]);
 
       template.hasResourceProperties("AWS::Events::Rule", {
         EventPattern: Match.objectLike({
@@ -326,28 +334,70 @@ describe("Security Posture: Monitoring & Logging", () => {
       });
     });
 
-    test("EventBridge rules have targets configured", () => {
-      const template = getTemplate("infraStack");
-      const rules = getEventBridgeRules(template);
+    describe("EventBridge Rule Configuration", () => {
+      let rules: unknown[];
 
-      rules.forEach((rule) => {
-        const properties = getRuleProperties(rule);
-        expect(properties.Targets).toBeDefined();
-        expect(Array.isArray(properties.Targets)).toBe(true);
+      beforeAll(() => {
+        const template = getTemplate(MONITORING_TEST_STACKS[1]);
+        rules = getEventBridgeRules(template);
+      });
+
+      test("EventBridge rules exist", () => {
+        expect(rules.length).toBeGreaterThan(0);
+      });
+
+      test("EventBridge rules have targets configured", () => {
+        expect(rules).toBeDefined();
+        expect(Array.isArray(rules)).toBe(true);
+
+        rules.forEach((rule) => {
+          const properties = getRuleProperties(rule);
+          expect(properties.Targets).toBeDefined();
+          expect(Array.isArray(properties.Targets)).toBe(true);
+        });
       });
     });
 
-    test("EventBridge rules are enabled (if state is specified)", () => {
-      const template = getTemplate("infraStack");
-      const rules = getEventBridgeRules(template);
+    describe("EventBridge Rule State", () => {
+      let rulesWithState: Array<{
+        rule: unknown;
+        state: string | undefined;
+      }>;
 
-      rules.forEach((rule) => {
-        const properties = getRuleProperties(rule) as Record<string, string>;
-        const state = properties.State;
+      beforeAll(() => {
+        const template = getTemplate(MONITORING_TEST_STACKS[1]);
+        const rules = getEventBridgeRules(template);
 
-        if (state) {
+        // Pre-compute rules with state
+        rulesWithState = rules.map((rule) => {
+          const properties = getRuleProperties(rule) as Record<string, string>;
+          return {
+            rule,
+            state: properties.State,
+          };
+        });
+      });
+
+      test("rules exist", () => {
+        expect(rulesWithState.length).toBeGreaterThan(0);
+      });
+
+      test("EventBridge rules are enabled (if state is specified)", () => {
+        // This test validates configuration IF state is specified
+        // Empty array is valid - means no rules have state specified
+        expect(rulesWithState).toBeDefined();
+        expect(Array.isArray(rulesWithState)).toBe(true);
+
+        // Filter to only rules that have state specified
+        const rulesWithSpecifiedState = rulesWithState.filter(
+          (item) => item.state !== undefined
+        );
+
+        // If state is specified, it must be ENABLED
+        rulesWithSpecifiedState.forEach(({ state }) => {
+          expect(state).toBeDefined();
           expect(state).toBe("ENABLED");
-        }
+        });
       });
     });
   });
@@ -357,15 +407,35 @@ describe("Security Posture: Monitoring & Logging", () => {
   // ==========================================================================
 
   describe("Application Logging", () => {
-    test("ECS containers log to CloudWatch", () => {
-      const template = getTemplate("serviceStack");
-      const taskDefs = getTaskDefinitions(template);
+    describe("Container CloudWatch Logging", () => {
+      let containersWithLogConfig: Array<{
+        container: unknown;
+        logConfig: Record<string, unknown> | undefined;
+      }>;
 
-      taskDefs.forEach((taskDef) => {
-        const containers = getContainerDefinitions(taskDef);
+      beforeAll(() => {
+        const template = getTemplate(MONITORING_TEST_STACKS[2]);
+        const taskDefs = getTaskDefinitions(template);
 
-        containers.forEach((container) => {
-          const logConfig = getLogConfiguration(container);
+        // Pre-compute all containers with log configuration
+        containersWithLogConfig = taskDefs.flatMap((taskDef) => {
+          const containers = getContainersFromTaskDef(taskDef);
+          return containers.map((container) => ({
+            container,
+            logConfig: getLogConfiguration(container),
+          }));
+        });
+      });
+
+      test("containers exist", () => {
+        expect(containersWithLogConfig.length).toBeGreaterThan(0);
+      });
+
+      test("ECS containers log to CloudWatch", () => {
+        expect(containersWithLogConfig).toBeDefined();
+        expect(Array.isArray(containersWithLogConfig)).toBe(true);
+
+        containersWithLogConfig.forEach(({ logConfig }) => {
           expect(logConfig).toBeDefined();
           expect(logConfig?.LogDriver).toBe("awslogs");
           expect(logConfig?.Options).toBeDefined();
@@ -373,22 +443,54 @@ describe("Security Posture: Monitoring & Logging", () => {
       });
     });
 
-    test("container logs have stream prefix configured (if log configuration exists)", () => {
-      const template = getTemplate("serviceStack");
-      const taskDefs = getTaskDefinitions(template);
+    describe("Container Log Stream Prefix", () => {
+      let containersWithLogOptions: Array<{
+        container: unknown;
+        options: Record<string, string> | undefined;
+        hasStreamPrefix: boolean;
+      }>;
 
-      taskDefs.forEach((taskDef) => {
-        const containers = getContainerDefinitions(taskDef);
+      beforeAll(() => {
+        const template = getTemplate(MONITORING_TEST_STACKS[2]);
+        const taskDefs = getTaskDefinitions(template);
 
-        containers.forEach((container) => {
-          const options = getLogOptions(container);
+        // Pre-compute containers with log options
+        containersWithLogOptions = taskDefs.flatMap((taskDef) => {
+          const containers = getContainersFromTaskDef(taskDef);
+          return containers.map((container) => {
+            const options = getLogOptions(container);
+            const hasStreamPrefix =
+              options !== undefined &&
+              (options["awslogs-stream-prefix"] !== undefined ||
+                options["awslogs-stream-prefix"] !== undefined);
 
-          if (options) {
-            expect(
-              options["awslogs-stream-prefix"] ||
-                options["awslogs-stream-prefix"]
-            ).toBeDefined();
-          }
+            return {
+              container,
+              options,
+              hasStreamPrefix,
+            };
+          });
+        });
+      });
+
+      test("containers exist", () => {
+        expect(containersWithLogOptions.length).toBeGreaterThan(0);
+      });
+
+      test("container logs have stream prefix configured (if log configuration exists)", () => {
+        // This test validates configuration IF log configuration exists
+        // Empty array is valid - means no containers have log options
+        expect(containersWithLogOptions).toBeDefined();
+        expect(Array.isArray(containersWithLogOptions)).toBe(true);
+
+        // Filter to only containers that have log options
+        const containersWithOptions = containersWithLogOptions.filter(
+          (item) => item.options !== undefined
+        );
+
+        // If log options exist, validate stream prefix
+        containersWithOptions.forEach(({ hasStreamPrefix }) => {
+          expect(hasStreamPrefix).toBe(true);
         });
       });
     });
@@ -399,9 +501,20 @@ describe("Security Posture: Monitoring & Logging", () => {
   // ==========================================================================
 
   describe("Audit Logging", () => {
+    let associations: unknown[];
+
+    beforeAll(() => {
+      const template = getTemplate(MONITORING_TEST_STACKS[1]);
+      associations = getAssociations(template);
+    });
+
+    test("SSM associations exist", () => {
+      expect(associations.length).toBeGreaterThan(0);
+    });
+
     test("SSM associations have output logging configured", () => {
-      const template = getTemplate("infraStack");
-      const associations = getAssociations(template);
+      expect(associations).toBeDefined();
+      expect(Array.isArray(associations)).toBe(true);
 
       associations.forEach((association) => {
         const properties = getAssociationProperties(association);
