@@ -419,6 +419,17 @@ test-constructs-ecs-task-definition: ## Run ECS TaskDefinition construct tests
 test-constructs-ecs: test-constructs-ecs-asg test-constructs-ecs-cluster test-constructs-ecs-service test-constructs-ecs-task-definition ## Run all ECS construct tests
 	@echo "$(GREEN)All ECS construct tests completed$(NC)"
 
+test-constructs-ecr: ## Run ECR construct tests
+	@echo "$(BLUE)Running ECR construct tests...$(NC)"
+	yarn test tests/unit/constructs/storage/ecr-construct.test.ts
+
+test-constructs-efs-access-point: ## Run EFS Access Point construct tests
+	@echo "$(BLUE)Running EFS Access Point construct tests...$(NC)"
+	yarn test tests/unit/constructs/storage/efs-access-point-construct.test.ts
+
+test-constructs-storage: test-constructs-ecr test-constructs-efs-access-point ## Run all storage construct tests
+	@echo "$(GREEN)All storage construct tests completed$(NC)"
+
 test-constructs-alb-listener: ## Run ALB Listener construct tests
 	@echo "$(BLUE)Running ALB Listener construct tests...$(NC)"
 	yarn test tests/unit/constructs/networking/alb-listener-construct.test.ts
@@ -518,7 +529,7 @@ test-constructs-prometheus-validation: ## Run Prometheus validation tests
 test-constructs-prometheus: test-constructs-prometheus-creation test-constructs-prometheus-launch-type test-constructs-prometheus-volumes test-constructs-prometheus-service test-constructs-prometheus-container test-constructs-prometheus-alertmanager test-constructs-prometheus-config test-constructs-prometheus-validation ## Run all Prometheus construct tests
 	@echo "$(GREEN)All Prometheus construct tests completed$(NC)"
 
-test-constructs: test-constructs-ecs test-constructs-networking test-constructs-grafana test-constructs-prometheus ## Run all construct tests
+test-constructs: test-constructs-ecs test-constructs-storage test-constructs-networking test-constructs-grafana test-constructs-prometheus ## Run all construct tests
 	@echo "$(GREEN)All construct tests completed$(NC)"
 
 # ============================================================================
