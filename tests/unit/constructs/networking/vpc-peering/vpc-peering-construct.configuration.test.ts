@@ -5,6 +5,7 @@ import * as cdk from "aws-cdk-lib";
 import { Template, Match } from "aws-cdk-lib/assertions";
 
 import { createTestApp, extendExpectWithCdkMatchers } from "../../../utils/stack-test-utils";
+
 import {
   TEST_CONSTANTS,
   createTestStack,
@@ -149,7 +150,12 @@ describe("VpcPeeringConstruct - Optional Properties & Lambda Providers", () => {
       });
 
       const template = Template.fromStack(stack);
-      const outputs = template.toJSON().Outputs || {};
+      const json = template.toJSON();
+      
+      // Guard assertion: Outputs must exist
+      expect(json.Outputs).toBeDefined();
+      
+      const outputs = json.Outputs;
       const outputKey = "PeeringPeeringConnectionId";
 
       expect(outputs[outputKey]).toBeDefined();
@@ -164,7 +170,12 @@ describe("VpcPeeringConstruct - Optional Properties & Lambda Providers", () => {
       });
 
       const template = Template.fromStack(stack);
-      const outputs = template.toJSON().Outputs || {};
+      const json = template.toJSON();
+      
+      // Guard assertion: Outputs must exist
+      expect(json.Outputs).toBeDefined();
+      
+      const outputs = json.Outputs;
       const outputKey = "PeeringPeeringConnectionId";
 
       expect(outputs[outputKey]).toBeDefined();
@@ -253,24 +264,52 @@ describe("VpcPeeringConstruct - Optional Properties & Lambda Providers", () => {
 
       // Verify specific actions exist in at least one policy statement
       const policies = template.findResources("AWS::IAM::Policy");
-      const hasPeeringActions = Object.values(policies).some(
-        (policy: {
-          Properties?: {
-            PolicyDocument?: { Statement?: Array<{ Action?: string | string[] }> };
+      
+      // Guard assertion: Ensure policies exist
+      expect(Object.keys(policies).length).toBeGreaterThan(0);
+      
+      // Extract all policy statements for verification
+      const allStatements: Array<{ Action: string | string[] }> = [];
+      for (const policy of Object.values(policies)) {
+        const typedPolicy = policy as {
+          Properties: {
+            PolicyDocument: { Statement: Array<{ Action: string | string[] }> };
           };
-        }) => {
-          const statements = policy.Properties?.PolicyDocument?.Statement || [];
-          return statements.some((stmt) => {
-            const actions = Array.isArray(stmt.Action) ? stmt.Action : [stmt.Action];
-            return (
-              actions.includes("ec2:CreateVpcPeeringConnection") &&
-              actions.includes("ec2:AcceptVpcPeeringConnection") &&
-              actions.includes("ec2:DescribeVpcPeeringConnections")
-            );
-          });
-        }
-      );
-      expect(hasPeeringActions).toBe(true);
+        };
+        
+        // Guard assertion: Ensure Properties, PolicyDocument, and Statement exist
+        expect(typedPolicy.Properties).toBeDefined();
+        expect(typedPolicy.Properties.PolicyDocument).toBeDefined();
+        expect(typedPolicy.Properties.PolicyDocument.Statement).toBeDefined();
+        
+        // After guard assertions, we know these properties exist
+        const statements = typedPolicy.Properties.PolicyDocument.Statement;
+        allStatements.push(...statements);
+      }
+      
+      // Guard assertion: Ensure we have statements to check
+      expect(allStatements.length).toBeGreaterThan(0);
+      
+      // Extract all actions from all statements
+      const allActions: string[] = [];
+      for (const stmt of allStatements) {
+        // Guard assertion: Ensure Action exists
+        expect(stmt.Action).toBeDefined();
+        
+        // After guard assertion, Action is guaranteed to exist
+        // Wrap in array and flatten to handle both string and string[] uniformly
+        const actionValue = stmt.Action;
+        const actionArray = [actionValue].flat();
+        allActions.push(...actionArray);
+      }
+      
+      // Guard assertion: Ensure we have actions to verify
+      expect(allActions.length).toBeGreaterThan(0);
+      
+      // Verify required peering actions are present
+      expect(allActions).toContain("ec2:CreateVpcPeeringConnection");
+      expect(allActions).toContain("ec2:AcceptVpcPeeringConnection");
+      expect(allActions).toContain("ec2:DescribeVpcPeeringConnections");
     });
 
     test("grants EC2 permissions for route table operations", () => {

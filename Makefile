@@ -379,7 +379,43 @@ test-cross-stack-connectivity: ## Run cross-stack connectivity tests
 
 test-networking: ## Run networking stack tests
 	@echo "$(BLUE)Running networking stack tests...$(NC)"
-	yarn test tests/unit/stacks/foundation/networking-stack.test.ts
+	yarn test tests/unit/stacks/foundation/networking/
+
+test-networking-creation: ## Run networking stack creation tests
+	@echo "$(BLUE)Running networking stack creation tests...$(NC)"
+	yarn test tests/unit/stacks/foundation/networking/networking-stack.creation.test.ts
+
+test-networking-vpc: ## Run networking stack VPC tests
+	@echo "$(BLUE)Running networking stack VPC tests...$(NC)"
+	yarn test tests/unit/stacks/foundation/networking/networking-stack.vpc.test.ts
+
+test-networking-subnets: ## Run networking stack subnet tests
+	@echo "$(BLUE)Running networking stack subnet tests...$(NC)"
+	yarn test tests/unit/stacks/foundation/networking/networking-stack.subnets.test.ts
+
+test-networking-nat: ## Run networking stack NAT gateway tests
+	@echo "$(BLUE)Running networking stack NAT gateway tests...$(NC)"
+	yarn test tests/unit/stacks/foundation/networking/networking-stack.nat.test.ts
+
+test-networking-flow-logs: ## Run networking stack flow logs tests
+	@echo "$(BLUE)Running networking stack flow logs tests...$(NC)"
+	yarn test tests/unit/stacks/foundation/networking/networking-stack.flow-logs.test.ts
+
+test-networking-endpoints: ## Run networking stack VPC endpoints tests
+	@echo "$(BLUE)Running networking stack VPC endpoints tests...$(NC)"
+	yarn test tests/unit/stacks/foundation/networking/networking-stack.endpoints.test.ts
+
+test-networking-ssm: ## Run networking stack SSM parameters tests
+	@echo "$(BLUE)Running networking stack SSM parameters tests...$(NC)"
+	yarn test tests/unit/stacks/foundation/networking/networking-stack.ssm.test.ts
+
+test-networking-validation: ## Run networking stack validation tests
+	@echo "$(BLUE)Running networking stack validation tests...$(NC)"
+	yarn test tests/unit/stacks/foundation/networking/networking-stack.validation.test.ts
+
+test-networking-advanced: ## Run networking stack advanced tests
+	@echo "$(BLUE)Running networking stack advanced tests...$(NC)"
+	yarn test tests/unit/stacks/foundation/networking/networking-stack.advanced.test.ts
 
 test-monitoring-efs: ## Run monitoring EFS stack tests
 	@echo "$(BLUE)Running monitoring EFS stack tests...$(NC)"
