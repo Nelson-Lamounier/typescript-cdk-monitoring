@@ -427,7 +427,11 @@ test-constructs-efs-access-point: ## Run EFS Access Point construct tests
 	@echo "$(BLUE)Running EFS Access Point construct tests...$(NC)"
 	yarn test tests/unit/constructs/storage/efs-access-point-construct.test.ts
 
-test-constructs-storage: test-constructs-ecr test-constructs-efs-access-point ## Run all storage construct tests
+test-constructs-efs-file-system: ## Run EFS File System construct tests
+	@echo "$(BLUE)Running EFS File System construct tests...$(NC)"
+	yarn test tests/unit/constructs/storage/efs-file-system-construct.test.ts
+
+test-constructs-storage: test-constructs-ecr test-constructs-efs-access-point test-constructs-efs-file-system ## Run all storage construct tests
 	@echo "$(GREEN)All storage construct tests completed$(NC)"
 
 test-constructs-alb-listener: ## Run ALB Listener construct tests
