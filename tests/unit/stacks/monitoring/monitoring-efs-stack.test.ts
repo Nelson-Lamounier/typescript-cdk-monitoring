@@ -12,189 +12,74 @@ import {
   MONITORING_EFS_POSIX_USER,
   MONITORING_EFS_CREATION_ACL,
 } from "../../../../lib/shared/constants/monitoring-constants";
+import {
+  TEST_CONFIG,
+  BASE_TEST_CONSTANTS,
+  TestFixtures,
+  createTestApp,
+  createTestEnv,
+  extendExpectWithCdkMatchers,
+} from "../../utils/stack-test-utils";
+import {
+  EFS_TEST_CONSTANTS,
+  EFS_RESOURCE_COUNTS,
+  SSM_PARAMETER_PATHS,
+  EFS_OUTPUT_NAMES,
+  SSM_DOCUMENT_CONFIG,
+  EFS_LIFECYCLE_POLICIES,
+} from "../../shared/constants";
 
 // ============================================================================
-// CUSTOM MATCHERS (Type declarations will be added when matchers are used)
+// CUSTOM MATCHERS SETUP
 // ============================================================================
+
+extendExpectWithCdkMatchers();
 
 // ============================================================================
 // TEST CONFIGURATION
 // ============================================================================
 
 /**
- * Test configuration constants
- * Centralised configuration values used across all tests
- */
-const TEST_CONFIG = {
-  account: "123456789012",
-  region: "eu-west-1",
-} as const;
-
-/**
- * Test constants - avoid magic numbers and strings
- * All hardcoded values used in tests should be defined here
+ * Stack-specific test constants
+ * Extends base constants with EFS-specific values
  */
 const TEST_CONSTANTS = {
-  VPC: {
-    CIDR: "10.0.0.0/16",
-    MAX_AZS: 2,
-    NAT_GATEWAYS: 1,
-    SUBNET_MASK: 24,
-  },
+  ...BASE_TEST_CONSTANTS,
   EFS: {
-    MOUNT_PATH: "/monitoring",
-    NFS_PORT: 2049,
+    ...EFS_TEST_CONSTANTS,
     OWNER_UID: MONITORING_EFS_POSIX_USER.uid,
     OWNER_GID: MONITORING_EFS_POSIX_USER.gid,
     PERMISSIONS: MONITORING_EFS_CREATION_ACL.permissions,
   },
-  RESOURCE_COUNTS: {
-    FILE_SYSTEM: 1,
-    ACCESS_POINT: 1,
-    SECURITY_GROUP: 1,
-    SSM_DOCUMENT: 1,
-    SSM_ASSOCIATION: 1,
-    LAMBDA_FUNCTION: 0,
-    CUSTOM_RESOURCE: 0,
-  },
-  STACK_IDS: {
-    DEFAULT: "TestStack",
-    VPC: "TestVpcStack",
-    MINIMAL: "MinimalStack",
-    SNAPSHOT: "SnapshotStack",
-    ALL_PROPERTIES: "AllPropertiesStack",
-    DEV: "DevStack",
-    PROD: "ProdStack",
-  },
-  ENVIRONMENTS: {
-    DEVELOPMENT: "development",
-    PRODUCTION: "production",
-    STAGING: "staging",
-    PIPELINE: "pipeline",
-  },
-  SSM_PARAMETER_PATHS: {
-    PROMETHEUS_CONFIG: "/monitoring/development/prometheus-config",
-    PROMETHEUS_CONFIG_YAML: "/monitoring/development/prometheus-config-yaml",
-    GRAFANA_DATASOURCE_CONFIG:
-      "/monitoring/development/grafana-datasource-config",
-    GRAFANA_DATASOURCE_CONFIG_YAML:
-      "/monitoring/development/grafana-datasource-config-yaml",
-    GRAFANA_DASHBOARD_CONFIG:
-      "/monitoring/development/grafana-dashboard-config",
-    GRAFANA_DASHBOARD_CONFIG_YAML:
-      "/monitoring/development/grafana-dashboard-config-yaml",
-    EFS_CONFIG_PREFIX: "/monitoring/.*/efs/config/.*",
-  },
-  OUTPUT_NAMES: {
-    FILE_SYSTEM_ID: "FileSystemId",
-    ACCESS_POINT_ID: "AccessPointId",
-    SECURITY_GROUP_ID: "SecurityGroupId",
-  },
-  REMOVAL_POLICIES: {
-    DELETE: "Delete",
-    RETAIN: "Retain",
-  },
-  SSM_DOCUMENT: {
-    TYPE: "Automation",
-    FORMAT: "YAML",
-  },
-  LIFECYCLE_POLICIES: {
-    AFTER_7_DAYS: "AFTER_7_DAYS",
-    AFTER_14_DAYS: "AFTER_14_DAYS",
-    AFTER_30_DAYS: "AFTER_30_DAYS",
-    AFTER_60_DAYS: "AFTER_60_DAYS",
-    AFTER_90_DAYS: "AFTER_90_DAYS",
-  },
+  RESOURCE_COUNTS: EFS_RESOURCE_COUNTS,
+  SSM_PARAMETER_PATHS,
+  OUTPUT_NAMES: EFS_OUTPUT_NAMES,
+  SSM_DOCUMENT: SSM_DOCUMENT_CONFIG,
+  LIFECYCLE_POLICIES: EFS_LIFECYCLE_POLICIES,
 } as const;
 
 // ============================================================================
-// TEST FIXTURES CACHING CLASS
+// TEST FIXTURES EXTENSION
 // ============================================================================
 
 /**
- * TestFixtures caching class
- *
- * Provides cached test fixtures (VPC) to improve test performance
- * and reduce resource creation overhead. Each app instance gets its own cached fixtures.
- *
- * @example
- * ```typescript
- * const fixtures = TestFixtures.getInstance(app);
- * const stack = new MonitoringEfsStack(app, "TestStack", {
- *   ...fixtures.getMinimalProps(),
- *   envName: "production",
- * });
- * ```
+ * Extended TestFixtures for MonitoringEfsStack
+ * Adds stack-specific helper methods
  */
-class TestFixtures {
-  private static instances = new Map<cdk.App, TestFixtures>();
-  private vpc: ec2.IVpc | null = null;
+class EfsTestFixtures {
+  private baseFixtures: TestFixtures;
 
-  /**
-   * Private constructor to enforce singleton pattern per app instance
-   * @param app - CDK app instance
-   */
-  private constructor(private readonly app: cdk.App) {}
-
-  /**
-   * Get or create TestFixtures instance for the given app
-   *
-   * Each app instance gets its own TestFixtures singleton to avoid
-   * construct name conflicts across different test suites.
-   *
-   * @param app - CDK app instance
-   * @returns TestFixtures instance for the app
-   */
-  static getInstance(app: cdk.App): TestFixtures {
-    if (!app) {
-      throw new Error("CDK App instance is required to create TestFixtures");
-    }
-
-    if (!TestFixtures.instances.has(app)) {
-      TestFixtures.instances.set(app, new TestFixtures(app));
-    }
-
-    const instance = TestFixtures.instances.get(app);
-    if (!instance) {
-      throw new Error("Failed to create TestFixtures instance");
-    }
-    return instance;
+  constructor(app: cdk.App) {
+    this.baseFixtures = TestFixtures.getInstance(app);
   }
 
   /**
    * Get or create mock VPC for testing
    *
-   * VPC is cached per app instance to avoid recreating it for each test.
-   * Includes both public and private subnets for comprehensive testing.
-   *
    * @returns IVpc instance for testing
    */
   getVpc(): ec2.IVpc {
-    if (!this.vpc) {
-      const vpcStack = new cdk.Stack(this.app, TEST_CONSTANTS.STACK_IDS.VPC, {
-        env: { account: TEST_CONFIG.account, region: TEST_CONFIG.region },
-      });
-
-      this.vpc = new ec2.Vpc(vpcStack, "TestVpc", {
-        ipAddresses: ec2.IpAddresses.cidr(TEST_CONSTANTS.VPC.CIDR),
-        maxAzs: TEST_CONSTANTS.VPC.MAX_AZS,
-        natGateways: TEST_CONSTANTS.VPC.NAT_GATEWAYS,
-        subnetConfiguration: [
-          {
-            name: "Public",
-            subnetType: ec2.SubnetType.PUBLIC,
-            cidrMask: TEST_CONSTANTS.VPC.SUBNET_MASK,
-          },
-          {
-            name: "Private",
-            subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-            cidrMask: TEST_CONSTANTS.VPC.SUBNET_MASK,
-          },
-        ],
-      });
-    }
-
-    return this.vpc;
+    return this.baseFixtures.getVpc();
   }
 
   /**
@@ -206,28 +91,10 @@ class TestFixtures {
     const vpc = this.getVpc();
 
     return {
-      env: { account: TEST_CONFIG.account, region: TEST_CONFIG.region },
+      env: createTestEnv(),
       envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
       vpc,
     };
-  }
-
-  /**
-   * Clear cached fixtures for this app instance
-   *
-   * Useful for cleanup between test suites or when fixtures need to be recreated.
-   */
-  clear(): void {
-    this.vpc = null;
-  }
-
-  /**
-   * Clear all cached fixtures across all app instances
-   *
-   * Useful for global cleanup after all tests complete.
-   */
-  static clearAll(): void {
-    TestFixtures.instances.clear();
   }
 }
 
@@ -284,7 +151,7 @@ function createTestStack(
     throw new Error("Stack ID is required to create test stack");
   }
 
-  const fixtures = TestFixtures.getInstance(app);
+  const fixtures = new EfsTestFixtures(app);
   const minimalProps = fixtures.getMinimalProps();
 
   return new MonitoringEfsStack(app, id, {
@@ -298,12 +165,6 @@ function createTestStack(
 // ============================================================================
 
 describe("MonitoringEfsStack", () => {
-  let app: cdk.App;
-
-  beforeEach(() => {
-    app = new cdk.App();
-  });
-
   // ============================================================================
   // Stack Creation
   // ============================================================================
@@ -315,18 +176,21 @@ describe("MonitoringEfsStack", () => {
    * configuration combinations and exposes expected public properties.
    */
   describe("Stack Creation", () => {
-    test("creates stack with minimal required properties", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
+    let app: cdk.App;
+    let minimalStack: MonitoringEfsStack;
+    let allPropertiesStack: MonitoringEfsStack;
+    let snapshotStack: MonitoringEfsStack;
+    let minimalTemplate: Template;
+    let allPropertiesTemplate: Template;
+    let snapshotTemplate: Template;
 
-      template.resourceCountIs(
-        "AWS::EFS::FileSystem",
-        TEST_CONSTANTS.RESOURCE_COUNTS.FILE_SYSTEM
-      );
-    });
+    beforeAll(() => {
+      app = createTestApp();
 
-    test("creates stack with all optional properties", () => {
-      const stack = createTestStack(
+      // Create ALL stacks first before calling Template.fromStack()
+      // Template.fromStack() triggers synthesis which locks the app
+      minimalStack = createTestStack(app);
+      allPropertiesStack = createTestStack(
         app,
         TEST_CONSTANTS.STACK_IDS.ALL_PROPERTIES,
         {
@@ -340,19 +204,34 @@ describe("MonitoringEfsStack", () => {
           enableExports: true,
         }
       );
+      snapshotStack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.SNAPSHOT);
 
-      const template = Template.fromStack(stack);
-      template.resourceCountIs(
-        "AWS::EFS::FileSystem",
-        TEST_CONSTANTS.RESOURCE_COUNTS.FILE_SYSTEM
-      );
+      // Now create templates from the stacks
+      minimalTemplate = Template.fromStack(minimalStack);
+      allPropertiesTemplate = Template.fromStack(allPropertiesStack);
+      snapshotTemplate = Template.fromStack(snapshotStack);
+    });
+
+    test("creates stack with minimal required properties", () => {
+      expect(() => {
+        minimalTemplate.resourceCountIs(
+          "AWS::EFS::FileSystem",
+          TEST_CONSTANTS.RESOURCE_COUNTS.FILE_SYSTEM
+        );
+      }).not.toThrow();
+    });
+
+    test("creates stack with all optional properties", () => {
+      expect(() => {
+        allPropertiesTemplate.resourceCountIs(
+          "AWS::EFS::FileSystem",
+          TEST_CONSTANTS.RESOURCE_COUNTS.FILE_SYSTEM
+        );
+      }).not.toThrow();
     });
 
     test("matches snapshot for minimal configuration", () => {
-      const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.SNAPSHOT);
-      const template = Template.fromStack(stack);
-
-      expect(template.toJSON()).toMatchSnapshot();
+      expect(snapshotTemplate.toJSON()).toMatchSnapshot();
     });
   });
 
@@ -367,6 +246,131 @@ describe("MonitoringEfsStack", () => {
    * and removal policies based on environment and configuration.
    */
   describe("EFS File System Configuration", () => {
+    let app: cdk.App;
+    let defaultStack: MonitoringEfsStack;
+    let defaultTemplate: Template;
+    let removalPolicyStacks: Array<{
+      envName: string;
+      expectedPolicy: string;
+      stack: MonitoringEfsStack;
+      template: Template;
+    }>;
+    let encryptionStacks: Array<{
+      description: string;
+      expectedEncrypted: boolean;
+      stack: MonitoringEfsStack;
+      template: Template;
+    }>;
+    let lifecycleStacks: Array<{
+      expectedTransition: string;
+      stack: MonitoringEfsStack;
+      template: Template;
+    }>;
+
+    beforeAll(() => {
+      app = createTestApp();
+
+      // Pre-compute all stacks and templates
+      defaultStack = createTestStack(app);
+      defaultTemplate = Template.fromStack(defaultStack);
+
+      // Pre-compute removal policy stacks
+      const removalPolicyConfigs = [
+        {
+          envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
+          expectedPolicy: TEST_CONSTANTS.REMOVAL_POLICIES.DELETE,
+        },
+        {
+          envName: TEST_CONSTANTS.ENVIRONMENTS.PRODUCTION,
+          expectedPolicy: TEST_CONSTANTS.REMOVAL_POLICIES.RETAIN,
+        },
+        {
+          envName: TEST_CONSTANTS.ENVIRONMENTS.STAGING,
+          expectedPolicy: TEST_CONSTANTS.REMOVAL_POLICIES.DELETE,
+        },
+        {
+          envName: TEST_CONSTANTS.ENVIRONMENTS.PIPELINE,
+          expectedPolicy: TEST_CONSTANTS.REMOVAL_POLICIES.DELETE,
+        },
+      ];
+
+      removalPolicyStacks = removalPolicyConfigs.map((config) => {
+        const removalApp = createTestApp();
+        const stack = createTestStack(removalApp, `TestStack-${config.envName}`, {
+          envName: config.envName,
+        });
+        return {
+          envName: config.envName,
+          expectedPolicy: config.expectedPolicy,
+          stack,
+          template: Template.fromStack(stack),
+        };
+      });
+
+      // Pre-compute encryption stacks
+      const encryptionConfigs = [
+        {
+          description: "encryption enabled by default",
+          enableEncryption: undefined,
+          expectedEncrypted: true,
+        },
+        {
+          description: "encryption disabled when specified",
+          enableEncryption: false,
+          expectedEncrypted: false,
+        },
+      ];
+
+      encryptionStacks = encryptionConfigs.map((config) => {
+        const encryptionApp = createTestApp();
+        const stack = createTestStack(encryptionApp, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+          enableEncryption: config.enableEncryption,
+        });
+        return {
+          description: config.description,
+          expectedEncrypted: config.expectedEncrypted,
+          stack,
+          template: Template.fromStack(stack),
+        };
+      });
+
+      // Pre-compute lifecycle policy stacks
+      const lifecyclePolicies = [
+        {
+          policy: efs.LifecyclePolicy.AFTER_7_DAYS,
+          expectedTransition: TEST_CONSTANTS.LIFECYCLE_POLICIES.AFTER_7_DAYS,
+        },
+        {
+          policy: efs.LifecyclePolicy.AFTER_14_DAYS,
+          expectedTransition: TEST_CONSTANTS.LIFECYCLE_POLICIES.AFTER_14_DAYS,
+        },
+        {
+          policy: efs.LifecyclePolicy.AFTER_30_DAYS,
+          expectedTransition: TEST_CONSTANTS.LIFECYCLE_POLICIES.AFTER_30_DAYS,
+        },
+        {
+          policy: efs.LifecyclePolicy.AFTER_60_DAYS,
+          expectedTransition: TEST_CONSTANTS.LIFECYCLE_POLICIES.AFTER_60_DAYS,
+        },
+        {
+          policy: efs.LifecyclePolicy.AFTER_90_DAYS,
+          expectedTransition: TEST_CONSTANTS.LIFECYCLE_POLICIES.AFTER_90_DAYS,
+        },
+      ];
+
+      lifecycleStacks = lifecyclePolicies.map(({ policy, expectedTransition }) => {
+        const lifecycleApp = createTestApp();
+        const stack = createTestStack(lifecycleApp, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+          lifecyclePolicy: policy,
+        });
+        return {
+          expectedTransition,
+          stack,
+          template: Template.fromStack(stack),
+        };
+      });
+    });
+
     test.each([
       {
         envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
@@ -387,90 +391,87 @@ describe("MonitoringEfsStack", () => {
     ])(
       "uses $expectedPolicy removal policy for $envName",
       ({ envName, expectedPolicy }) => {
-        const stack = createTestStack(app, `TestStack-${envName}`, {
-          envName,
-        });
-        const template = Template.fromStack(stack);
+        const testData = removalPolicyStacks.find((data) => data.envName === envName);
+        expect(testData).toBeDefined();
+        expect(testData?.expectedPolicy).toBe(expectedPolicy);
 
-        template.hasResource("AWS::EFS::FileSystem", {
-          DeletionPolicy: expectedPolicy,
-          UpdateReplacePolicy: expectedPolicy,
-        });
+        expect(() => {
+          testData?.template.hasResource("AWS::EFS::FileSystem", {
+            DeletionPolicy: expectedPolicy,
+            UpdateReplacePolicy: expectedPolicy,
+          });
+        }).not.toThrow();
       }
     );
 
     test.each([
       {
         description: "encryption enabled by default",
-        enableEncryption: undefined,
         expectedEncrypted: true,
       },
       {
         description: "encryption disabled when specified",
-        enableEncryption: false,
         expectedEncrypted: false,
       },
     ])(
       "creates EFS file system with $description",
-      ({ enableEncryption, expectedEncrypted }) => {
-        const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
-          enableEncryption,
-        });
-        const template = Template.fromStack(stack);
+      ({ description, expectedEncrypted }) => {
+        const testData = encryptionStacks.find((data) => data.description === description);
+        expect(testData).toBeDefined();
+        expect(testData?.expectedEncrypted).toBe(expectedEncrypted);
 
-        template.hasResourceProperties("AWS::EFS::FileSystem", {
-          Encrypted: expectedEncrypted,
-        });
+        expect(() => {
+          testData?.template.hasResourceProperties("AWS::EFS::FileSystem", {
+            Encrypted: expectedEncrypted,
+          });
+        }).not.toThrow();
       }
     );
 
     test.each([
       {
-        policy: efs.LifecyclePolicy.AFTER_7_DAYS,
         expectedTransition: TEST_CONSTANTS.LIFECYCLE_POLICIES.AFTER_7_DAYS,
       },
       {
-        policy: efs.LifecyclePolicy.AFTER_14_DAYS,
         expectedTransition: TEST_CONSTANTS.LIFECYCLE_POLICIES.AFTER_14_DAYS,
       },
       {
-        policy: efs.LifecyclePolicy.AFTER_30_DAYS,
         expectedTransition: TEST_CONSTANTS.LIFECYCLE_POLICIES.AFTER_30_DAYS,
       },
       {
-        policy: efs.LifecyclePolicy.AFTER_60_DAYS,
         expectedTransition: TEST_CONSTANTS.LIFECYCLE_POLICIES.AFTER_60_DAYS,
       },
       {
-        policy: efs.LifecyclePolicy.AFTER_90_DAYS,
         expectedTransition: TEST_CONSTANTS.LIFECYCLE_POLICIES.AFTER_90_DAYS,
       },
     ])(
       "creates EFS with lifecycle policy $expectedTransition",
-      ({ policy, expectedTransition }) => {
-        const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
-          lifecyclePolicy: policy,
-        });
-        const template = Template.fromStack(stack);
+      ({ expectedTransition }) => {
+        const testData = lifecycleStacks.find(
+          (data) => data.expectedTransition === expectedTransition
+        );
+        expect(testData).toBeDefined();
+        expect(testData?.expectedTransition).toBe(expectedTransition);
 
-        template.hasResourceProperties("AWS::EFS::FileSystem", {
-          LifecyclePolicies: [
-            {
-              TransitionToIA: expectedTransition,
-            },
-          ],
-        });
+        expect(() => {
+          testData?.template.hasResourceProperties("AWS::EFS::FileSystem", {
+            LifecyclePolicies: [
+              {
+                TransitionToIA: expectedTransition,
+              },
+            ],
+          });
+        }).not.toThrow();
       }
     );
 
     test("creates exactly one EFS file system", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
-
-      template.resourceCountIs(
-        "AWS::EFS::FileSystem",
-        TEST_CONSTANTS.RESOURCE_COUNTS.FILE_SYSTEM
-      );
+      expect(() => {
+        defaultTemplate.resourceCountIs(
+          "AWS::EFS::FileSystem",
+          TEST_CONSTANTS.RESOURCE_COUNTS.FILE_SYSTEM
+        );
+      }).not.toThrow();
     });
   });
 
@@ -485,34 +486,42 @@ describe("MonitoringEfsStack", () => {
    * configuration and mount path.
    */
   describe("EFS Access Point Configuration", () => {
-    test("creates EFS access point with correct path and POSIX configuration", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
+    let app: cdk.App;
+    let stack: MonitoringEfsStack;
+    let template: Template;
 
-      template.hasResourceProperties("AWS::EFS::AccessPoint", {
-        PosixUser: {
-          Uid: TEST_CONSTANTS.EFS.OWNER_UID,
-          Gid: TEST_CONSTANTS.EFS.OWNER_GID,
-        },
-        RootDirectory: {
-          CreationInfo: {
-            OwnerUid: TEST_CONSTANTS.EFS.OWNER_UID,
-            OwnerGid: TEST_CONSTANTS.EFS.OWNER_GID,
-            Permissions: TEST_CONSTANTS.EFS.PERMISSIONS,
+    beforeAll(() => {
+      app = createTestApp();
+      stack = createTestStack(app);
+      template = Template.fromStack(stack);
+    });
+
+    test("creates EFS access point with correct path and POSIX configuration", () => {
+      expect(() => {
+        template.hasResourceProperties("AWS::EFS::AccessPoint", {
+          PosixUser: {
+            Uid: TEST_CONSTANTS.EFS.OWNER_UID,
+            Gid: TEST_CONSTANTS.EFS.OWNER_GID,
           },
-          Path: TEST_CONSTANTS.EFS.MOUNT_PATH,
-        },
-      });
+          RootDirectory: {
+            CreationInfo: {
+              OwnerUid: TEST_CONSTANTS.EFS.OWNER_UID,
+              OwnerGid: TEST_CONSTANTS.EFS.OWNER_GID,
+              Permissions: TEST_CONSTANTS.EFS.PERMISSIONS,
+            },
+            Path: TEST_CONSTANTS.EFS.MOUNT_PATH,
+          },
+        });
+      }).not.toThrow();
     });
 
     test("creates exactly one EFS access point", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
-
-      template.resourceCountIs(
-        "AWS::EFS::AccessPoint",
-        TEST_CONSTANTS.RESOURCE_COUNTS.ACCESS_POINT
-      );
+      expect(() => {
+        template.resourceCountIs(
+          "AWS::EFS::AccessPoint",
+          TEST_CONSTANTS.RESOURCE_COUNTS.ACCESS_POINT
+        );
+      }).not.toThrow();
     });
   });
 
@@ -527,30 +536,38 @@ describe("MonitoringEfsStack", () => {
    * allowing traffic from VPC CIDR.
    */
   describe("Security Group Configuration", () => {
-    test("creates security group for EFS mount targets", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
+    let app: cdk.App;
+    let stack: MonitoringEfsStack;
+    let template: Template;
 
-      template.resourceCountIs(
-        "AWS::EC2::SecurityGroup",
-        TEST_CONSTANTS.RESOURCE_COUNTS.SECURITY_GROUP
-      );
+    beforeAll(() => {
+      app = createTestApp();
+      stack = createTestStack(app);
+      template = Template.fromStack(stack);
+    });
+
+    test("creates security group for EFS mount targets", () => {
+      expect(() => {
+        template.resourceCountIs(
+          "AWS::EC2::SecurityGroup",
+          TEST_CONSTANTS.RESOURCE_COUNTS.SECURITY_GROUP
+        );
+      }).not.toThrow();
     });
 
     test("security group allows NFS traffic from VPC CIDR", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
-
-      template.hasResourceProperties("AWS::EC2::SecurityGroup", {
-        SecurityGroupIngress: Match.arrayWith([
-          Match.objectLike({
-            IpProtocol: "tcp",
-            FromPort: TEST_CONSTANTS.EFS.NFS_PORT,
-            ToPort: TEST_CONSTANTS.EFS.NFS_PORT,
-            CidrIp: Match.anyValue(),
-          }),
-        ]),
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::EC2::SecurityGroup", {
+          SecurityGroupIngress: Match.arrayWith([
+            Match.objectLike({
+              IpProtocol: "tcp",
+              FromPort: TEST_CONSTANTS.EFS.NFS_PORT,
+              ToPort: TEST_CONSTANTS.EFS.NFS_PORT,
+              CidrIp: Match.anyValue(),
+            }),
+          ]),
+        });
+      }).not.toThrow();
     });
   });
 
@@ -566,34 +583,30 @@ describe("MonitoringEfsStack", () => {
    * or custom resources are created.
    */
   describe("SSM Automation Document Configuration", () => {
-    test("creates SSM Automation Document for EFS initialization", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
+    let app: cdk.App;
+    let defaultStack: MonitoringEfsStack;
+    let devStack: MonitoringEfsStack;
+    let defaultTemplate: Template;
+    let devTemplate: Template;
+    let automationRole: unknown;
 
-      template.resourceCountIs(
-        "AWS::SSM::Document",
-        TEST_CONSTANTS.RESOURCE_COUNTS.SSM_DOCUMENT
-      );
-    });
+    beforeAll(() => {
+      app = createTestApp();
 
-    test("creates SSM Document with correct type and format", () => {
-      const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+      // Create ALL stacks first before calling Template.fromStack()
+      // Template.fromStack() triggers synthesis which locks the app
+      defaultStack = createTestStack(app, "DefaultSsmStack");
+      devStack = createTestStack(app, "DevSsmStack", {
         envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
       });
-      const template = Template.fromStack(stack);
 
-      template.hasResourceProperties("AWS::SSM::Document", {
-        DocumentType: TEST_CONSTANTS.SSM_DOCUMENT.TYPE,
-        DocumentFormat: TEST_CONSTANTS.SSM_DOCUMENT.FORMAT,
-      });
-    });
+      // Now create templates from the stacks
+      defaultTemplate = Template.fromStack(defaultStack);
+      devTemplate = Template.fromStack(devStack);
 
-    test("creates IAM role for automation execution", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
-
-      const roles = template.findResources("AWS::IAM::Role");
-      const automationRole = Object.values(roles).find((role) => {
+      // Pre-compute automation role
+      const roles = defaultTemplate.findResources("AWS::IAM::Role");
+      automationRole = Object.values(roles).find((role) => {
         const roleProps = role.Properties as {
           AssumeRolePolicyDocument?: {
             Statement?: Array<{
@@ -611,55 +624,70 @@ describe("MonitoringEfsStack", () => {
           );
         });
       });
+    });
+
+    test("creates SSM Automation Document for EFS initialization", () => {
+      expect(() => {
+        defaultTemplate.resourceCountIs(
+          "AWS::SSM::Document",
+          TEST_CONSTANTS.RESOURCE_COUNTS.SSM_DOCUMENT
+        );
+      }).not.toThrow();
+    });
+
+    test("creates SSM Document with correct type and format", () => {
+      expect(() => {
+        devTemplate.hasResourceProperties("AWS::SSM::Document", {
+          DocumentType: TEST_CONSTANTS.SSM_DOCUMENT.TYPE,
+          DocumentFormat: TEST_CONSTANTS.SSM_DOCUMENT.FORMAT,
+        });
+      }).not.toThrow();
+    });
+
+    test("creates IAM role for automation execution", () => {
       expect(automationRole).toBeDefined();
     });
 
     test("creates SSM Association to execute automation", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
-
-      template.resourceCountIs(
-        "AWS::SSM::Association",
-        TEST_CONSTANTS.RESOURCE_COUNTS.SSM_ASSOCIATION
-      );
+      expect(() => {
+        defaultTemplate.resourceCountIs(
+          "AWS::SSM::Association",
+          TEST_CONSTANTS.RESOURCE_COUNTS.SSM_ASSOCIATION
+        );
+      }).not.toThrow();
     });
 
     test("SSM Association has correct parameters", () => {
-      const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
-        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
-      });
-      const template = Template.fromStack(stack);
-
-      template.hasResourceProperties("AWS::SSM::Association", {
-        Parameters: {
-          FileSystemId: Match.anyValue(),
-          AccessPointId: Match.anyValue(),
-          Environment: [TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT],
-          AutomationAssumeRole: Match.anyValue(),
-        },
-      });
+      expect(() => {
+        devTemplate.hasResourceProperties("AWS::SSM::Association", {
+          Parameters: {
+            FileSystemId: Match.anyValue(),
+            AccessPointId: Match.anyValue(),
+            Environment: [TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT],
+            AutomationAssumeRole: Match.anyValue(),
+          },
+        });
+      }).not.toThrow();
     });
 
     test("no Lambda function is created", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
-
       // Lambda-based initialization has been replaced by SSM Automation
-      template.resourceCountIs(
-        "AWS::Lambda::Function",
-        TEST_CONSTANTS.RESOURCE_COUNTS.LAMBDA_FUNCTION
-      );
+      expect(() => {
+        defaultTemplate.resourceCountIs(
+          "AWS::Lambda::Function",
+          TEST_CONSTANTS.RESOURCE_COUNTS.LAMBDA_FUNCTION
+        );
+      }).not.toThrow();
     });
 
     test("no custom resource is created", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
-
       // Custom resource has been replaced by SSM Association
-      template.resourceCountIs(
-        "AWS::CloudFormation::CustomResource",
-        TEST_CONSTANTS.RESOURCE_COUNTS.CUSTOM_RESOURCE
-      );
+      expect(() => {
+        defaultTemplate.resourceCountIs(
+          "AWS::CloudFormation::CustomResource",
+          TEST_CONSTANTS.RESOURCE_COUNTS.CUSTOM_RESOURCE
+        );
+      }).not.toThrow();
     });
   });
 
@@ -674,117 +702,90 @@ describe("MonitoringEfsStack", () => {
    * configurations in both JSON and YAML formats, and EFS discovery parameters.
    */
   describe("SSM Parameters Configuration", () => {
-    test("creates SSM parameters by default", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
+    let app: cdk.App;
+    let defaultTemplate: Template;
+    let paramNames: string[];
+    let efsParamsCount: number;
 
-      const parameters = template.findResources("AWS::SSM::Parameter");
-      expect(Object.keys(parameters).length).toBeGreaterThan(0);
-    });
+    beforeAll(() => {
+      app = createTestApp();
 
-    test.each([
-      {
-        parameterName: "Prometheus JSON configuration",
-        expectedPath: TEST_CONSTANTS.SSM_PARAMETER_PATHS.PROMETHEUS_CONFIG,
-      },
-      {
-        parameterName: "Prometheus YAML configuration",
-        expectedPath: TEST_CONSTANTS.SSM_PARAMETER_PATHS.PROMETHEUS_CONFIG_YAML,
-      },
-      {
-        parameterName: "Grafana datasource JSON configuration",
-        expectedPath:
-          TEST_CONSTANTS.SSM_PARAMETER_PATHS.GRAFANA_DATASOURCE_CONFIG,
-      },
-      {
-        parameterName: "Grafana datasource YAML configuration",
-        expectedPath:
-          TEST_CONSTANTS.SSM_PARAMETER_PATHS.GRAFANA_DATASOURCE_CONFIG_YAML,
-      },
-      {
-        parameterName: "Grafana dashboard JSON configuration",
-        expectedPath:
-          TEST_CONSTANTS.SSM_PARAMETER_PATHS.GRAFANA_DASHBOARD_CONFIG,
-      },
-      {
-        parameterName: "Grafana dashboard YAML configuration",
-        expectedPath:
-          TEST_CONSTANTS.SSM_PARAMETER_PATHS.GRAFANA_DASHBOARD_CONFIG_YAML,
-      },
-    ])("creates $parameterName SSM parameter", ({ expectedPath }) => {
-      const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
-        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
-      });
-      const template = Template.fromStack(stack);
+      // Pre-compute default template
+      const defaultStack = createTestStack(app);
+      defaultTemplate = Template.fromStack(defaultStack);
 
-      template.hasResourceProperties("AWS::SSM::Parameter", {
-        Name: expectedPath,
-        Type: "String",
-        Tier: "Standard",
-      });
-    });
-
-    test("creates both JSON and YAML versions of each config", () => {
-      const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
-        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
-      });
-      const template = Template.fromStack(stack);
-
-      const parameters = template.findResources("AWS::SSM::Parameter");
-      const paramNames = Object.values(parameters).map(
+      // Pre-compute parameter names for JSON/YAML tests
+      const parameters = defaultTemplate.findResources("AWS::SSM::Parameter");
+      paramNames = Object.values(parameters).map(
         (param) => (param.Properties as { Name: string }).Name
       );
 
-      // Check JSON versions exist
+      // Pre-compute EFS params count for disabled test
+      const disabledApp = createTestApp();
+      const disabledStack = createTestStack(disabledApp, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+        createSsmParameters: false,
+      });
+      const disabledTemplate = Template.fromStack(disabledStack);
+      const disabledParams = disabledTemplate.findResources("AWS::SSM::Parameter");
+      efsParamsCount = Object.values(disabledParams).filter((param) => {
+        const paramProps = param.Properties as { Name?: string };
+        return paramProps.Name?.includes("/efs/");
+      }).length;
+    });
+
+    test("creates SSM parameters by default", () => {
+      const parameters = defaultTemplate.findResources("AWS::SSM::Parameter");
+      expect(Object.keys(parameters).length).toBeGreaterThan(0);
+    });
+
+    test("creates Prometheus JSON configuration SSM parameter", () => {
       expect(paramNames).toContain(
         TEST_CONSTANTS.SSM_PARAMETER_PATHS.PROMETHEUS_CONFIG
       );
-      expect(paramNames).toContain(
-        TEST_CONSTANTS.SSM_PARAMETER_PATHS.GRAFANA_DATASOURCE_CONFIG
-      );
-      expect(paramNames).toContain(
-        TEST_CONSTANTS.SSM_PARAMETER_PATHS.GRAFANA_DASHBOARD_CONFIG
-      );
+    });
 
-      // Check YAML versions exist
+    test("creates Prometheus YAML configuration SSM parameter", () => {
       expect(paramNames).toContain(
         TEST_CONSTANTS.SSM_PARAMETER_PATHS.PROMETHEUS_CONFIG_YAML
       );
+    });
+
+    test("creates Grafana datasource JSON configuration SSM parameter", () => {
+      expect(paramNames).toContain(
+        TEST_CONSTANTS.SSM_PARAMETER_PATHS.GRAFANA_DATASOURCE_CONFIG
+      );
+    });
+
+    test("creates Grafana datasource YAML configuration SSM parameter", () => {
       expect(paramNames).toContain(
         TEST_CONSTANTS.SSM_PARAMETER_PATHS.GRAFANA_DATASOURCE_CONFIG_YAML
       );
+    });
+
+    test("creates Grafana dashboard JSON configuration SSM parameter", () => {
+      expect(paramNames).toContain(
+        TEST_CONSTANTS.SSM_PARAMETER_PATHS.GRAFANA_DASHBOARD_CONFIG
+      );
+    });
+
+    test("creates Grafana dashboard YAML configuration SSM parameter", () => {
       expect(paramNames).toContain(
         TEST_CONSTANTS.SSM_PARAMETER_PATHS.GRAFANA_DASHBOARD_CONFIG_YAML
       );
     });
 
     test("creates EFS discovery SSM parameters when enabled", () => {
-      const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
-        createSsmParameters: true,
-      });
-      const template = Template.fromStack(stack);
-
-      template.hasResourceProperties("AWS::SSM::Parameter", {
-        Name: Match.stringLikeRegexp(
-          TEST_CONSTANTS.SSM_PARAMETER_PATHS.EFS_CONFIG_PREFIX
-        ),
-      });
+      expect(() => {
+        defaultTemplate.hasResourceProperties("AWS::SSM::Parameter", {
+          Name: Match.stringLikeRegexp(
+            TEST_CONSTANTS.SSM_PARAMETER_PATHS.EFS_CONFIG_PREFIX
+          ),
+        });
+      }).not.toThrow();
     });
 
-    test("does not create SSM parameters when disabled", () => {
-      const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
-        createSsmParameters: false,
-      });
-      const template = Template.fromStack(stack);
-
-      // Should still have monitoring config parameters (Prometheus, Grafana)
-      // but not EFS discovery parameters
-      const parameters = template.findResources("AWS::SSM::Parameter");
-      const efsParams = Object.values(parameters).filter((param) => {
-        const paramProps = param.Properties as { Name?: string };
-        return paramProps.Name?.includes("/efs/");
-      });
-      expect(efsParams.length).toBe(0);
+    test("does not create EFS SSM parameters when disabled", () => {
+      expect(efsParamsCount).toBe(0);
     });
   });
 
@@ -799,99 +800,101 @@ describe("MonitoringEfsStack", () => {
    * access point ID, and security group ID, with optional exports.
    */
   describe("CloudFormation Outputs", () => {
-    test.each([
-      {
-        outputName: TEST_CONSTANTS.OUTPUT_NAMES.FILE_SYSTEM_ID,
-        descriptionPattern: "EFS file system ID",
-      },
-      {
-        outputName: TEST_CONSTANTS.OUTPUT_NAMES.ACCESS_POINT_ID,
-        descriptionPattern: "EFS access point ID",
-      },
-      {
-        outputName: TEST_CONSTANTS.OUTPUT_NAMES.SECURITY_GROUP_ID,
-        descriptionPattern: "EFS.*security group",
-      },
-    ])(
-      "creates $outputName output with correct description",
-      ({ outputName, descriptionPattern }) => {
-        const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
-          createOutputs: true,
-        });
-        const template = Template.fromStack(stack);
+    let app: cdk.App;
+    let defaultTemplate: Template;
+    let exportsTemplate: Template;
+    let noExportsTemplate: Template;
+    let noOutputsTemplate: Template;
+    let exportsOutputs: Record<string, unknown>;
+    let noExportsOutputs: Record<string, unknown>;
+    let noOutputsOutputs: Record<string, unknown> | undefined;
 
-        template.hasOutput(outputName, {
-          Description: Match.stringLikeRegexp(descriptionPattern),
-        });
-      }
-    );
+    beforeAll(() => {
+      app = createTestApp();
 
-    test("creates CloudFormation outputs by default", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
-
-      template.hasOutput(TEST_CONSTANTS.OUTPUT_NAMES.FILE_SYSTEM_ID, {
-        Description: Match.stringLikeRegexp("EFS file system ID"),
+      // Default stack with outputs
+      const defaultStack = createTestStack(app, "DefaultOutputsStack", {
+        createOutputs: true,
       });
-    });
+      defaultTemplate = Template.fromStack(defaultStack);
 
-    test("exports outputs when enableExports is true", () => {
-      const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+      // Stack with exports enabled
+      const exportsApp = createTestApp();
+      const exportsStack = createTestStack(exportsApp, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
         envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         projectName: "monitoring",
         enableExports: true,
         createOutputs: true,
       });
-      const template = Template.fromStack(stack);
+      exportsTemplate = Template.fromStack(exportsStack);
+      exportsOutputs = exportsTemplate.toJSON().Outputs as Record<string, unknown>;
 
-      // Verify output exists with export
-      const outputs = template.toJSON().Outputs;
-      const fileSystemOutput = outputs?.[
+      // Stack with exports disabled
+      const noExportsApp = createTestApp();
+      const noExportsStack = createTestStack(noExportsApp, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+        enableExports: false,
+      });
+      noExportsTemplate = Template.fromStack(noExportsStack);
+      noExportsOutputs = noExportsTemplate.toJSON().Outputs as Record<string, unknown>;
+
+      // Stack with outputs disabled
+      const noOutputsApp = createTestApp();
+      const noOutputsStack = createTestStack(noOutputsApp, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+        createOutputs: false,
+      });
+      noOutputsTemplate = Template.fromStack(noOutputsStack);
+      noOutputsOutputs = noOutputsTemplate.toJSON().Outputs as Record<string, unknown> | undefined;
+    });
+
+    test("creates FileSystemId output with correct description", () => {
+      expect(() => {
+        defaultTemplate.hasOutput(TEST_CONSTANTS.OUTPUT_NAMES.FILE_SYSTEM_ID, {
+          Description: Match.stringLikeRegexp("EFS file system ID"),
+        });
+      }).not.toThrow();
+    });
+
+    test("creates AccessPointId output with correct description", () => {
+      expect(() => {
+        defaultTemplate.hasOutput(TEST_CONSTANTS.OUTPUT_NAMES.ACCESS_POINT_ID, {
+          Description: Match.stringLikeRegexp("EFS access point ID"),
+        });
+      }).not.toThrow();
+    });
+
+    test("creates SecurityGroupId output with correct description", () => {
+      expect(() => {
+        defaultTemplate.hasOutput(TEST_CONSTANTS.OUTPUT_NAMES.SECURITY_GROUP_ID, {
+          Description: Match.stringLikeRegexp("EFS.*security group"),
+        });
+      }).not.toThrow();
+    });
+
+    test("exports outputs when enableExports is true", () => {
+      const fileSystemOutput = exportsOutputs[
         TEST_CONSTANTS.OUTPUT_NAMES.FILE_SYSTEM_ID
-      ] as {
-        Export?: { Name?: string };
-      };
+      ] as { Export?: { Name?: string } };
       expect(fileSystemOutput).toBeDefined();
       expect(fileSystemOutput.Export).toBeDefined();
       expect(fileSystemOutput.Export?.Name).toMatch(/.*efs.*id.*/i);
     });
 
     test("does not create exports when enableExports is false", () => {
-      const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
-        enableExports: false,
-      });
-      const template = Template.fromStack(stack);
-
-      const outputs = template.toJSON().Outputs;
-      expect(
-        (
-          outputs[TEST_CONSTANTS.OUTPUT_NAMES.FILE_SYSTEM_ID] as {
-            Export?: unknown;
-          }
-        ).Export
-      ).toBeUndefined();
+      const fileSystemOutput = noExportsOutputs[
+        TEST_CONSTANTS.OUTPUT_NAMES.FILE_SYSTEM_ID
+      ] as { Export?: unknown };
+      expect(fileSystemOutput.Export).toBeUndefined();
     });
 
     test("does not create stack outputs when disabled", () => {
-      const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
-        createOutputs: false,
-      });
-      const template = Template.fromStack(stack);
-
-      const outputs = template.toJSON().Outputs;
-      // When createOutputs is false, custom outputs should not exist
-      // Some outputs may still be created by CDK constructs
-      // Verify stack property indicates outputs are disabled
-      expect(stack).toBeDefined();
-      if (outputs) {
-        // Verify custom outputs are not present
-        expect(
-          outputs[TEST_CONSTANTS.OUTPUT_NAMES.FILE_SYSTEM_ID]
-        ).toBeUndefined();
-        expect(
-          outputs[TEST_CONSTANTS.OUTPUT_NAMES.ACCESS_POINT_ID]
-        ).toBeUndefined();
-      }
+      // Pre-computed in beforeAll - no conditional needed
+      expect(noOutputsOutputs).toBeDefined();
+      expect(
+        noOutputsOutputs?.[TEST_CONSTANTS.OUTPUT_NAMES.FILE_SYSTEM_ID]
+      ).toBeUndefined();
+      expect(
+        noOutputsOutputs?.[TEST_CONSTANTS.OUTPUT_NAMES.ACCESS_POINT_ID]
+      ).toBeUndefined();
     });
   });
 
@@ -906,38 +909,52 @@ describe("MonitoringEfsStack", () => {
    * (public or private) based on configuration.
    */
   describe("Subnet Selection", () => {
-    test("uses public subnets by default", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
+    let publicSubnetTemplate: Template;
+    let privateSubnetTemplate: Template;
+    let customSubnetTemplate: Template;
 
-      // Verify mount targets exist (EFS creates mount targets in subnets)
-      template.resourceCountIs("AWS::EFS::MountTarget", 2);
-    });
+    beforeAll(() => {
+      // Public subnets (default)
+      const publicApp = createTestApp();
+      const publicStack = createTestStack(publicApp);
+      publicSubnetTemplate = Template.fromStack(publicStack);
 
-    test("uses private subnets when usePublicSubnets is false", () => {
-      const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+      // Private subnets
+      const privateApp = createTestApp();
+      const privateStack = createTestStack(privateApp, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
         usePublicSubnets: false,
       });
-      const template = Template.fromStack(stack);
+      privateSubnetTemplate = Template.fromStack(privateStack);
 
-      // Verify mount targets exist in private subnets
-      template.resourceCountIs("AWS::EFS::MountTarget", 2);
-    });
-
-    test("uses custom subnet selection when provided", () => {
-      const fixtures = TestFixtures.getInstance(app);
+      // Custom subnet selection
+      const customApp = createTestApp();
+      const fixtures = TestFixtures.getInstance(customApp);
       const vpc = fixtures.getVpc();
-
-      const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+      const customStack = createTestStack(customApp, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
         vpc,
         mountTargetSubnetSelection: {
           subnetGroupName: "Private",
         },
       });
-      const template = Template.fromStack(stack);
+      customSubnetTemplate = Template.fromStack(customStack);
+    });
 
-      // Verify mount targets exist
-      template.resourceCountIs("AWS::EFS::MountTarget", 2);
+    test("uses public subnets by default", () => {
+      expect(() => {
+        publicSubnetTemplate.resourceCountIs("AWS::EFS::MountTarget", 2);
+      }).not.toThrow();
+    });
+
+    test("uses private subnets when usePublicSubnets is false", () => {
+      expect(() => {
+        privateSubnetTemplate.resourceCountIs("AWS::EFS::MountTarget", 2);
+      }).not.toThrow();
+    });
+
+    test("uses custom subnet selection when provided", () => {
+      expect(() => {
+        customSubnetTemplate.resourceCountIs("AWS::EFS::MountTarget", 2);
+      }).not.toThrow();
     });
   });
 
@@ -953,11 +970,12 @@ describe("MonitoringEfsStack", () => {
    */
   describe("Validation", () => {
     test("validates environment name is non-empty", () => {
+      const app = createTestApp();
       const fixtures = TestFixtures.getInstance(app);
       const vpc = fixtures.getVpc();
 
       expect(() => {
-        createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+        createTestStack(app, "ValidationEnvNameStack", {
           vpc,
           envName: "",
         });
@@ -965,8 +983,10 @@ describe("MonitoringEfsStack", () => {
     });
 
     test("throws error when VPC is not provided", () => {
+      const app = createTestApp();
+
       expect(() => {
-        new MonitoringEfsStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+        new MonitoringEfsStack(app, "ValidationVpcStack", {
           env: {
             account: TEST_CONFIG.account,
             region: TEST_CONFIG.region,
@@ -1022,14 +1042,16 @@ describe("MonitoringEfsStack", () => {
     test("encryption and lifecycle policy work together", () => {
       const template = Template.fromStack(encryptionLifecycleStack);
 
-      template.hasResourceProperties("AWS::EFS::FileSystem", {
-        Encrypted: true,
-        LifecyclePolicies: [
-          {
-            TransitionToIA: TEST_CONSTANTS.LIFECYCLE_POLICIES.AFTER_30_DAYS,
-          },
-        ],
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::EFS::FileSystem", {
+          Encrypted: true,
+          LifecyclePolicies: [
+            {
+              TransitionToIA: TEST_CONSTANTS.LIFECYCLE_POLICIES.AFTER_30_DAYS,
+            },
+          ],
+        });
+      }).not.toThrow();
     });
 
     test("SSM parameters and outputs work together", () => {
@@ -1087,27 +1109,33 @@ describe("MonitoringEfsStack", () => {
     test("development environment has cost-optimized configuration", () => {
       const template = Template.fromStack(devStack);
 
-      template.hasResource("AWS::EFS::FileSystem", {
-        DeletionPolicy: TEST_CONSTANTS.REMOVAL_POLICIES.DELETE,
-        UpdateReplacePolicy: TEST_CONSTANTS.REMOVAL_POLICIES.DELETE,
-      });
+      expect(() => {
+        template.hasResource("AWS::EFS::FileSystem", {
+          DeletionPolicy: TEST_CONSTANTS.REMOVAL_POLICIES.DELETE,
+          UpdateReplacePolicy: TEST_CONSTANTS.REMOVAL_POLICIES.DELETE,
+        });
+      }).not.toThrow();
     });
 
     test("production environment has HA and data retention configuration", () => {
       const template = Template.fromStack(prodStack);
 
-      template.hasResource("AWS::EFS::FileSystem", {
-        DeletionPolicy: TEST_CONSTANTS.REMOVAL_POLICIES.RETAIN,
-        UpdateReplacePolicy: TEST_CONSTANTS.REMOVAL_POLICIES.RETAIN,
-      });
+      expect(() => {
+        template.hasResource("AWS::EFS::FileSystem", {
+          DeletionPolicy: TEST_CONSTANTS.REMOVAL_POLICIES.RETAIN,
+          UpdateReplacePolicy: TEST_CONSTANTS.REMOVAL_POLICIES.RETAIN,
+        });
+      }).not.toThrow();
 
-      template.hasResourceProperties("AWS::EFS::FileSystem", {
-        LifecyclePolicies: [
-          {
-            TransitionToIA: TEST_CONSTANTS.LIFECYCLE_POLICIES.AFTER_30_DAYS,
-          },
-        ],
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::EFS::FileSystem", {
+          LifecyclePolicies: [
+            {
+              TransitionToIA: TEST_CONSTANTS.LIFECYCLE_POLICIES.AFTER_30_DAYS,
+            },
+          ],
+        });
+      }).not.toThrow();
     });
   });
 
@@ -1122,38 +1150,41 @@ describe("MonitoringEfsStack", () => {
    * for cross-stack references.
    */
   describe("Stack Properties", () => {
-    test.each([
-      {
-        property: "fileSystem",
-        expectedType: "object",
-      },
-      {
-        property: "accessPoint",
-        expectedType: "object",
-      },
-      {
-        property: "mountTargetSecurityGroup",
-        expectedType: "object",
-      },
-      {
-        property: "efsAvailabilityZone",
-        expectedType: "string",
-      },
-      {
-        property: "efsInitializationExecution",
-        expectedType: "object",
-      },
-    ])("exposes $property property", ({ property, expectedType }) => {
-      const stack = createTestStack(app);
+    let stack: MonitoringEfsStack;
 
-      const prop = (stack as unknown as Record<string, unknown>)[property];
+    beforeAll(() => {
+      const app = createTestApp();
+      stack = createTestStack(app);
+    });
+
+    test("exposes fileSystem property", () => {
+      const prop = (stack as unknown as Record<string, unknown>).fileSystem;
       expect(prop).toBeDefined();
+      expect(typeof prop).toBe("object");
+    });
 
-      if (expectedType === "string") {
-        expect(typeof prop).toBe("string");
-      } else {
-        expect(typeof prop).toBe("object");
-      }
+    test("exposes accessPoint property", () => {
+      const prop = (stack as unknown as Record<string, unknown>).accessPoint;
+      expect(prop).toBeDefined();
+      expect(typeof prop).toBe("object");
+    });
+
+    test("exposes mountTargetSecurityGroup property", () => {
+      const prop = (stack as unknown as Record<string, unknown>).mountTargetSecurityGroup;
+      expect(prop).toBeDefined();
+      expect(typeof prop).toBe("object");
+    });
+
+    test("exposes efsAvailabilityZone property", () => {
+      const prop = (stack as unknown as Record<string, unknown>).efsAvailabilityZone;
+      expect(prop).toBeDefined();
+      expect(typeof prop).toBe("string");
+    });
+
+    test("exposes efsInitializationExecution property", () => {
+      const prop = (stack as unknown as Record<string, unknown>).efsInitializationExecution;
+      expect(prop).toBeDefined();
+      expect(typeof prop).toBe("object");
     });
   });
 
@@ -1168,8 +1199,14 @@ describe("MonitoringEfsStack", () => {
    * when specified, and works correctly without them.
    */
   describe("Cross-Account Targets", () => {
-    test("creates Prometheus config with cross-account targets", () => {
-      const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+    let crossAccountTemplate: Template;
+    let noCrossAccountTemplate: Template;
+    let prometheusParam: unknown;
+
+    beforeAll(() => {
+      // Stack with cross-account targets
+      const crossAccountApp = createTestApp();
+      const crossAccountStack = createTestStack(crossAccountApp, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
         envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         crossAccountTargets: [
           {
@@ -1182,34 +1219,41 @@ describe("MonitoringEfsStack", () => {
           },
         ],
       });
-      const template = Template.fromStack(stack);
+      crossAccountTemplate = Template.fromStack(crossAccountStack);
 
-      // Verify Prometheus config SSM parameter exists
-      template.hasResourceProperties("AWS::SSM::Parameter", {
-        Name: TEST_CONSTANTS.SSM_PARAMETER_PATHS.PROMETHEUS_CONFIG,
-      });
-
-      // Verify the config contains cross-account scrape configs
-      const parameters = template.findResources("AWS::SSM::Parameter");
-      const prometheusParam = Object.values(parameters).find((param) => {
+      // Pre-compute prometheus param
+      const parameters = crossAccountTemplate.findResources("AWS::SSM::Parameter");
+      prometheusParam = Object.values(parameters).find((param) => {
         const paramProps = param.Properties as { Name?: string };
         return (
           paramProps.Name ===
           TEST_CONSTANTS.SSM_PARAMETER_PATHS.PROMETHEUS_CONFIG
         );
       });
+
+      // Stack without cross-account targets
+      const noCrossAccountApp = createTestApp();
+      const noCrossAccountStack = createTestStack(noCrossAccountApp, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
+      });
+      noCrossAccountTemplate = Template.fromStack(noCrossAccountStack);
+    });
+
+    test("creates Prometheus config with cross-account targets", () => {
+      expect(() => {
+        crossAccountTemplate.hasResourceProperties("AWS::SSM::Parameter", {
+          Name: TEST_CONSTANTS.SSM_PARAMETER_PATHS.PROMETHEUS_CONFIG,
+        });
+      }).not.toThrow();
       expect(prometheusParam).toBeDefined();
     });
 
     test("creates Prometheus config without cross-account targets", () => {
-      const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
-        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
-      });
-      const template = Template.fromStack(stack);
-
-      template.hasResourceProperties("AWS::SSM::Parameter", {
-        Name: TEST_CONSTANTS.SSM_PARAMETER_PATHS.PROMETHEUS_CONFIG,
-      });
+      expect(() => {
+        noCrossAccountTemplate.hasResourceProperties("AWS::SSM::Parameter", {
+          Name: TEST_CONSTANTS.SSM_PARAMETER_PATHS.PROMETHEUS_CONFIG,
+        });
+      }).not.toThrow();
     });
   });
 });

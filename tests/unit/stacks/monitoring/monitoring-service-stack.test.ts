@@ -18,73 +18,48 @@ import {
   MONITORING_CONTAINER_NAMES,
   GRAFANA_ADMIN_SECRET,
 } from "../../../../lib/shared/constants/monitoring-constants";
+import {
+  TEST_CONFIG,
+  BASE_TEST_CONSTANTS,
+  createTestApp,
+  extendExpectWithCdkMatchers,
+} from "../../utils/stack-test-utils";
+import {
+  MONITORING_SERVICE_RESOURCE_COUNTS,
+  MONITORING_SERVICE_NAMES,
+  MONITORING_SERVICE_SECRET_NAMES,
+  MONITORING_SERVICE_SSM_PARAMETER_NAMES,
+  MONITORING_SERVICE_OUTPUT_NAMES,
+} from "../../shared/constants";
 
 // ============================================================================
-// CUSTOM MATCHERS (Type declarations will be added when matchers are used)
+// CUSTOM MATCHERS SETUP
 // ============================================================================
+
+extendExpectWithCdkMatchers();
 
 // ============================================================================
 // TEST CONFIGURATION
 // ============================================================================
 
 /**
- * Test configuration constants
- * Centralised configuration values used across all tests
- */
-const TEST_CONFIG = {
-  account: "123456789012",
-  region: "eu-west-1",
-} as const;
-
-/**
  * Test constants - avoid magic numbers and strings
  * All hardcoded values used in tests should be defined here
  */
 const TEST_CONSTANTS = {
+  ...BASE_TEST_CONSTANTS,
+  RESOURCE_COUNTS: MONITORING_SERVICE_RESOURCE_COUNTS,
+  SERVICE_NAMES: MONITORING_SERVICE_NAMES,
+  SECRET_NAMES: MONITORING_SERVICE_SECRET_NAMES,
+  SSM_PARAMETER_NAMES: MONITORING_SERVICE_SSM_PARAMETER_NAMES,
+  OUTPUT_NAMES: MONITORING_SERVICE_OUTPUT_NAMES,
   STACK_IDS: {
-    DEFAULT: "TestServiceStack",
+    ...BASE_TEST_CONSTANTS.STACK_IDS,
     INFRA: "TestInfraStack",
     SERVICE: "TestServiceStack",
     ALL_PROPERTIES: "AllPropertiesServiceStack",
     TAGGED: "TaggedServiceStack",
     CUSTOM_TAGGED: "CustomTaggedServiceStack",
-  },
-  ENVIRONMENTS: {
-    DEVELOPMENT: "development",
-    DEV: "dev",
-    PRODUCTION: "production",
-    STAGING: "staging",
-  },
-  RESOURCE_COUNTS: {
-    ECS_SERVICES: 3,
-    TARGET_GROUPS: 2,
-    LISTENER_RULES: 2,
-    SECRETS: 1,
-    SSM_PARAMETERS: 5,
-    OUTPUTS: 6,
-  },
-  SERVICE_NAMES: {
-    PROMETHEUS: "prometheus",
-    GRAFANA: "grafana",
-    NODE_EXPORTER: "node-exporter",
-  },
-  SECRET_NAMES: {
-    GRAFANA_ADMIN: "grafana-admin-password",
-  },
-  SSM_PARAMETER_NAMES: {
-    PROMETHEUS_SERVICE_ARN: "prometheus-service-arn",
-    GRAFANA_SERVICE_ARN: "grafana-service-arn",
-    NODE_EXPORTER_SERVICE_ARN: "node-exporter-service-arn",
-    PROMETHEUS_TARGET_GROUP_ARN: "prometheus-target-group-arn",
-    GRAFANA_TARGET_GROUP_ARN: "grafana-target-group-arn",
-  },
-  OUTPUT_NAMES: {
-    PROMETHEUS_SERVICE_ARN: "PrometheusServiceArn",
-    GRAFANA_SERVICE_ARN: "GrafanaServiceArn",
-    NODE_EXPORTER_SERVICE_ARN: "NodeExporterServiceArn",
-    PROMETHEUS_TARGET_GROUP_ARN: "PrometheusTargetGroupArn",
-    GRAFANA_TARGET_GROUP_ARN: "GrafanaTargetGroupArn",
-    GRAFANA_ADMIN_SECRET_ARN: "GrafanaAdminSecretArn",
   },
 } as const;
 
@@ -345,12 +320,6 @@ function createTestStack(
 // ============================================================================
 
 describe("MonitoringServiceStack", () => {
-  let app: cdk.App;
-
-  beforeEach(() => {
-    app = new cdk.App();
-  });
-
   // ============================================================================
   // Stack Creation and Validation
   // ============================================================================
@@ -362,40 +331,19 @@ describe("MonitoringServiceStack", () => {
    * configuration combinations and exposes expected public properties.
    */
   describe("Stack Creation", () => {
-    test("creates stack with minimal required properties", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
+    let app: cdk.App;
+    let minimalStack: MonitoringServiceStack;
+    let allPropertiesStack: MonitoringServiceStack;
+    let minimalTemplate: Template;
+    let allPropertiesTemplate: Template;
 
-      // Verify essential resources are created
-      template.resourceCountIs(
-        "AWS::ECS::Service",
-        TEST_CONSTANTS.RESOURCE_COUNTS.ECS_SERVICES
-      );
-      template.resourceCountIs(
-        "AWS::ElasticLoadBalancingV2::TargetGroup",
-        TEST_CONSTANTS.RESOURCE_COUNTS.TARGET_GROUPS
-      );
-      template.resourceCountIs(
-        "AWS::SecretsManager::Secret",
-        TEST_CONSTANTS.RESOURCE_COUNTS.SECRETS
-      );
-    });
+    beforeAll(() => {
+      app = createTestApp();
 
-    test("exposes public properties correctly", () => {
-      const stack = createTestStack(app);
-
-      expect(stack.prometheusService).toBeDefined();
-      expect(stack.grafanaService).toBeDefined();
-      expect(stack.nodeExporterService).toBeDefined();
-      expect(stack.prometheusTargetGroup).toBeDefined();
-      expect(stack.grafanaTargetGroup).toBeDefined();
-    });
-
-    test("creates stack with all optional properties", () => {
-      const testApp = new cdk.App();
-
-      const stack = createTestStack(
-        testApp,
+      // Create ALL stacks first before calling Template.fromStack()
+      minimalStack = createTestStack(app);
+      allPropertiesStack = createTestStack(
+        app,
         TEST_CONSTANTS.STACK_IDS.ALL_PROPERTIES,
         {
           envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
@@ -426,15 +374,47 @@ describe("MonitoringServiceStack", () => {
         }
       );
 
-      const template = Template.fromStack(stack);
-      template.resourceCountIs(
-        "AWS::ECS::Service",
-        TEST_CONSTANTS.RESOURCE_COUNTS.ECS_SERVICES
-      );
-      template.resourceCountIs(
-        "AWS::ElasticLoadBalancingV2::TargetGroup",
-        TEST_CONSTANTS.RESOURCE_COUNTS.TARGET_GROUPS
-      );
+      // Now create templates from the stacks
+      minimalTemplate = Template.fromStack(minimalStack);
+      allPropertiesTemplate = Template.fromStack(allPropertiesStack);
+    });
+
+    test("creates stack with minimal required properties", () => {
+      expect(() => {
+        minimalTemplate.resourceCountIs(
+          "AWS::ECS::Service",
+          TEST_CONSTANTS.RESOURCE_COUNTS.ECS_SERVICES
+        );
+        minimalTemplate.resourceCountIs(
+          "AWS::ElasticLoadBalancingV2::TargetGroup",
+          TEST_CONSTANTS.RESOURCE_COUNTS.TARGET_GROUPS
+        );
+        minimalTemplate.resourceCountIs(
+          "AWS::SecretsManager::Secret",
+          TEST_CONSTANTS.RESOURCE_COUNTS.SECRETS
+        );
+      }).not.toThrow();
+    });
+
+    test("exposes public properties correctly", () => {
+      expect(minimalStack.prometheusService).toBeDefined();
+      expect(minimalStack.grafanaService).toBeDefined();
+      expect(minimalStack.nodeExporterService).toBeDefined();
+      expect(minimalStack.prometheusTargetGroup).toBeDefined();
+      expect(minimalStack.grafanaTargetGroup).toBeDefined();
+    });
+
+    test("creates stack with all optional properties", () => {
+      expect(() => {
+        allPropertiesTemplate.resourceCountIs(
+          "AWS::ECS::Service",
+          TEST_CONSTANTS.RESOURCE_COUNTS.ECS_SERVICES
+        );
+        allPropertiesTemplate.resourceCountIs(
+          "AWS::ElasticLoadBalancingV2::TargetGroup",
+          TEST_CONSTANTS.RESOURCE_COUNTS.TARGET_GROUPS
+        );
+      }).not.toThrow();
     });
   });
 
@@ -445,61 +425,58 @@ describe("MonitoringServiceStack", () => {
    * and provides helpful error messages for invalid configurations.
    */
   describe("Validation", () => {
-    test("throws error when envName is empty", () => {
-      const fixtures = TestFixtures.getInstance(app);
-      const infra = fixtures.getInfraResources();
+    let app: cdk.App;
+    let infraResources: InfraResources;
 
+    beforeAll(() => {
+      app = createTestApp();
+      const fixtures = TestFixtures.getInstance(app);
+      infraResources = fixtures.getInfraResources();
+    });
+
+    test("throws error when envName is empty", () => {
       expect(() => {
-        new MonitoringServiceStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+        new MonitoringServiceStack(app, "ValidationEnvStack", {
           env: { account: TEST_CONFIG.account, region: TEST_CONFIG.region },
           envName: "",
-          cluster: infra.cluster,
-          loadBalancer: infra.loadBalancer,
-          listener: infra.listener,
+          cluster: infraResources.cluster,
+          loadBalancer: infraResources.loadBalancer,
+          listener: infraResources.listener,
         });
       }).toThrow(/environment name/i);
     });
 
     test("throws error when cluster is missing", () => {
-      const fixtures = TestFixtures.getInstance(app);
-      const infra = fixtures.getInfraResources();
-
       expect(() => {
-        new MonitoringServiceStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+        new MonitoringServiceStack(app, "ValidationClusterStack", {
           env: { account: TEST_CONFIG.account, region: TEST_CONFIG.region },
           envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
           cluster: null as unknown as ecs.ICluster,
-          loadBalancer: infra.loadBalancer,
-          listener: infra.listener,
+          loadBalancer: infraResources.loadBalancer,
+          listener: infraResources.listener,
         });
       }).toThrow(/ECS cluster is required/);
     });
 
     test("throws error when loadBalancer is missing", () => {
-      const fixtures = TestFixtures.getInstance(app);
-      const infra = fixtures.getInfraResources();
-
       expect(() => {
-        new MonitoringServiceStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+        new MonitoringServiceStack(app, "ValidationLbStack", {
           env: { account: TEST_CONFIG.account, region: TEST_CONFIG.region },
           envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
-          cluster: infra.cluster,
+          cluster: infraResources.cluster,
           loadBalancer: null as unknown as elbv2.IApplicationLoadBalancer,
-          listener: infra.listener,
+          listener: infraResources.listener,
         });
       }).toThrow(/Load balancer is required/);
     });
 
     test("throws error when listener is missing", () => {
-      const fixtures = TestFixtures.getInstance(app);
-      const infra = fixtures.getInfraResources();
-
       expect(() => {
-        new MonitoringServiceStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+        new MonitoringServiceStack(app, "ValidationListenerStack", {
           env: { account: TEST_CONFIG.account, region: TEST_CONFIG.region },
           envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
-          cluster: infra.cluster,
-          loadBalancer: infra.loadBalancer,
+          cluster: infraResources.cluster,
+          loadBalancer: infraResources.loadBalancer,
           listener: null as unknown as elbv2.IApplicationListener,
         });
       }).toThrow(/ALB listener is required/);
@@ -517,34 +494,72 @@ describe("MonitoringServiceStack", () => {
    * are created with correct configurations.
    */
   describe("ECS Services Configuration", () => {
-    test("creates Prometheus service", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
+    let app: cdk.App;
+    let stack: MonitoringServiceStack;
+    let template: Template;
+    let containerTestStacks: Array<{
+      serviceName: string;
+      containerName: string;
+      containerPort: number;
+      stack: MonitoringServiceStack;
+      template: Template;
+    }>;
 
-      template.hasResourceProperties("AWS::ECS::Service", {
-        ServiceName: Match.stringLikeRegexp(".*prometheus.*"),
-        LaunchType: "EC2",
+    beforeAll(() => {
+      app = createTestApp();
+      stack = createTestStack(app);
+      template = Template.fromStack(stack);
+
+      // Pre-compute container test data
+      const containerConfigs = [
+        {
+          serviceName: "Prometheus",
+          containerName: MONITORING_CONTAINER_NAMES.PROMETHEUS,
+          containerPort: MONITORING_PORTS.PROMETHEUS,
+        },
+        {
+          serviceName: "Grafana",
+          containerName: MONITORING_CONTAINER_NAMES.GRAFANA,
+          containerPort: MONITORING_PORTS.GRAFANA,
+        },
+      ];
+
+      containerTestStacks = containerConfigs.map((config) => {
+        const testApp = createTestApp();
+        const testStack = createTestStack(testApp);
+        return {
+          ...config,
+          stack: testStack,
+          template: Template.fromStack(testStack),
+        };
       });
+    });
+
+    test("creates Prometheus service", () => {
+      expect(() => {
+        template.hasResourceProperties("AWS::ECS::Service", {
+          ServiceName: Match.stringLikeRegexp(".*prometheus.*"),
+          LaunchType: "EC2",
+        });
+      }).not.toThrow();
     });
 
     test("creates Grafana service", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
-
-      template.hasResourceProperties("AWS::ECS::Service", {
-        ServiceName: Match.stringLikeRegexp(".*grafana.*"),
-        LaunchType: "EC2",
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::ECS::Service", {
+          ServiceName: Match.stringLikeRegexp(".*grafana.*"),
+          LaunchType: "EC2",
+        });
+      }).not.toThrow();
     });
 
     test("creates Node Exporter service", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
-
-      template.hasResourceProperties("AWS::ECS::Service", {
-        ServiceName: Match.stringLikeRegexp(".*node-exporter.*"),
-        LaunchType: "EC2",
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::ECS::Service", {
+          ServiceName: Match.stringLikeRegexp(".*node-exporter.*"),
+          LaunchType: "EC2",
+        });
+      }).not.toThrow();
     });
 
     test.each([
@@ -560,23 +575,24 @@ describe("MonitoringServiceStack", () => {
       },
     ])(
       "$serviceName service uses correct container name and port",
-      ({ containerName, containerPort }) => {
-        const stack = createTestStack(app);
-        const template = Template.fromStack(stack);
+      ({ serviceName, containerName, containerPort }) => {
+        const testData = containerTestStacks.find((d) => d.serviceName === serviceName);
+        expect(testData).toBeDefined();
 
-        // Verify task definition has correct container configuration
-        template.hasResourceProperties("AWS::ECS::TaskDefinition", {
-          ContainerDefinitions: Match.arrayWith([
-            Match.objectLike({
-              Name: containerName,
-              PortMappings: Match.arrayWith([
-                Match.objectLike({
-                  ContainerPort: containerPort,
-                }),
-              ]),
-            }),
-          ]),
-        });
+        expect(() => {
+          testData?.template.hasResourceProperties("AWS::ECS::TaskDefinition", {
+            ContainerDefinitions: Match.arrayWith([
+              Match.objectLike({
+                Name: containerName,
+                PortMappings: Match.arrayWith([
+                  Match.objectLike({
+                    ContainerPort: containerPort,
+                  }),
+                ]),
+              }),
+            ]),
+          });
+        }).not.toThrow();
       }
     );
   });
@@ -592,20 +608,63 @@ describe("MonitoringServiceStack", () => {
    * configuration and removal policies.
    */
   describe("Secrets Manager Configuration", () => {
-    test("creates Grafana admin password secret", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
+    let app: cdk.App;
+    let defaultTemplate: Template;
+    let removalPolicyTests: Array<{
+      environment: string;
+      expectedPolicy: string;
+      secrets: Record<string, any>;
+      secret: any;
+    }>;
 
-      template.hasResourceProperties("AWS::SecretsManager::Secret", {
-        Name: Match.stringLikeRegexp(".*grafana-admin-password.*"),
-        Description: Match.stringLikeRegexp(".*Grafana admin password.*"),
-        GenerateSecretString: Match.objectLike({
-          SecretStringTemplate: Match.stringLikeRegexp(".*username.*"),
-          GenerateStringKey: "password",
-          ExcludePunctuation: GRAFANA_ADMIN_SECRET.EXCLUDE_PUNCTUATION,
-          PasswordLength: GRAFANA_ADMIN_SECRET.PASSWORD_LENGTH,
-        }),
+    beforeAll(() => {
+      app = createTestApp();
+      const defaultStack = createTestStack(app);
+      defaultTemplate = Template.fromStack(defaultStack);
+
+      // Pre-compute removal policy stacks and extract secrets
+      const policyConfigs = [
+        {
+          environment: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
+          expectedPolicy: "Delete",
+        },
+        {
+          environment: TEST_CONSTANTS.ENVIRONMENTS.PRODUCTION,
+          expectedPolicy: "Retain",
+        },
+      ];
+
+      removalPolicyTests = policyConfigs.map((config) => {
+        const testApp = createTestApp();
+        const testStack = createTestStack(testApp, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+          envName: config.environment,
+        });
+        const template = Template.fromStack(testStack);
+        const secrets = template.findResources("AWS::SecretsManager::Secret");
+        const secret = Object.values(secrets)[0];
+
+        return {
+          environment: config.environment,
+          expectedPolicy: config.expectedPolicy,
+          secrets,
+          secret,
+        };
       });
+    });
+
+    test("creates Grafana admin password secret", () => {
+      expect(() => {
+        defaultTemplate.hasResourceProperties("AWS::SecretsManager::Secret", {
+          Name: Match.stringLikeRegexp(".*grafana-admin-password.*"),
+          Description: Match.stringLikeRegexp(".*Grafana admin password.*"),
+          GenerateSecretString: Match.objectLike({
+            SecretStringTemplate: Match.stringLikeRegexp(".*username.*"),
+            GenerateStringKey: "password",
+            ExcludePunctuation: GRAFANA_ADMIN_SECRET.EXCLUDE_PUNCTUATION,
+            PasswordLength: GRAFANA_ADMIN_SECRET.PASSWORD_LENGTH,
+          }),
+        });
+      }).not.toThrow();
     });
 
     test.each([
@@ -620,14 +679,9 @@ describe("MonitoringServiceStack", () => {
     ])(
       "applies $expectedPolicy removal policy for $environment environment",
       ({ environment, expectedPolicy }) => {
-        const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
-          envName: environment,
-        });
-        const template = Template.fromStack(stack);
-
-        const secrets = template.findResources("AWS::SecretsManager::Secret");
-        const secret = Object.values(secrets)[0];
-        expect(secret.DeletionPolicy).toBe(expectedPolicy);
+        const testData = removalPolicyTests.find((d) => d.environment === environment);
+        expect(testData).toBeDefined();
+        expect(testData?.secret?.DeletionPolicy).toBe(expectedPolicy);
       }
     );
   });
@@ -643,34 +697,48 @@ describe("MonitoringServiceStack", () => {
    * service attachments to target groups.
    */
   describe("Load Balancer Configuration", () => {
-    test("creates Prometheus target group", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
+    let app: cdk.App;
+    let defaultStack: MonitoringServiceStack;
+    let defaultTemplate: Template;
+    let healthCheckTemplate: Template;
 
-      template.hasResourceProperties(
-        "AWS::ElasticLoadBalancingV2::TargetGroup",
-        {
-          Port: MONITORING_PORTS.PROMETHEUS,
-          Protocol: "HTTP",
-          TargetType: "instance",
-          HealthCheckPath: Match.stringLikeRegexp(".*prometheus.*healthy.*"),
-        }
-      );
+    beforeAll(() => {
+      app = createTestApp();
+      defaultStack = createTestStack(app);
+      defaultTemplate = Template.fromStack(defaultStack);
+
+      // Pre-compute health check template
+      const healthCheckApp = createTestApp();
+      const healthCheckStack = createTestStack(healthCheckApp);
+      healthCheckTemplate = Template.fromStack(healthCheckStack);
+    });
+
+    test("creates Prometheus target group", () => {
+      expect(() => {
+        defaultTemplate.hasResourceProperties(
+          "AWS::ElasticLoadBalancingV2::TargetGroup",
+          {
+            Port: MONITORING_PORTS.PROMETHEUS,
+            Protocol: "HTTP",
+            TargetType: "instance",
+            HealthCheckPath: Match.stringLikeRegexp(".*prometheus.*healthy.*"),
+          }
+        );
+      }).not.toThrow();
     });
 
     test("creates Grafana target group", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
-
-      template.hasResourceProperties(
-        "AWS::ElasticLoadBalancingV2::TargetGroup",
-        {
-          Port: MONITORING_PORTS.GRAFANA,
-          Protocol: "HTTP",
-          TargetType: "instance",
-          HealthCheckPath: MONITORING_HEALTH_CHECK.PATHS.GRAFANA,
-        }
-      );
+      expect(() => {
+        defaultTemplate.hasResourceProperties(
+          "AWS::ElasticLoadBalancingV2::TargetGroup",
+          {
+            Port: MONITORING_PORTS.GRAFANA,
+            Protocol: "HTTP",
+            TargetType: "instance",
+            HealthCheckPath: MONITORING_HEALTH_CHECK.PATHS.GRAFANA,
+          }
+        );
+      }).not.toThrow();
     });
 
     test.each([
@@ -687,38 +755,34 @@ describe("MonitoringServiceStack", () => {
     ])(
       "$targetGroup target group has correct health check configuration",
       () => {
-        const stack = createTestStack(app);
-        const template = Template.fromStack(stack);
-
-        // Health check properties are at top level, not nested
-        template.hasResourceProperties(
-          "AWS::ElasticLoadBalancingV2::TargetGroup",
-          {
-            HealthCheckIntervalSeconds:
-              MONITORING_HEALTH_CHECK.INTERVAL_SECONDS,
-            HealthCheckTimeoutSeconds: MONITORING_HEALTH_CHECK.TIMEOUT_SECONDS,
-            HealthyThresholdCount: MONITORING_HEALTH_CHECK.HEALTHY_THRESHOLD,
-            UnhealthyThresholdCount:
-              MONITORING_HEALTH_CHECK.UNHEALTHY_THRESHOLD,
-            Matcher: Match.objectLike({
-              HttpCode: MONITORING_HEALTH_CHECK.HEALTHY_HTTP_CODES,
-            }),
-          }
-        );
+        expect(() => {
+          healthCheckTemplate.hasResourceProperties(
+            "AWS::ElasticLoadBalancingV2::TargetGroup",
+            {
+              HealthCheckIntervalSeconds:
+                MONITORING_HEALTH_CHECK.INTERVAL_SECONDS,
+              HealthCheckTimeoutSeconds: MONITORING_HEALTH_CHECK.TIMEOUT_SECONDS,
+              HealthyThresholdCount: MONITORING_HEALTH_CHECK.HEALTHY_THRESHOLD,
+              UnhealthyThresholdCount:
+                MONITORING_HEALTH_CHECK.UNHEALTHY_THRESHOLD,
+              Matcher: Match.objectLike({
+                HttpCode: MONITORING_HEALTH_CHECK.HEALTHY_HTTP_CODES,
+              }),
+            }
+          );
+        }).not.toThrow();
       }
     );
 
     test("creates listener rules for Prometheus and Grafana", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
+      expect(() => {
+        defaultTemplate.resourceCountIs(
+          "AWS::ElasticLoadBalancingV2::ListenerRule",
+          TEST_CONSTANTS.RESOURCE_COUNTS.LISTENER_RULES
+        );
+      }).not.toThrow();
 
-      template.resourceCountIs(
-        "AWS::ElasticLoadBalancingV2::ListenerRule",
-        TEST_CONSTANTS.RESOURCE_COUNTS.LISTENER_RULES
-      );
-
-      // Verify listener rules exist with path patterns
-      const rules = template.findResources(
+      const rules = defaultTemplate.findResources(
         "AWS::ElasticLoadBalancingV2::ListenerRule"
       );
       const rulesStr = JSON.stringify(rules);
@@ -738,16 +802,18 @@ describe("MonitoringServiceStack", () => {
    * CDK manages the actual security group rules internally via connections.allowFrom().
    */
   describe("Security Group Configuration", () => {
-    test("configures security group connections for Prometheus and Grafana", () => {
-      const stack = createTestStack(app);
+    let app: cdk.App;
+    let stack: MonitoringServiceStack;
 
-      // Verify services exist and have connections configured
-      // The connections.allowFrom() calls configure security group rules
+    beforeAll(() => {
+      app = createTestApp();
+      stack = createTestStack(app);
+    });
+
+    test("configures security group connections for Prometheus and Grafana", () => {
       expect(stack.prometheusService.connections).toBeDefined();
       expect(stack.grafanaService.connections).toBeDefined();
       expect(stack.nodeExporterService.connections).toBeDefined();
-
-      // Stack creation succeeds means connections are properly configured
       expect(stack).toBeDefined();
     });
   });
@@ -763,41 +829,48 @@ describe("MonitoringServiceStack", () => {
    * and Grafana execution role has secret read permissions.
    */
   describe("IAM Permissions", () => {
-    test("Prometheus task role has EC2 service discovery permissions", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
+    let app: cdk.App;
+    let defaultStack: MonitoringServiceStack;
+    let defaultTemplate: Template;
 
-      template.hasResourceProperties("AWS::IAM::Policy", {
-        PolicyDocument: {
-          Statement: Match.arrayWith([
-            Match.objectLike({
-              Effect: "Allow",
-              Action: Match.arrayWith([
-                "ec2:DescribeInstances",
-                "ec2:DescribeInstanceStatus",
-                "ec2:DescribeTags",
-              ]),
-            }),
-          ]),
-        },
-      });
+    beforeAll(() => {
+      app = createTestApp();
+      defaultStack = createTestStack(app);
+      defaultTemplate = Template.fromStack(defaultStack);
+    });
+
+    test("Prometheus task role has EC2 service discovery permissions", () => {
+      expect(() => {
+        defaultTemplate.hasResourceProperties("AWS::IAM::Policy", {
+          PolicyDocument: {
+            Statement: Match.arrayWith([
+              Match.objectLike({
+                Effect: "Allow",
+                Action: Match.arrayWith([
+                  "ec2:DescribeInstances",
+                  "ec2:DescribeInstanceStatus",
+                  "ec2:DescribeTags",
+                ]),
+              }),
+            ]),
+          },
+        });
+      }).not.toThrow();
     });
 
     test("Grafana execution role can read admin password secret", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
-
-      // Verify secret has read permission granted
-      template.hasResourceProperties("AWS::IAM::Policy", {
-        PolicyDocument: {
-          Statement: Match.arrayWith([
-            Match.objectLike({
-              Effect: "Allow",
-              Action: Match.arrayWith(["secretsmanager:GetSecretValue"]),
-            }),
-          ]),
-        },
-      });
+      expect(() => {
+        defaultTemplate.hasResourceProperties("AWS::IAM::Policy", {
+          PolicyDocument: {
+            Statement: Match.arrayWith([
+              Match.objectLike({
+                Effect: "Allow",
+                Action: Match.arrayWith(["secretsmanager:GetSecretValue"]),
+              }),
+            ]),
+          },
+        });
+      }).not.toThrow();
     });
   });
 
@@ -812,14 +885,29 @@ describe("MonitoringServiceStack", () => {
    * and can be overridden via props.
    */
   describe("Circuit Breaker Configuration", () => {
-    test("disables circuit breaker for development environment by default", () => {
-      const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+    let app: cdk.App;
+    let devStack: MonitoringServiceStack;
+    let devWithCircuitBreakerStack: MonitoringServiceStack;
+    let devTemplate: Template;
+    let devWithCircuitBreakerTemplate: Template;
+
+    beforeAll(() => {
+      app = createTestApp();
+
+      devStack = createTestStack(app, "DevStack", {
         envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
       });
-      const template = Template.fromStack(stack);
+      devWithCircuitBreakerStack = createTestStack(app, "DevCircuitBreakerStack", {
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
+        enableCircuitBreaker: true,
+      });
 
-      // Circuit breaker disabled means no DeploymentConfiguration with CircuitBreaker
-      const services = template.findResources("AWS::ECS::Service");
+      devTemplate = Template.fromStack(devStack);
+      devWithCircuitBreakerTemplate = Template.fromStack(devWithCircuitBreakerStack);
+    });
+
+    test("disables circuit breaker for development environment by default", () => {
+      const services = devTemplate.findResources("AWS::ECS::Service");
       Object.values(services).forEach((service) => {
         const serviceProps = service.Properties as {
           DeploymentConfiguration?: {
@@ -835,22 +923,16 @@ describe("MonitoringServiceStack", () => {
     });
 
     test("allows circuit breaker override for development", () => {
-      // Test that stack can be created with circuit breaker override
-      const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
-        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
-        enableCircuitBreaker: true,
-      });
+      expect(devWithCircuitBreakerStack).toBeDefined();
+      expect(devWithCircuitBreakerStack.prometheusService).toBeDefined();
+      expect(devWithCircuitBreakerStack.grafanaService).toBeDefined();
 
-      expect(stack).toBeDefined();
-      expect(stack.prometheusService).toBeDefined();
-      expect(stack.grafanaService).toBeDefined();
-
-      // Verify services exist - circuit breaker configuration is handled by CDK
-      const template = Template.fromStack(stack);
-      template.resourceCountIs(
-        "AWS::ECS::Service",
-        TEST_CONSTANTS.RESOURCE_COUNTS.ECS_SERVICES
-      );
+      expect(() => {
+        devWithCircuitBreakerTemplate.resourceCountIs(
+          "AWS::ECS::Service",
+          TEST_CONSTANTS.RESOURCE_COUNTS.ECS_SERVICES
+        );
+      }).not.toThrow();
     });
   });
 
@@ -865,15 +947,80 @@ describe("MonitoringServiceStack", () => {
    * and can be disabled when not needed.
    */
   describe("SSM Parameters", () => {
-    test("creates SSM parameters by default", () => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
+    let app: cdk.App;
+    let defaultStack: MonitoringServiceStack;
+    let noSsmStack: MonitoringServiceStack;
+    let defaultTemplate: Template;
+    let noSsmTemplate: Template;
+    let parameterTests: Array<{
+      parameterName: string;
+      descriptionPattern: RegExp;
+      patternStr: string;
+      template: Template;
+    }>;
 
-      expect(stack.ssmParameters).toBeDefined();
-      template.resourceCountIs(
-        "AWS::SSM::Parameter",
-        TEST_CONSTANTS.RESOURCE_COUNTS.SSM_PARAMETERS
-      );
+    beforeAll(() => {
+      app = createTestApp();
+
+      defaultStack = createTestStack(app);
+      defaultTemplate = Template.fromStack(defaultStack);
+
+      const noSsmApp = createTestApp();
+      noSsmStack = createTestStack(noSsmApp, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+        createSsmParameters: false,
+      });
+      noSsmTemplate = Template.fromStack(noSsmStack);
+
+      // Pre-compute parameter test data with extracted patterns
+      const parameterConfigs = [
+        {
+          parameterName:
+            TEST_CONSTANTS.SSM_PARAMETER_NAMES.PROMETHEUS_SERVICE_ARN,
+          descriptionPattern: /Prometheus ECS service ARN/i,
+        },
+        {
+          parameterName: TEST_CONSTANTS.SSM_PARAMETER_NAMES.GRAFANA_SERVICE_ARN,
+          descriptionPattern: /Grafana ECS service ARN/i,
+        },
+        {
+          parameterName:
+            TEST_CONSTANTS.SSM_PARAMETER_NAMES.NODE_EXPORTER_SERVICE_ARN,
+          descriptionPattern: /Node Exporter ECS service ARN/i,
+        },
+        {
+          parameterName:
+            TEST_CONSTANTS.SSM_PARAMETER_NAMES.PROMETHEUS_TARGET_GROUP_ARN,
+          descriptionPattern: /Prometheus ALB target group ARN/i,
+        },
+        {
+          parameterName:
+            TEST_CONSTANTS.SSM_PARAMETER_NAMES.GRAFANA_TARGET_GROUP_ARN,
+          descriptionPattern: /Grafana ALB target group ARN/i,
+        },
+      ];
+
+      parameterTests = parameterConfigs.map((config) => {
+        const testApp = createTestApp();
+        const testStack = createTestStack(testApp, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+          envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
+        });
+        return {
+          parameterName: config.parameterName,
+          descriptionPattern: config.descriptionPattern,
+          patternStr: config.descriptionPattern.source,
+          template: Template.fromStack(testStack),
+        };
+      });
+    });
+
+    test("creates SSM parameters by default", () => {
+      expect(defaultStack.ssmParameters).toBeDefined();
+      expect(() => {
+        defaultTemplate.resourceCountIs(
+          "AWS::SSM::Parameter",
+          TEST_CONSTANTS.RESOURCE_COUNTS.SSM_PARAMETERS
+        );
+      }).not.toThrow();
     });
 
     test.each([
@@ -903,32 +1050,29 @@ describe("MonitoringServiceStack", () => {
       },
     ])(
       "creates $parameterName parameter with correct description",
-      ({ parameterName, descriptionPattern }) => {
-        const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
-          envName: TEST_CONSTANTS.ENVIRONMENTS.DEV,
-        });
-        const template = Template.fromStack(stack);
+      ({ parameterName }) => {
+        const testData = parameterTests.find((d) => d.parameterName === parameterName);
+        
+        // Guard assertion: test data must exist
+        expect(testData).toBeDefined();
+        expect(testData?.template).toBeDefined();
+        expect(testData?.patternStr).toBeDefined();
 
-        const patternStr =
-          descriptionPattern instanceof RegExp
-            ? descriptionPattern.source
-            : descriptionPattern;
-        template.hasResourceProperties("AWS::SSM::Parameter", {
-          Name: Match.stringLikeRegexp(`.*${parameterName}.*`),
-          Type: "String",
-          Description: Match.stringLikeRegexp(patternStr),
-        });
+        expect(() => {
+          testData?.template.hasResourceProperties("AWS::SSM::Parameter", {
+            Name: Match.stringLikeRegexp(`.*${parameterName}.*`),
+            Type: "String",
+            Description: Match.stringLikeRegexp(testData.patternStr),
+          });
+        }).not.toThrow();
       }
     );
 
     test("does not create SSM parameters when disabled", () => {
-      const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
-        createSsmParameters: false,
-      });
-      const template = Template.fromStack(stack);
-
-      expect(stack.ssmParameters).toBeUndefined();
-      template.resourceCountIs("AWS::SSM::Parameter", 0);
+      expect(noSsmStack.ssmParameters).toBeUndefined();
+      expect(() => {
+        noSsmTemplate.resourceCountIs("AWS::SSM::Parameter", 0);
+      }).not.toThrow();
     });
   });
 
@@ -943,6 +1087,49 @@ describe("MonitoringServiceStack", () => {
    * target group ARNs, and secret ARN.
    */
   describe("CloudFormation Outputs", () => {
+    let app: cdk.App;
+    let defaultStack: MonitoringServiceStack;
+    let exportsStack: MonitoringServiceStack;
+    let noExportsStack: MonitoringServiceStack;
+    let noOutputsStack: MonitoringServiceStack;
+    let defaultTemplate: Template;
+    let exportsTemplate: Template;
+    let noExportsTemplate: Template;
+    let noOutputsTemplate: Template;
+    let defaultOutputs: Record<string, any>;
+    let noExportsOutputs: Record<string, any>;
+    let noOutputsOutputs: Record<string, any> | undefined;
+
+    beforeAll(() => {
+      app = createTestApp();
+
+      defaultStack = createTestStack(app);
+      defaultTemplate = Template.fromStack(defaultStack);
+      defaultOutputs = defaultTemplate.toJSON().Outputs;
+
+      const exportsApp = createTestApp();
+      exportsStack = createTestStack(exportsApp, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
+        projectName: "monitoring",
+        enableExports: true,
+      });
+      exportsTemplate = Template.fromStack(exportsStack);
+
+      const noExportsApp = createTestApp();
+      noExportsStack = createTestStack(noExportsApp, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+        enableExports: false,
+      });
+      noExportsTemplate = Template.fromStack(noExportsStack);
+      noExportsOutputs = noExportsTemplate.toJSON().Outputs;
+
+      const noOutputsApp = createTestApp();
+      noOutputsStack = createTestStack(noOutputsApp, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+        createOutputs: false,
+      });
+      noOutputsTemplate = Template.fromStack(noOutputsStack);
+      noOutputsOutputs = noOutputsTemplate.toJSON().Outputs;
+    });
+
     test.each([
       TEST_CONSTANTS.OUTPUT_NAMES.PROMETHEUS_SERVICE_ARN,
       TEST_CONSTANTS.OUTPUT_NAMES.GRAFANA_SERVICE_ARN,
@@ -951,57 +1138,38 @@ describe("MonitoringServiceStack", () => {
       TEST_CONSTANTS.OUTPUT_NAMES.GRAFANA_TARGET_GROUP_ARN,
       TEST_CONSTANTS.OUTPUT_NAMES.GRAFANA_ADMIN_SECRET_ARN,
     ])("creates %s output by default", (outputName) => {
-      const stack = createTestStack(app);
-      const template = Template.fromStack(stack);
+      expect(() => {
+        defaultTemplate.hasOutput(outputName, {});
+      }).not.toThrow();
 
-      template.hasOutput(outputName, {});
-      const outputs = template.toJSON().Outputs;
-      expect(outputs[outputName]).toBeDefined();
-      expect(outputs[outputName].Value).toBeDefined();
+      expect(defaultOutputs[outputName]).toBeDefined();
+      expect(defaultOutputs[outputName].Value).toBeDefined();
     });
 
     test("exports outputs when enableExports is true", () => {
-      const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
-        envName: TEST_CONSTANTS.ENVIRONMENTS.DEV,
-        projectName: "monitoring",
-        enableExports: true,
-      });
-      const template = Template.fromStack(stack);
-
-      template.hasOutput(TEST_CONSTANTS.OUTPUT_NAMES.PROMETHEUS_SERVICE_ARN, {
-        Export: {
-          Name: Match.stringLikeRegexp(".*prometheus-service-arn.*"),
-        },
-      });
+      expect(() => {
+        exportsTemplate.hasOutput(TEST_CONSTANTS.OUTPUT_NAMES.PROMETHEUS_SERVICE_ARN, {
+          Export: {
+            Name: Match.stringLikeRegexp(".*prometheus-service-arn.*"),
+          },
+        });
+      }).not.toThrow();
     });
 
     test("does not export outputs when enableExports is false", () => {
-      const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
-        enableExports: false,
-      });
-      const template = Template.fromStack(stack);
-
-      const outputs = template.toJSON().Outputs;
       expect(
-        outputs[TEST_CONSTANTS.OUTPUT_NAMES.PROMETHEUS_SERVICE_ARN].Export
+        noExportsOutputs[TEST_CONSTANTS.OUTPUT_NAMES.PROMETHEUS_SERVICE_ARN].Export
       ).toBeUndefined();
     });
 
     test("does not create outputs when createOutputs is false", () => {
-      const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
-        createOutputs: false,
-      });
-      const template = Template.fromStack(stack);
-
-      const outputs = template.toJSON().Outputs;
-      if (outputs) {
-        expect(
-          outputs[TEST_CONSTANTS.OUTPUT_NAMES.PROMETHEUS_SERVICE_ARN]
-        ).toBeUndefined();
-        expect(
-          outputs[TEST_CONSTANTS.OUTPUT_NAMES.GRAFANA_SERVICE_ARN]
-        ).toBeUndefined();
-      }
+      expect(noOutputsOutputs).toBeDefined();
+      expect(
+        noOutputsOutputs?.[TEST_CONSTANTS.OUTPUT_NAMES.PROMETHEUS_SERVICE_ARN]
+      ).toBeUndefined();
+      expect(
+        noOutputsOutputs?.[TEST_CONSTANTS.OUTPUT_NAMES.GRAFANA_SERVICE_ARN]
+      ).toBeUndefined();
     });
   });
 
@@ -1020,8 +1188,8 @@ describe("MonitoringServiceStack", () => {
 
     beforeAll(() => {
       // Create separate apps to avoid construct name conflicts
-      const app1 = new cdk.App();
-      const app2 = new cdk.App();
+      const app1 = createTestApp();
+      const app2 = createTestApp();
 
       taggedStack = createTestStack(app1, TEST_CONSTANTS.STACK_IDS.TAGGED, {
         envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
@@ -1062,26 +1230,32 @@ describe("MonitoringServiceStack", () => {
    * Verifies that production warnings are logged for insecure configurations.
    */
   describe("Production Warnings", () => {
-    test("logs warnings for production environment", () => {
-      // Production warnings are logged to console during stack synthesis
-      // Testing that stack can be created with warning-triggering configurations
-      const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
-        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT, // Use dev to avoid production validation issues
+    let app: cdk.App;
+    let warningStack: MonitoringServiceStack;
+    let suppressWarningsStack: MonitoringServiceStack;
+
+    beforeAll(() => {
+      app = createTestApp();
+
+      warningStack = createTestStack(app, "WarningStack", {
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         enableExecuteCommand: true,
       });
 
-      expect(stack).toBeDefined();
-      expect(stack.prometheusService).toBeDefined();
-    });
-
-    test("production warnings can be suppressed via configuration", () => {
-      const stack = createTestStack(app, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
+      suppressWarningsStack = createTestStack(app, "SuppressWarningsStack", {
         envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         enableProductionWarnings: false,
         enableExecuteCommand: true,
       });
+    });
 
-      expect(stack).toBeDefined();
+    test("logs warnings for production environment", () => {
+      expect(warningStack).toBeDefined();
+      expect(warningStack.prometheusService).toBeDefined();
+    });
+
+    test("production warnings can be suppressed via configuration", () => {
+      expect(suppressWarningsStack).toBeDefined();
     });
   });
 });

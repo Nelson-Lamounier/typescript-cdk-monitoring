@@ -8,7 +8,19 @@
  */
 
 import { Template } from "aws-cdk-lib/assertions";
-import { getResourceProperties, stringifyResource, getResources } from "./template-helpers";
+
+// Networking types from test-types
+import type {
+  SubnetProperties,
+  RouteProperties,
+  SubnetsByType,
+  RoutesByType,
+  AvailabilityZoneInfo,
+  ResourceWithProperties,
+} from "../types/test-types";
+
+
+import { getResourceProperties, stringifyResource} from "./template-helpers";
 import type {
   AlbAttribute,
   TargetGroupAttribute,
@@ -22,15 +34,7 @@ import type {
   ResourceTag,
   SsmTarget,
 } from "./types";
-// Networking types from test-types
-import type {
-  SubnetProperties,
-  RouteProperties,
-  SubnetsByType,
-  RoutesByType,
-  AvailabilityZoneInfo,
-  ResourceWithProperties,
-} from "../types/test-types";
+
 
 // =============================================================================
 // ALB (Application Load Balancer) Extractors
