@@ -387,7 +387,7 @@ test-monitoring-efs: ## Run monitoring EFS stack tests
 
 test-monitoring-infra: ## Run monitoring infrastructure stack tests
 	@echo "$(BLUE)Running monitoring infrastructure stack tests...$(NC)"
-	yarn test tests/unit/stacks/monitoring/monitoring-infra-stack.test.ts
+	yarn test tests/unit/stacks/monitoring/infra/
 
 test-monitoring-service: ## Run monitoring service stack tests
 	@echo "$(BLUE)Running monitoring service stack tests...$(NC)"
@@ -395,6 +395,59 @@ test-monitoring-service: ## Run monitoring service stack tests
 
 test-stacks: test-networking test-monitoring-efs test-monitoring-infra test-monitoring-service ## Run all stack tests
 	@echo "$(BLUE)All stack tests completed$(NC)"
+
+# ============================================================================
+# CONSTRUCT TESTS
+# ============================================================================
+
+test-constructs-ecs-asg: ## Run ECS AutoScalingGroup construct tests
+	@echo "$(BLUE)Running ECS AutoScalingGroup construct tests...$(NC)"
+	yarn test tests/unit/constructs/compute/ecs/auto-scaling-group-construct.test.ts
+
+test-constructs-ecs-cluster: ## Run ECS Cluster construct tests
+	@echo "$(BLUE)Running ECS Cluster construct tests...$(NC)"
+	yarn test tests/unit/constructs/compute/ecs/ecs-cluster-construct.test.ts
+
+test-constructs-ecs-service: ## Run ECS Service construct tests
+	@echo "$(BLUE)Running ECS Service construct tests...$(NC)"
+	yarn test tests/unit/constructs/compute/ecs/ecs-service-construct.test.ts
+
+test-constructs-ecs-task-definition: ## Run ECS TaskDefinition construct tests
+	@echo "$(BLUE)Running ECS TaskDefinition construct tests...$(NC)"
+	yarn test tests/unit/constructs/compute/ecs/ecs-task-definition-construct.test.ts
+
+test-constructs-ecs: test-constructs-ecs-asg test-constructs-ecs-cluster test-constructs-ecs-service test-constructs-ecs-task-definition ## Run all ECS construct tests
+	@echo "$(GREEN)All ECS construct tests completed$(NC)"
+
+test-constructs-alb-listener: ## Run ALB Listener construct tests
+	@echo "$(BLUE)Running ALB Listener construct tests...$(NC)"
+	yarn test tests/unit/constructs/networking/alb-listener-construct.test.ts
+
+test-constructs-alb-target-group: ## Run ALB Target Group construct tests
+	@echo "$(BLUE)Running ALB Target Group construct tests...$(NC)"
+	yarn test tests/unit/constructs/networking/alb-target-group-construct.test.ts
+
+test-constructs-security-group: ## Run Security Group construct tests
+	@echo "$(BLUE)Running Security Group construct tests...$(NC)"
+	yarn test tests/unit/constructs/networking/security-group-construct.test.ts
+
+test-constructs-vpc-flow-logs: ## Run VPC Flow Logs construct tests
+	@echo "$(BLUE)Running VPC Flow Logs construct tests...$(NC)"
+	yarn test tests/unit/constructs/networking/vpc-flow-logs-construct.test.ts
+
+test-constructs-vpc-peering: ## Run VPC Peering construct tests
+	@echo "$(BLUE)Running VPC Peering construct tests...$(NC)"
+	yarn test tests/unit/constructs/networking/vpc-peering-construct.test.ts
+
+test-constructs-networking: test-constructs-alb-listener test-constructs-alb-target-group test-constructs-security-group test-constructs-vpc-flow-logs test-constructs-vpc-peering ## Run all networking construct tests
+	@echo "$(GREEN)All networking construct tests completed$(NC)"
+
+test-constructs: test-constructs-ecs test-constructs-networking ## Run all construct tests
+	@echo "$(GREEN)All construct tests completed$(NC)"
+
+# ============================================================================
+# LINTING & BUILD
+# ============================================================================
 
 lint: ## Run linter (ESLint with max-warnings 0)
 	@echo "$(BLUE)Running linter...$(NC)"

@@ -1,4 +1,5 @@
 /** @format */
+/// <reference types="jest" />
 
 import * as cdk from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
@@ -14,6 +15,32 @@ import {
   DEFAULT_ALB_FIXED_RESPONSE_CONTENT_TYPE,
   DEFAULT_ALB_FIXED_RESPONSE_MESSAGE,
 } from "../../../../lib/shared/constants/networking-constants";
+import {
+  TEST_CONFIG,
+  BASE_TEST_CONSTANTS,
+  createTestApp,
+  extendExpectWithCdkMatchers,
+} from "../../utils/stack-test-utils";
+
+// ============================================================================
+// CUSTOM MATCHERS SETUP
+// ============================================================================
+
+extendExpectWithCdkMatchers();
+
+// ============================================================================
+// TEST CONFIGURATION
+// ============================================================================
+
+const TEST_CONSTANTS = {
+  ...BASE_TEST_CONSTANTS,
+  CERTIFICATE_ARN: "arn:aws:acm:eu-west-1:123456789012:certificate/test-cert",
+  ADDITIONAL_CERT_1: "arn:aws:acm:eu-west-1:123456789012:certificate/cert1",
+  ADDITIONAL_CERT_2: "arn:aws:acm:eu-west-1:123456789012:certificate/cert2",
+  CUSTOM_HTTP_PORT: 8080,
+  CUSTOM_HTTPS_PORT: 8443,
+  CUSTOM_FIXED_RESPONSE_STATUS: 503,
+} as const;
 
 // ============================================================================
 // ALB LISTENER CONSTRUCT TESTS
@@ -24,21 +51,16 @@ describe("AlbListenerConstruct", () => {
   let stack: cdk.Stack;
   let vpc: ec2.IVpc;
   let loadBalancer: elbv2.ApplicationLoadBalancer;
-  const certificateArn =
-    "arn:aws:acm:eu-west-1:123456789012:certificate/test-cert";
 
   beforeEach(() => {
-    app = new cdk.App();
+    app = createTestApp();
     stack = new cdk.Stack(app, "TestStack", {
-      env: {
-        account: "123456789012",
-        region: "eu-west-1",
-      },
+      env: { account: TEST_CONFIG.account, region: TEST_CONFIG.region },
     });
 
     // Create a VPC for testing
     const vpcConstruct = new VpcConstruct(stack, "TestVpc", {
-      envName: "test",
+      envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
     });
     vpc = vpcConstruct.vpc;
 
@@ -57,76 +79,82 @@ describe("AlbListenerConstruct", () => {
     test("creates HTTP listener with minimal required properties", () => {
       new AlbListenerConstruct(stack, "Listener", {
         loadBalancer,
-        envName: "test",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         enableHttp: true,
         enableHttps: false,
       });
 
       const template = Template.fromStack(stack);
 
-      template.resourceCountIs("AWS::ElasticLoadBalancingV2::Listener", 1);
-      template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
-        Port: DEFAULT_ALB_HTTP_PORT,
-        Protocol: "HTTP",
-      });
+      expect(() => {
+        template.resourceCountIs("AWS::ElasticLoadBalancingV2::Listener", 1);
+        template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
+          Port: DEFAULT_ALB_HTTP_PORT,
+          Protocol: "HTTP",
+        });
+      }).not.toThrow();
     });
 
     test("creates HTTPS listener when enabled with certificate", () => {
       new AlbListenerConstruct(stack, "Listener", {
         loadBalancer,
-        envName: "test",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         enableHttp: false,
         enableHttps: true,
-        certificateArn,
+        certificateArn: TEST_CONSTANTS.CERTIFICATE_ARN,
       });
 
       const template = Template.fromStack(stack);
 
-      template.resourceCountIs("AWS::ElasticLoadBalancingV2::Listener", 1);
-      template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
-        Port: DEFAULT_ALB_HTTPS_PORT,
-        Protocol: "HTTPS",
-        Certificates: Match.arrayWith([
-          Match.objectLike({
-            CertificateArn: certificateArn,
-          }),
-        ]),
-      });
+      expect(() => {
+        template.resourceCountIs("AWS::ElasticLoadBalancingV2::Listener", 1);
+        template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
+          Port: DEFAULT_ALB_HTTPS_PORT,
+          Protocol: "HTTPS",
+          Certificates: Match.arrayWith([
+            Match.objectLike({
+              CertificateArn: TEST_CONSTANTS.CERTIFICATE_ARN,
+            }),
+          ]),
+        });
+      }).not.toThrow();
     });
 
     test("creates both HTTP and HTTPS listeners", () => {
       new AlbListenerConstruct(stack, "Listener", {
         loadBalancer,
-        envName: "test",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         enableHttp: true,
         enableHttps: true,
-        certificateArn,
+        certificateArn: TEST_CONSTANTS.CERTIFICATE_ARN,
       });
 
       const template = Template.fromStack(stack);
 
-      template.resourceCountIs("AWS::ElasticLoadBalancingV2::Listener", 2);
+      expect(() => {
+        template.resourceCountIs("AWS::ElasticLoadBalancingV2::Listener", 2);
 
-      // Check HTTP listener
-      template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
-        Port: DEFAULT_ALB_HTTP_PORT,
-        Protocol: "HTTP",
-      });
+        // Check HTTP listener
+        template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
+          Port: DEFAULT_ALB_HTTP_PORT,
+          Protocol: "HTTP",
+        });
 
-      // Check HTTPS listener
-      template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
-        Port: DEFAULT_ALB_HTTPS_PORT,
-        Protocol: "HTTPS",
-      });
+        // Check HTTPS listener
+        template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
+          Port: DEFAULT_ALB_HTTPS_PORT,
+          Protocol: "HTTPS",
+        });
+      }).not.toThrow();
     });
 
     test("exposes httpListener, httpsListener, and primary listener", () => {
       const construct = new AlbListenerConstruct(stack, "Listener", {
         loadBalancer,
-        envName: "test",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         enableHttp: true,
         enableHttps: true,
-        certificateArn,
+        certificateArn: TEST_CONSTANTS.CERTIFICATE_ARN,
       });
 
       expect(construct.httpListener).toBeDefined();
@@ -141,7 +169,7 @@ describe("AlbListenerConstruct", () => {
     test("primary listener is HTTP when HTTPS is not enabled", () => {
       const construct = new AlbListenerConstruct(stack, "Listener", {
         loadBalancer,
-        envName: "test",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         enableHttp: true,
         enableHttps: false,
       });
@@ -180,7 +208,7 @@ describe("AlbListenerConstruct", () => {
       expect(() => {
         new AlbListenerConstruct(stack, "Listener", {
           loadBalancer,
-          envName: "test",
+          envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
           enableHttp: false,
           enableHttps: false,
         });
@@ -191,7 +219,7 @@ describe("AlbListenerConstruct", () => {
       expect(() => {
         new AlbListenerConstruct(stack, "Listener", {
           loadBalancer,
-          envName: "test",
+          envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
           enableHttps: true,
           // certificateArn missing
         });
@@ -202,10 +230,10 @@ describe("AlbListenerConstruct", () => {
       expect(() => {
         new AlbListenerConstruct(stack, "Listener", {
           loadBalancer,
-          envName: "test",
+          envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
           enableHttp: false,
           enableHttps: true,
-          certificateArn,
+          certificateArn: TEST_CONSTANTS.CERTIFICATE_ARN,
           redirectHttpToHttps: true,
         });
       }).toThrow(
@@ -222,35 +250,37 @@ describe("AlbListenerConstruct", () => {
     test("HTTP listener uses fixed response by default", () => {
       new AlbListenerConstruct(stack, "Listener", {
         loadBalancer,
-        envName: "test",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         enableHttp: true,
         enableHttps: false,
       });
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
-        Port: DEFAULT_ALB_HTTP_PORT,
-        DefaultActions: Match.arrayWith([
-          Match.objectLike({
-            Type: "fixed-response",
-            FixedResponseConfig: {
-              StatusCode: String(DEFAULT_ALB_FIXED_RESPONSE_STATUS_CODE),
-              ContentType: DEFAULT_ALB_FIXED_RESPONSE_CONTENT_TYPE,
-              MessageBody: DEFAULT_ALB_FIXED_RESPONSE_MESSAGE,
-            },
-          }),
-        ]),
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
+          Port: DEFAULT_ALB_HTTP_PORT,
+          DefaultActions: Match.arrayWith([
+            Match.objectLike({
+              Type: "fixed-response",
+              FixedResponseConfig: {
+                StatusCode: String(DEFAULT_ALB_FIXED_RESPONSE_STATUS_CODE),
+                ContentType: DEFAULT_ALB_FIXED_RESPONSE_CONTENT_TYPE,
+                MessageBody: DEFAULT_ALB_FIXED_RESPONSE_MESSAGE,
+              },
+            }),
+          ]),
+        });
+      }).not.toThrow();
     });
 
     test("HTTP listener redirects to HTTPS when configured", () => {
       new AlbListenerConstruct(stack, "Listener", {
         loadBalancer,
-        envName: "test",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         enableHttp: true,
         enableHttps: true,
-        certificateArn,
+        certificateArn: TEST_CONSTANTS.CERTIFICATE_ARN,
         redirectHttpToHttps: true,
       });
 
@@ -285,36 +315,41 @@ describe("AlbListenerConstruct", () => {
     test("HTTPS listener uses fixed response by default", () => {
       new AlbListenerConstruct(stack, "Listener", {
         loadBalancer,
-        envName: "test",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         enableHttp: false,
         enableHttps: true,
-        certificateArn,
+        certificateArn: TEST_CONSTANTS.CERTIFICATE_ARN,
       });
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
-        Port: DEFAULT_ALB_HTTPS_PORT,
-        DefaultActions: Match.arrayWith([
-          Match.objectLike({
-            Type: "fixed-response",
-            FixedResponseConfig: {
-              StatusCode: String(DEFAULT_ALB_FIXED_RESPONSE_STATUS_CODE),
-            },
-          }),
-        ]),
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
+          Port: DEFAULT_ALB_HTTPS_PORT,
+          DefaultActions: Match.arrayWith([
+            Match.objectLike({
+              Type: "fixed-response",
+              FixedResponseConfig: {
+                StatusCode: String(DEFAULT_ALB_FIXED_RESPONSE_STATUS_CODE),
+              },
+            }),
+          ]),
+        });
+      }).not.toThrow();
     });
 
     test("uses custom default action when provided", () => {
-      const customAction = elbv2.ListenerAction.fixedResponse(503, {
-        contentType: "application/json",
-        messageBody: '{"error": "Service unavailable"}',
-      });
+      const customAction = elbv2.ListenerAction.fixedResponse(
+        TEST_CONSTANTS.CUSTOM_FIXED_RESPONSE_STATUS,
+        {
+          contentType: "application/json",
+          messageBody: '{"error": "Service unavailable"}',
+        }
+      );
 
       new AlbListenerConstruct(stack, "Listener", {
         loadBalancer,
-        envName: "test",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         enableHttp: true,
         enableHttps: false,
         httpDefaultAction: customAction,
@@ -322,19 +357,21 @@ describe("AlbListenerConstruct", () => {
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
-        Port: DEFAULT_ALB_HTTP_PORT,
-        DefaultActions: Match.arrayWith([
-          Match.objectLike({
-            Type: "fixed-response",
-            FixedResponseConfig: {
-              StatusCode: "503",
-              ContentType: "application/json",
-              MessageBody: '{"error": "Service unavailable"}',
-            },
-          }),
-        ]),
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
+          Port: DEFAULT_ALB_HTTP_PORT,
+          DefaultActions: Match.arrayWith([
+            Match.objectLike({
+              Type: "fixed-response",
+              FixedResponseConfig: {
+                StatusCode: String(TEST_CONSTANTS.CUSTOM_FIXED_RESPONSE_STATUS),
+                ContentType: "application/json",
+                MessageBody: '{"error": "Service unavailable"}',
+              },
+            }),
+          ]),
+        });
+      }).not.toThrow();
     });
   });
 
@@ -346,60 +383,64 @@ describe("AlbListenerConstruct", () => {
     test("uses TLS 1.3 by default", () => {
       new AlbListenerConstruct(stack, "Listener", {
         loadBalancer,
-        envName: "test",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         enableHttps: true,
-        certificateArn,
+        certificateArn: TEST_CONSTANTS.CERTIFICATE_ARN,
       });
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
-        Port: DEFAULT_ALB_HTTPS_PORT,
-        SslPolicy: "ELBSecurityPolicy-TLS13-1-2-2021-06",
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
+          Port: DEFAULT_ALB_HTTPS_PORT,
+          SslPolicy: "ELBSecurityPolicy-TLS13-1-2-2021-06",
+        });
+      }).not.toThrow();
     });
 
     test("uses custom SSL policy when provided", () => {
       new AlbListenerConstruct(stack, "Listener", {
         loadBalancer,
-        envName: "test",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         enableHttps: true,
-        certificateArn,
+        certificateArn: TEST_CONSTANTS.CERTIFICATE_ARN,
         sslPolicy: elbv2.SslPolicy.TLS12,
       });
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
-        Port: DEFAULT_ALB_HTTPS_PORT,
-        SslPolicy: "ELBSecurityPolicy-TLS-1-2-2017-01",
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
+          Port: DEFAULT_ALB_HTTPS_PORT,
+          SslPolicy: "ELBSecurityPolicy-TLS-1-2-2017-01",
+        });
+      }).not.toThrow();
     });
 
     test("supports SNI with multiple certificates", () => {
-      const additionalCert1 =
-        "arn:aws:acm:eu-west-1:123456789012:certificate/cert1";
-      const additionalCert2 =
-        "arn:aws:acm:eu-west-1:123456789012:certificate/cert2";
-
       new AlbListenerConstruct(stack, "Listener", {
         loadBalancer,
-        envName: "test",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         enableHttps: true,
-        certificateArn,
-        additionalCertificates: [additionalCert1, additionalCert2],
+        certificateArn: TEST_CONSTANTS.CERTIFICATE_ARN,
+        additionalCertificates: [
+          TEST_CONSTANTS.ADDITIONAL_CERT_1,
+          TEST_CONSTANTS.ADDITIONAL_CERT_2,
+        ],
       });
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
-        Port: DEFAULT_ALB_HTTPS_PORT,
-        Certificates: Match.arrayWith([
-          Match.objectLike({ CertificateArn: certificateArn }),
-          Match.objectLike({ CertificateArn: additionalCert1 }),
-          Match.objectLike({ CertificateArn: additionalCert2 }),
-        ]),
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
+          Port: DEFAULT_ALB_HTTPS_PORT,
+          Certificates: Match.arrayWith([
+            Match.objectLike({ CertificateArn: TEST_CONSTANTS.CERTIFICATE_ARN }),
+            Match.objectLike({ CertificateArn: TEST_CONSTANTS.ADDITIONAL_CERT_1 }),
+            Match.objectLike({ CertificateArn: TEST_CONSTANTS.ADDITIONAL_CERT_2 }),
+          ]),
+        });
+      }).not.toThrow();
     });
   });
 
@@ -411,67 +452,71 @@ describe("AlbListenerConstruct", () => {
     test("uses default HTTP port 80", () => {
       new AlbListenerConstruct(stack, "Listener", {
         loadBalancer,
-        envName: "test",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         enableHttp: true,
         enableHttps: false,
       });
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
-        Port: DEFAULT_ALB_HTTP_PORT,
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
+          Port: DEFAULT_ALB_HTTP_PORT,
+        });
+      }).not.toThrow();
     });
 
     test("uses default HTTPS port 443", () => {
       new AlbListenerConstruct(stack, "Listener", {
         loadBalancer,
-        envName: "test",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         enableHttps: true,
-        certificateArn,
+        certificateArn: TEST_CONSTANTS.CERTIFICATE_ARN,
       });
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
-        Port: DEFAULT_ALB_HTTPS_PORT,
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
+          Port: DEFAULT_ALB_HTTPS_PORT,
+        });
+      }).not.toThrow();
     });
 
     test("uses custom HTTP port when provided", () => {
-      const customPort = 8080;
-
       new AlbListenerConstruct(stack, "Listener", {
         loadBalancer,
-        envName: "test",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         enableHttp: true,
         enableHttps: false,
-        httpPort: customPort,
+        httpPort: TEST_CONSTANTS.CUSTOM_HTTP_PORT,
       });
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
-        Port: customPort,
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
+          Port: TEST_CONSTANTS.CUSTOM_HTTP_PORT,
+        });
+      }).not.toThrow();
     });
 
     test("uses custom HTTPS port when provided", () => {
-      const customPort = 8443;
-
       new AlbListenerConstruct(stack, "Listener", {
         loadBalancer,
-        envName: "test",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         enableHttps: true,
-        certificateArn,
-        httpsPort: customPort,
+        certificateArn: TEST_CONSTANTS.CERTIFICATE_ARN,
+        httpsPort: TEST_CONSTANTS.CUSTOM_HTTPS_PORT,
       });
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
-        Port: customPort,
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
+          Port: TEST_CONSTANTS.CUSTOM_HTTPS_PORT,
+        });
+      }).not.toThrow();
     });
   });
 
@@ -486,10 +531,10 @@ describe("AlbListenerConstruct", () => {
     beforeEach(() => {
       construct = new AlbListenerConstruct(stack, "Listener", {
         loadBalancer,
-        envName: "test",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         enableHttp: true,
         enableHttps: true,
-        certificateArn,
+        certificateArn: TEST_CONSTANTS.CERTIFICATE_ARN,
       });
 
       targetGroup = new elbv2.ApplicationTargetGroup(stack, "TargetGroup", {
@@ -506,21 +551,23 @@ describe("AlbListenerConstruct", () => {
 
       const template = Template.fromStack(stack);
 
-      template.resourceCountIs("AWS::ElasticLoadBalancingV2::ListenerRule", 1);
-      template.hasResourceProperties(
-        "AWS::ElasticLoadBalancingV2::ListenerRule",
-        {
-          Priority: 100,
-          Conditions: Match.arrayWith([
-            Match.objectLike({
-              Field: "path-pattern",
-              PathPatternConfig: {
-                Values: ["/api/*"],
-              },
-            }),
-          ]),
-        }
-      );
+      expect(() => {
+        template.resourceCountIs("AWS::ElasticLoadBalancingV2::ListenerRule", 1);
+        template.hasResourceProperties(
+          "AWS::ElasticLoadBalancingV2::ListenerRule",
+          {
+            Priority: 100,
+            Conditions: Match.arrayWith([
+              Match.objectLike({
+                Field: "path-pattern",
+                PathPatternConfig: {
+                  Values: ["/api/*"],
+                },
+              }),
+            ]),
+          }
+        );
+      }).not.toThrow();
     });
 
     test("addPathRule creates path-based routing rule", () => {
@@ -528,20 +575,22 @@ describe("AlbListenerConstruct", () => {
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties(
-        "AWS::ElasticLoadBalancingV2::ListenerRule",
-        {
-          Priority: 100,
-          Conditions: Match.arrayWith([
-            Match.objectLike({
-              Field: "path-pattern",
-              PathPatternConfig: {
-                Values: ["/api/*"],
-              },
-            }),
-          ]),
-        }
-      );
+      expect(() => {
+        template.hasResourceProperties(
+          "AWS::ElasticLoadBalancingV2::ListenerRule",
+          {
+            Priority: 100,
+            Conditions: Match.arrayWith([
+              Match.objectLike({
+                Field: "path-pattern",
+                PathPatternConfig: {
+                  Values: ["/api/*"],
+                },
+              }),
+            ]),
+          }
+        );
+      }).not.toThrow();
     });
 
     test("addHostRule creates host-based routing rule", () => {
@@ -549,20 +598,22 @@ describe("AlbListenerConstruct", () => {
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties(
-        "AWS::ElasticLoadBalancingV2::ListenerRule",
-        {
-          Priority: 100,
-          Conditions: Match.arrayWith([
-            Match.objectLike({
-              Field: "host-header",
-              HostHeaderConfig: {
-                Values: ["api.example.com"],
-              },
-            }),
-          ]),
-        }
-      );
+      expect(() => {
+        template.hasResourceProperties(
+          "AWS::ElasticLoadBalancingV2::ListenerRule",
+          {
+            Priority: 100,
+            Conditions: Match.arrayWith([
+              Match.objectLike({
+                Field: "host-header",
+                HostHeaderConfig: {
+                  Values: ["api.example.com"],
+                },
+              }),
+            ]),
+          }
+        );
+      }).not.toThrow();
     });
 
     test("addHeaderRule creates header-based routing rule", () => {
@@ -576,21 +627,23 @@ describe("AlbListenerConstruct", () => {
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties(
-        "AWS::ElasticLoadBalancingV2::ListenerRule",
-        {
-          Priority: 100,
-          Conditions: Match.arrayWith([
-            Match.objectLike({
-              Field: "http-header",
-              HttpHeaderConfig: {
-                HttpHeaderName: "X-Custom-Header",
-                Values: ["value1", "value2"],
-              },
-            }),
-          ]),
-        }
-      );
+      expect(() => {
+        template.hasResourceProperties(
+          "AWS::ElasticLoadBalancingV2::ListenerRule",
+          {
+            Priority: 100,
+            Conditions: Match.arrayWith([
+              Match.objectLike({
+                Field: "http-header",
+                HttpHeaderConfig: {
+                  HttpHeaderName: "X-Custom-Header",
+                  Values: ["value1", "value2"],
+                },
+              }),
+            ]),
+          }
+        );
+      }).not.toThrow();
     });
 
     test("addWeightedTargetGroups creates weighted forwarding rule", () => {
@@ -615,23 +668,25 @@ describe("AlbListenerConstruct", () => {
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties(
-        "AWS::ElasticLoadBalancingV2::ListenerRule",
-        {
-          Priority: 100,
-          Actions: Match.arrayWith([
-            Match.objectLike({
-              Type: "forward",
-              ForwardConfig: {
-                TargetGroups: Match.arrayWith([
-                  Match.objectLike({ Weight: 80 }),
-                  Match.objectLike({ Weight: 20 }),
-                ]),
-              },
-            }),
-          ]),
-        }
-      );
+      expect(() => {
+        template.hasResourceProperties(
+          "AWS::ElasticLoadBalancingV2::ListenerRule",
+          {
+            Priority: 100,
+            Actions: Match.arrayWith([
+              Match.objectLike({
+                Type: "forward",
+                ForwardConfig: {
+                  TargetGroups: Match.arrayWith([
+                    Match.objectLike({ Weight: 80 }),
+                    Match.objectLike({ Weight: 20 }),
+                  ]),
+                },
+              }),
+            ]),
+          }
+        );
+      }).not.toThrow();
     });
 
     test("addWeightedTargetGroups throws error when total weight is zero", () => {
@@ -653,7 +708,7 @@ describe("AlbListenerConstruct", () => {
     test("adds standard tags to HTTP listener", () => {
       new AlbListenerConstruct(stack, "Listener", {
         loadBalancer,
-        envName: "test",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         enableHttp: true,
         enableHttps: false,
       });
@@ -673,7 +728,7 @@ describe("AlbListenerConstruct", () => {
     test("adds project tag when projectName is provided", () => {
       new AlbListenerConstruct(stack, "Listener", {
         loadBalancer,
-        envName: "test",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         projectName: "monitoring",
         enableHttp: true,
         enableHttps: false,
@@ -682,23 +737,27 @@ describe("AlbListenerConstruct", () => {
       const template = Template.fromStack(stack);
 
       // Verify listener is created (tags are applied via CDK Tags API)
-      template.resourceCountIs("AWS::ElasticLoadBalancingV2::Listener", 1);
+      expect(() => {
+        template.resourceCountIs("AWS::ElasticLoadBalancingV2::Listener", 1);
+      }).not.toThrow();
     });
 
     test("adds tags to both HTTP and HTTPS listeners", () => {
       new AlbListenerConstruct(stack, "Listener", {
         loadBalancer,
-        envName: "test",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         projectName: "monitoring",
         enableHttp: true,
         enableHttps: true,
-        certificateArn,
+        certificateArn: TEST_CONSTANTS.CERTIFICATE_ARN,
       });
 
       const template = Template.fromStack(stack);
 
       // Both listeners should be created
-      template.resourceCountIs("AWS::ElasticLoadBalancingV2::Listener", 2);
+      expect(() => {
+        template.resourceCountIs("AWS::ElasticLoadBalancingV2::Listener", 2);
+      }).not.toThrow();
     });
   });
 
@@ -710,37 +769,41 @@ describe("AlbListenerConstruct", () => {
     test("creates output for HTTP listener ARN", () => {
       new AlbListenerConstruct(stack, "Listener", {
         loadBalancer,
-        envName: "test",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         enableHttp: true,
         enableHttps: false,
       });
 
       const template = Template.fromStack(stack);
 
-      template.hasOutput("HttpListenerArn", {
-        Description: "HTTP Listener ARN",
-      });
+      expect(() => {
+        template.hasOutput("HttpListenerArn", {
+          Description: "HTTP Listener ARN",
+        });
+      }).not.toThrow();
     });
 
     test("creates output for HTTPS listener ARN", () => {
       new AlbListenerConstruct(stack, "Listener", {
         loadBalancer,
-        envName: "test",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         enableHttps: true,
-        certificateArn,
+        certificateArn: TEST_CONSTANTS.CERTIFICATE_ARN,
       });
 
       const template = Template.fromStack(stack);
 
-      template.hasOutput("HttpsListenerArn", {
-        Description: "HTTPS Listener ARN",
-      });
+      expect(() => {
+        template.hasOutput("HttpsListenerArn", {
+          Description: "HTTPS Listener ARN",
+        });
+      }).not.toThrow();
     });
 
     test("creates unique export names with loadBalancerName", () => {
       new AlbListenerConstruct(stack, "Listener", {
         loadBalancer,
-        envName: "test",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         loadBalancerName: "my-alb",
         enableHttp: true,
         enableHttps: false,
@@ -764,14 +827,12 @@ describe("AlbListenerConstruct", () => {
     test("creates complete listener configuration with all features", () => {
       const construct = new AlbListenerConstruct(stack, "Listener", {
         loadBalancer,
-        envName: "production",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.PRODUCTION,
         projectName: "monitoring",
         enableHttp: true,
         enableHttps: true,
-        certificateArn,
-        additionalCertificates: [
-          "arn:aws:acm:eu-west-1:123456789012:certificate/cert2",
-        ],
+        certificateArn: TEST_CONSTANTS.CERTIFICATE_ARN,
+        additionalCertificates: [TEST_CONSTANTS.ADDITIONAL_CERT_2],
         redirectHttpToHttps: true,
         sslPolicy: elbv2.SslPolicy.TLS13_RES,
         loadBalancerName: "monitoring-alb",
@@ -791,27 +852,28 @@ describe("AlbListenerConstruct", () => {
 
       const template = Template.fromStack(stack);
 
-      // Verify both listeners exist
-      template.resourceCountIs("AWS::ElasticLoadBalancingV2::Listener", 2);
+      expect(() => {
+        // Verify both listeners exist
+        template.resourceCountIs("AWS::ElasticLoadBalancingV2::Listener", 2);
 
-      // Verify HTTPS listener has multiple certificates (SNI)
-      template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
-        Port: DEFAULT_ALB_HTTPS_PORT,
-        Certificates: Match.arrayWith([
-          Match.objectLike({ CertificateArn: certificateArn }),
-          Match.objectLike({
-            CertificateArn:
-              "arn:aws:acm:eu-west-1:123456789012:certificate/cert2",
-          }),
-        ]),
-      });
+        // Verify HTTPS listener has multiple certificates (SNI)
+        template.hasResourceProperties("AWS::ElasticLoadBalancingV2::Listener", {
+          Port: DEFAULT_ALB_HTTPS_PORT,
+          Certificates: Match.arrayWith([
+            Match.objectLike({ CertificateArn: TEST_CONSTANTS.CERTIFICATE_ARN }),
+            Match.objectLike({
+              CertificateArn: TEST_CONSTANTS.ADDITIONAL_CERT_2,
+            }),
+          ]),
+        });
 
-      // Verify listener rule exists
-      template.resourceCountIs("AWS::ElasticLoadBalancingV2::ListenerRule", 1);
+        // Verify listener rule exists
+        template.resourceCountIs("AWS::ElasticLoadBalancingV2::ListenerRule", 1);
 
-      // Verify outputs
-      template.hasOutput("HttpListenerArn", {});
-      template.hasOutput("HttpsListenerArn", {});
+        // Verify outputs
+        template.hasOutput("HttpListenerArn", {});
+        template.hasOutput("HttpsListenerArn", {});
+      }).not.toThrow();
 
       // Verify primary listener is HTTPS
       expect(construct.listener).toBe(construct.httpsListener);
