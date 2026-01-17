@@ -1,4 +1,5 @@
 /** @format */
+/// <reference types="jest" />
 
 import * as cdk from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
@@ -7,6 +8,44 @@ import { Template, Match } from "aws-cdk-lib/assertions";
 import { SecurityGroupConstruct } from "../../../../lib/constructs/networking/security/security-group-construct";
 import { VpcConstruct } from "../../../../lib/constructs/networking/vpc/vpc-construct";
 import { COMMON_PORTS } from "../../../../lib/shared/constants/networking-constants";
+import {
+  TEST_CONFIG,
+  BASE_TEST_CONSTANTS,
+  createTestApp,
+  extendExpectWithCdkMatchers,
+} from "../../utils/stack-test-utils";
+
+// ============================================================================
+// CUSTOM MATCHERS SETUP
+// ============================================================================
+
+extendExpectWithCdkMatchers();
+
+// ============================================================================
+// TEST CONFIGURATION
+// ============================================================================
+
+const TEST_CONSTANTS = {
+  ...BASE_TEST_CONSTANTS,
+  SECURITY_GROUP: {
+    NAME: "test-sg",
+    DESCRIPTION: "Test security group description",
+    SHORT_DESCRIPTION: "Short",
+    PROD_NAME: "prod-sg",
+    PROD_DESCRIPTION: "Production security group description",
+    WEB_SERVER_NAME: "web-server-sg",
+    WEB_SERVER_DESCRIPTION: "Security group for web servers allowing HTTP/HTTPS traffic",
+    SG1_NAME: "sg-1",
+    SG1_DESCRIPTION: "First security group description",
+    SG2_NAME: "sg-2",
+    SG2_DESCRIPTION: "Second security group description",
+    SOURCE_NAME: "source-sg",
+    SOURCE_DESCRIPTION: "Source security group description",
+    TARGET_NAME: "target-sg",
+    TARGET_DESCRIPTION: "Target security group description",
+  },
+  VPC_CIDR: "10.0.0.0/16",
+} as const;
 
 // ============================================================================
 // SECURITY GROUP CONSTRUCT TESTS
@@ -18,17 +57,14 @@ describe("SecurityGroupConstruct", () => {
   let vpc: ec2.IVpc;
 
   beforeEach(() => {
-    app = new cdk.App();
+    app = createTestApp();
     stack = new cdk.Stack(app, "TestStack", {
-      env: {
-        account: "123456789012",
-        region: "eu-west-1",
-      },
+      env: { account: TEST_CONFIG.account, region: TEST_CONFIG.region },
     });
 
     // Create a VPC for testing
     const vpcConstruct = new VpcConstruct(stack, "TestVpc", {
-      envName: "test",
+      envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
     });
     vpc = vpcConstruct.vpc;
   });
@@ -41,29 +77,31 @@ describe("SecurityGroupConstruct", () => {
     test("creates security group with minimal required properties", () => {
       new SecurityGroupConstruct(stack, "SecurityGroup", {
         vpc,
-        groupName: "test-sg",
-        description: "Test security group description",
-        envName: "test",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
       });
 
       const template = Template.fromStack(stack);
 
-      template.resourceCountIs("AWS::EC2::SecurityGroup", 1);
-      template.hasResourceProperties("AWS::EC2::SecurityGroup", {
-        GroupDescription: "Test security group description",
-        GroupName: "test-sg",
-        VpcId: {
-          Ref: Match.stringLikeRegexp("TestVpc.*"),
-        },
-      });
+      expect(() => {
+        template.resourceCountIs("AWS::EC2::SecurityGroup", 1);
+        template.hasResourceProperties("AWS::EC2::SecurityGroup", {
+          GroupDescription: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+          GroupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+          VpcId: {
+            Ref: Match.stringLikeRegexp("TestVpc.*"),
+          },
+        });
+      }).not.toThrow();
     });
 
     test("exposes security group and security group ID", () => {
       const construct = new SecurityGroupConstruct(stack, "SecurityGroup", {
         vpc,
-        groupName: "test-sg",
-        description: "Test security group description",
-        envName: "test",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
       });
 
       expect(construct.securityGroup).toBeDefined();
@@ -74,51 +112,51 @@ describe("SecurityGroupConstruct", () => {
     test("defaults allowAllOutbound to false", () => {
       new SecurityGroupConstruct(stack, "SecurityGroup", {
         vpc,
-        groupName: "test-sg",
-        description: "Test security group description",
-        envName: "test",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
       });
 
       const template = Template.fromStack(stack);
 
       // When allowAllOutbound is false, CDK creates a default deny-all egress rule
       // We verify that there's no allow-all rule (0.0.0.0/0 with protocol -1)
-      const securityGroupResources = template.findResources(
-        "AWS::EC2::SecurityGroup"
-      );
-      const securityGroupResource = Object.values(securityGroupResources)[0];
-      const egressRules = securityGroupResource.Properties.SecurityGroupEgress;
-
-      // Should have egress rules (default deny-all)
-      expect(egressRules).toBeInstanceOf(Array);
-      // Should NOT have an allow-all rule (0.0.0.0/0 with protocol -1)
-      const hasAllowAll = (egressRules as Array<Record<string, unknown>>).some(
-        (rule) =>
-          rule.CidrIp === "0.0.0.0/0" && rule.IpProtocol === "-1"
-      );
-      expect(hasAllowAll).toBe(false);
+      expect(() => {
+        template.hasResourceProperties("AWS::EC2::SecurityGroup", {
+          SecurityGroupEgress: Match.not(
+            Match.arrayWith([
+              Match.objectLike({
+                CidrIp: "0.0.0.0/0",
+                IpProtocol: "-1",
+              }),
+            ])
+          ),
+        });
+      }).not.toThrow();
     });
 
     test("creates security group with allowAllOutbound set to true when specified", () => {
       new SecurityGroupConstruct(stack, "SecurityGroup", {
         vpc,
-        groupName: "test-sg",
-        description: "Test security group description",
-        envName: "test",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         allowAllOutbound: true,
       });
 
       const template = Template.fromStack(stack);
 
       // When allowAllOutbound is true, CDK creates a default egress rule
-      template.hasResourceProperties("AWS::EC2::SecurityGroup", {
-        SecurityGroupEgress: Match.arrayWith([
-          Match.objectLike({
-            CidrIp: "0.0.0.0/0",
-            IpProtocol: "-1",
-          }),
-        ]),
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::EC2::SecurityGroup", {
+          SecurityGroupEgress: Match.arrayWith([
+            Match.objectLike({
+              CidrIp: "0.0.0.0/0",
+              IpProtocol: "-1",
+            }),
+          ]),
+        });
+      }).not.toThrow();
     });
   });
 
@@ -131,9 +169,9 @@ describe("SecurityGroupConstruct", () => {
       expect(() => {
         new SecurityGroupConstruct(stack, "SecurityGroup", {
           vpc: undefined as unknown as ec2.IVpc,
-          groupName: "test-sg",
-          description: "Test security group description",
-          envName: "test",
+          groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+          description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+          envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         });
       }).toThrow("VPC is required for SecurityGroupConstruct");
     });
@@ -142,9 +180,9 @@ describe("SecurityGroupConstruct", () => {
       expect(() => {
         new SecurityGroupConstruct(stack, "SecurityGroup", {
           vpc: null as unknown as ec2.IVpc,
-          groupName: "test-sg",
-          description: "Test security group description",
-          envName: "test",
+          groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+          description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+          envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         });
       }).toThrow("VPC is required for SecurityGroupConstruct");
     });
@@ -154,8 +192,8 @@ describe("SecurityGroupConstruct", () => {
         new SecurityGroupConstruct(stack, "SecurityGroup", {
           vpc,
           groupName: "",
-          description: "Test security group description",
-          envName: "test",
+          description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+          envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         });
       }).toThrow("Security group name is required");
     });
@@ -165,8 +203,8 @@ describe("SecurityGroupConstruct", () => {
         new SecurityGroupConstruct(stack, "SecurityGroup", {
           vpc,
           groupName: "   ",
-          description: "Test security group description",
-          envName: "test",
+          description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+          envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         });
       }).toThrow("Security group name cannot be empty");
     });
@@ -175,9 +213,9 @@ describe("SecurityGroupConstruct", () => {
       expect(() => {
         new SecurityGroupConstruct(stack, "SecurityGroup", {
           vpc,
-          groupName: "test-sg",
-          description: "Short",
-          envName: "test",
+          groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+          description: TEST_CONSTANTS.SECURITY_GROUP.SHORT_DESCRIPTION,
+          envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         });
       }).toThrow("Security group description is too short");
     });
@@ -186,9 +224,9 @@ describe("SecurityGroupConstruct", () => {
       expect(() => {
         new SecurityGroupConstruct(stack, "SecurityGroup", {
           vpc,
-          groupName: "test-sg",
+          groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
           description: "",
-          envName: "test",
+          envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         });
       }).toThrow("Security group description is required");
     });
@@ -197,8 +235,8 @@ describe("SecurityGroupConstruct", () => {
       expect(() => {
         new SecurityGroupConstruct(stack, "SecurityGroup", {
           vpc,
-          groupName: "test-sg",
-          description: "Test security group description",
+          groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+          description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
           envName: undefined as unknown as string,
         });
       }).toThrow("Environment name (envName) is required");
@@ -208,8 +246,8 @@ describe("SecurityGroupConstruct", () => {
       expect(() => {
         new SecurityGroupConstruct(stack, "SecurityGroup", {
           vpc,
-          groupName: "test-sg",
-          description: "Test security group description",
+          groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+          description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
           envName: "",
         });
       }).toThrow("Environment name (envName) is required");
@@ -219,8 +257,8 @@ describe("SecurityGroupConstruct", () => {
       expect(() => {
         new SecurityGroupConstruct(stack, "SecurityGroup", {
           vpc,
-          groupName: "test-sg",
-          description: "Test security group description",
+          groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+          description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
           envName: "   ",
         });
       }).toThrow("Environment name (envName) is required");
@@ -235,9 +273,9 @@ describe("SecurityGroupConstruct", () => {
     test("adds ingress rules from props", () => {
       new SecurityGroupConstruct(stack, "SecurityGroup", {
         vpc,
-        groupName: "test-sg",
-        description: "Test security group description",
-        envName: "test",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         ingressRules: [
           {
             peer: ec2.Peer.anyIpv4(),
@@ -245,7 +283,7 @@ describe("SecurityGroupConstruct", () => {
             description: "Allow HTTP from internet",
           },
           {
-            peer: ec2.Peer.ipv4("10.0.0.0/16"),
+            peer: ec2.Peer.ipv4(TEST_CONSTANTS.VPC_CIDR),
             port: ec2.Port.tcp(COMMON_PORTS.HTTPS),
             description: "Allow HTTPS from VPC",
           },
@@ -254,32 +292,34 @@ describe("SecurityGroupConstruct", () => {
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties("AWS::EC2::SecurityGroup", {
-        SecurityGroupIngress: Match.arrayWith([
-          Match.objectLike({
-            CidrIp: "0.0.0.0/0",
-            FromPort: COMMON_PORTS.HTTP,
-            ToPort: COMMON_PORTS.HTTP,
-            IpProtocol: "tcp",
-            Description: "Allow HTTP from internet",
-          }),
-          Match.objectLike({
-            CidrIp: "10.0.0.0/16",
-            FromPort: COMMON_PORTS.HTTPS,
-            ToPort: COMMON_PORTS.HTTPS,
-            IpProtocol: "tcp",
-            Description: "Allow HTTPS from VPC",
-          }),
-        ]),
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::EC2::SecurityGroup", {
+          SecurityGroupIngress: Match.arrayWith([
+            Match.objectLike({
+              CidrIp: "0.0.0.0/0",
+              FromPort: COMMON_PORTS.HTTP,
+              ToPort: COMMON_PORTS.HTTP,
+              IpProtocol: "tcp",
+              Description: "Allow HTTP from internet",
+            }),
+            Match.objectLike({
+              CidrIp: TEST_CONSTANTS.VPC_CIDR,
+              FromPort: COMMON_PORTS.HTTPS,
+              ToPort: COMMON_PORTS.HTTPS,
+              IpProtocol: "tcp",
+              Description: "Allow HTTPS from VPC",
+            }),
+          ]),
+        });
+      }).not.toThrow();
     });
 
     test("generates description for ingress rules when not provided", () => {
       new SecurityGroupConstruct(stack, "SecurityGroup", {
         vpc,
-        groupName: "test-sg",
-        description: "Test security group description",
-        envName: "test",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         ingressRules: [
           {
             peer: ec2.Peer.anyIpv4(),
@@ -290,21 +330,23 @@ describe("SecurityGroupConstruct", () => {
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties("AWS::EC2::SecurityGroup", {
-        SecurityGroupIngress: Match.arrayWith([
-          Match.objectLike({
-            Description: Match.stringLikeRegexp("Allow.*80.*"),
-          }),
-        ]),
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::EC2::SecurityGroup", {
+          SecurityGroupIngress: Match.arrayWith([
+            Match.objectLike({
+              Description: Match.stringLikeRegexp("Allow.*80.*"),
+            }),
+          ]),
+        });
+      }).not.toThrow();
     });
 
     test("allows adding ingress rules via addIngressRule method", () => {
       const construct = new SecurityGroupConstruct(stack, "SecurityGroup", {
         vpc,
-        groupName: "test-sg",
-        description: "Test security group description",
-        envName: "test",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
       });
 
       construct.addIngressRule(
@@ -315,17 +357,19 @@ describe("SecurityGroupConstruct", () => {
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties("AWS::EC2::SecurityGroup", {
-        SecurityGroupIngress: Match.arrayWith([
-          Match.objectLike({
-            CidrIp: "0.0.0.0/0",
-            FromPort: COMMON_PORTS.SSH,
-            ToPort: COMMON_PORTS.SSH,
-            IpProtocol: "tcp",
-            Description: "Allow SSH from anywhere",
-          }),
-        ]),
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::EC2::SecurityGroup", {
+          SecurityGroupIngress: Match.arrayWith([
+            Match.objectLike({
+              CidrIp: "0.0.0.0/0",
+              FromPort: COMMON_PORTS.SSH,
+              ToPort: COMMON_PORTS.SSH,
+              IpProtocol: "tcp",
+              Description: "Allow SSH from anywhere",
+            }),
+          ]),
+        });
+      }).not.toThrow();
     });
   });
 
@@ -337,9 +381,9 @@ describe("SecurityGroupConstruct", () => {
     test("adds egress rules from props when allowAllOutbound is false", () => {
       new SecurityGroupConstruct(stack, "SecurityGroup", {
         vpc,
-        groupName: "test-sg",
-        description: "Test security group description",
-        envName: "test",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         allowAllOutbound: false,
         egressRules: [
           {
@@ -352,17 +396,19 @@ describe("SecurityGroupConstruct", () => {
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties("AWS::EC2::SecurityGroup", {
-        SecurityGroupEgress: Match.arrayWith([
-          Match.objectLike({
-            CidrIp: "0.0.0.0/0",
-            FromPort: COMMON_PORTS.HTTPS,
-            ToPort: COMMON_PORTS.HTTPS,
-            IpProtocol: "tcp",
-            Description: "Allow outbound HTTPS",
-          }),
-        ]),
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::EC2::SecurityGroup", {
+          SecurityGroupEgress: Match.arrayWith([
+            Match.objectLike({
+              CidrIp: "0.0.0.0/0",
+              FromPort: COMMON_PORTS.HTTPS,
+              ToPort: COMMON_PORTS.HTTPS,
+              IpProtocol: "tcp",
+              Description: "Allow outbound HTTPS",
+            }),
+          ]),
+        });
+      }).not.toThrow();
     });
 
     test("adds egress rules even when allowAllOutbound is true", () => {
@@ -373,9 +419,9 @@ describe("SecurityGroupConstruct", () => {
       // This test verifies that our construct attempts to add explicit rules.
       const construct = new SecurityGroupConstruct(stack, "SecurityGroup", {
         vpc,
-        groupName: "test-sg",
-        description: "Test security group description",
-        envName: "test",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         allowAllOutbound: true,
         egressRules: [
           {
@@ -407,9 +453,9 @@ describe("SecurityGroupConstruct", () => {
     test("generates description for egress rules when not provided", () => {
       new SecurityGroupConstruct(stack, "SecurityGroup", {
         vpc,
-        groupName: "test-sg",
-        description: "Test security group description",
-        envName: "test",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         egressRules: [
           {
             peer: ec2.Peer.anyIpv4(),
@@ -420,21 +466,23 @@ describe("SecurityGroupConstruct", () => {
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties("AWS::EC2::SecurityGroup", {
-        SecurityGroupEgress: Match.arrayWith([
-          Match.objectLike({
-            Description: Match.stringLikeRegexp("Allow outbound.*"),
-          }),
-        ]),
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::EC2::SecurityGroup", {
+          SecurityGroupEgress: Match.arrayWith([
+            Match.objectLike({
+              Description: Match.stringLikeRegexp("Allow outbound.*"),
+            }),
+          ]),
+        });
+      }).not.toThrow();
     });
 
     test("allows adding egress rules via addEgressRule method", () => {
       const construct = new SecurityGroupConstruct(stack, "SecurityGroup", {
         vpc,
-        groupName: "test-sg",
-        description: "Test security group description",
-        envName: "test",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
       });
 
       construct.addEgressRule(
@@ -445,17 +493,19 @@ describe("SecurityGroupConstruct", () => {
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties("AWS::EC2::SecurityGroup", {
-        SecurityGroupEgress: Match.arrayWith([
-          Match.objectLike({
-            CidrIp: "0.0.0.0/0",
-            FromPort: COMMON_PORTS.HTTP,
-            ToPort: COMMON_PORTS.HTTP,
-            IpProtocol: "tcp",
-            Description: "Allow outbound HTTP for updates",
-          }),
-        ]),
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::EC2::SecurityGroup", {
+          SecurityGroupEgress: Match.arrayWith([
+            Match.objectLike({
+              CidrIp: "0.0.0.0/0",
+              FromPort: COMMON_PORTS.HTTP,
+              ToPort: COMMON_PORTS.HTTP,
+              IpProtocol: "tcp",
+              Description: "Allow outbound HTTP for updates",
+            }),
+          ]),
+        });
+      }).not.toThrow();
     });
   });
 
@@ -464,19 +514,29 @@ describe("SecurityGroupConstruct", () => {
   // ============================================
 
   describe("Security Group Connections", () => {
-    test("allows connections from another security group", () => {
+    let ingressTestData: {
+      hasIngressRule: boolean;
+      targetSg: SecurityGroupConstruct;
+    };
+    let egressTestData: {
+      hasEgressRule: boolean;
+      sourceSg: SecurityGroupConstruct;
+    };
+
+    beforeAll(() => {
+      // Pre-compute ingress test data
       const sourceSg = new SecurityGroupConstruct(stack, "SourceSG", {
         vpc,
-        groupName: "source-sg",
-        description: "Source security group description",
-        envName: "test",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.SOURCE_NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.SOURCE_DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
       });
 
       const targetSg = new SecurityGroupConstruct(stack, "TargetSG", {
         vpc,
-        groupName: "target-sg",
-        description: "Target security group description",
-        envName: "test",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.TARGET_NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.TARGET_DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
       });
 
       targetSg.allowFrom(
@@ -487,46 +547,45 @@ describe("SecurityGroupConstruct", () => {
 
       const template = Template.fromStack(stack);
 
-      // Check the target security group (where the ingress rule is added)
+      // Find the target security group resource
       const securityGroupResources = template.findResources(
         "AWS::EC2::SecurityGroup"
       );
       const targetSgResource = Object.values(securityGroupResources).find(
         (resource: Record<string, unknown>) =>
           (resource.Properties as Record<string, unknown>).GroupName ===
-          "target-sg"
+          TEST_CONSTANTS.SECURITY_GROUP.TARGET_NAME
       ) as Record<string, unknown> | undefined;
 
-      expect(targetSgResource).toBeDefined();
-      if (!targetSgResource) {
-        throw new Error("Target security group resource not found");
-      }
-      const targetSgProps = targetSgResource.Properties as Record<
-        string,
-        unknown
-      >;
-
-      // CDK connections.allowFrom() may add rules to SecurityGroupIngress property
-      // or create separate AWS::EC2::SecurityGroupIngress resources
-      // Check both locations
-      let hasIngressRule = false;
+      const targetSgProps = targetSgResource
+        ? (targetSgResource.Properties as Record<string, unknown>)
+        : {};
 
       // Check SecurityGroupIngress property
-      if (targetSgProps.SecurityGroupIngress) {
-        expect(targetSgProps.SecurityGroupIngress).toBeInstanceOf(Array);
-        hasIngressRule = (
-          targetSgProps.SecurityGroupIngress as Array<Record<string, unknown>>
-        ).some(
-          (rule) =>
-            rule.SourceSecurityGroupId &&
-            rule.FromPort === COMMON_PORTS.HTTP &&
-            rule.ToPort === COMMON_PORTS.HTTP &&
-            rule.IpProtocol === "tcp" &&
-            rule.Description === "Allow HTTP from source security group"
-        );
+      let hasIngressRule = false;
+      const ingressRules = targetSgProps.SecurityGroupIngress as
+        | Array<Record<string, unknown>>
+        | undefined;
+
+      if (ingressRules && Array.isArray(ingressRules)) {
+        hasIngressRule = ingressRules.some((rule) => {
+          const hasSourceSg = rule.SourceSecurityGroupId !== undefined;
+          const fromPortMatches = rule.FromPort === COMMON_PORTS.HTTP;
+          const toPortMatches = rule.ToPort === COMMON_PORTS.HTTP;
+          const protocolMatches = rule.IpProtocol === "tcp";
+          const descriptionMatches =
+            rule.Description === "Allow HTTP from source security group";
+          return (
+            hasSourceSg &&
+            fromPortMatches &&
+            toPortMatches &&
+            protocolMatches &&
+            descriptionMatches
+          );
+        });
       }
 
-      // If not found in properties, check for separate SecurityGroupIngress resources
+      // Check for separate SecurityGroupIngress resources if not found in properties
       if (!hasIngressRule) {
         const ingressResources = template.findResources(
           "AWS::EC2::SecurityGroupIngress"
@@ -534,77 +593,75 @@ describe("SecurityGroupConstruct", () => {
         hasIngressRule = Object.values(ingressResources).some(
           (resource: Record<string, unknown>) => {
             const props = resource.Properties as Record<string, unknown>;
+            const hasGroupId = props.GroupId !== undefined;
+            const hasSourceSg = props.SourceSecurityGroupId !== undefined;
+            const fromPortMatches = props.FromPort === COMMON_PORTS.HTTP;
+            const toPortMatches = props.ToPort === COMMON_PORTS.HTTP;
+            const protocolMatches = props.IpProtocol === "tcp";
+            const descriptionMatches =
+              props.Description === "Allow HTTP from source security group";
             return (
-              props.GroupId &&
-              props.SourceSecurityGroupId &&
-              props.FromPort === COMMON_PORTS.HTTP &&
-              props.ToPort === COMMON_PORTS.HTTP &&
-              props.IpProtocol === "tcp" &&
-              props.Description === "Allow HTTP from source security group"
+              hasGroupId &&
+              hasSourceSg &&
+              fromPortMatches &&
+              toPortMatches &&
+              protocolMatches &&
+              descriptionMatches
             );
           }
         );
       }
 
-      // Verify the rule exists in one of the locations
-      expect(hasIngressRule).toBe(true);
-      expect(targetSg).toBeDefined();
-      expect(targetSg.securityGroup).toBeDefined();
-    });
+      ingressTestData = {
+        hasIngressRule,
+        targetSg,
+      };
 
-    test("allows connections to another security group", () => {
-      const sourceSg = new SecurityGroupConstruct(stack, "SourceSG", {
+      // Pre-compute egress test data
+      const sourceSg2 = new SecurityGroupConstruct(stack, "SourceSG2", {
         vpc,
-        groupName: "source-sg",
-        description: "Source security group description",
-        envName: "test",
+        groupName: `${TEST_CONSTANTS.SECURITY_GROUP.SOURCE_NAME}-2`,
+        description: TEST_CONSTANTS.SECURITY_GROUP.SOURCE_DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
       });
 
-      const targetSg = new SecurityGroupConstruct(stack, "TargetSG", {
+      const targetSg2 = new SecurityGroupConstruct(stack, "TargetSG2", {
         vpc,
-        groupName: "target-sg",
-        description: "Target security group description",
-        envName: "test",
+        groupName: `${TEST_CONSTANTS.SECURITY_GROUP.TARGET_NAME}-2`,
+        description: TEST_CONSTANTS.SECURITY_GROUP.TARGET_DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
       });
 
-      sourceSg.allowTo(
-        targetSg.securityGroup,
+      sourceSg2.allowTo(
+        targetSg2.securityGroup,
         ec2.Port.tcp(COMMON_PORTS.HTTPS),
         "Allow HTTPS to target security group"
       );
 
-      const template = Template.fromStack(stack);
+      const template2 = Template.fromStack(stack);
 
-      // Check the source security group (where the egress rule is added)
-      const securityGroupResources = template.findResources(
+      // Find the source security group resource
+      const securityGroupResources2 = template2.findResources(
         "AWS::EC2::SecurityGroup"
       );
-      const sourceSgResource = Object.values(securityGroupResources).find(
+      const sourceSgResource = Object.values(securityGroupResources2).find(
         (resource: Record<string, unknown>) =>
           (resource.Properties as Record<string, unknown>).GroupName ===
-          "source-sg"
+          `${TEST_CONSTANTS.SECURITY_GROUP.SOURCE_NAME}-2`
       ) as Record<string, unknown> | undefined;
 
-      expect(sourceSgResource).toBeDefined();
-      if (!sourceSgResource) {
-        throw new Error("Source security group resource not found");
-      }
-      const sourceSgProps = sourceSgResource.Properties as Record<
-        string,
-        unknown
-      >;
-
-      // CDK connections.allowTo() may add rules to SecurityGroupEgress property
-      // or create separate AWS::EC2::SecurityGroupEgress resources
-      // Check both locations
-      let hasEgressRule = false;
+      const sourceSgProps = sourceSgResource
+        ? (sourceSgResource.Properties as Record<string, unknown>)
+        : {};
 
       // Check SecurityGroupEgress property
-      if (sourceSgProps.SecurityGroupEgress) {
-        expect(sourceSgProps.SecurityGroupEgress).toBeInstanceOf(Array);
-        hasEgressRule = (
-          sourceSgProps.SecurityGroupEgress as Array<Record<string, unknown>>
-        ).some(
+      let hasEgressRule = false;
+      const egressRules = sourceSgProps.SecurityGroupEgress as
+        | Array<Record<string, unknown>>
+        | undefined;
+
+      if (egressRules && Array.isArray(egressRules)) {
+        hasEgressRule = egressRules.some(
           (rule) =>
             rule.DestinationSecurityGroupId &&
             rule.FromPort === COMMON_PORTS.HTTPS &&
@@ -614,9 +671,9 @@ describe("SecurityGroupConstruct", () => {
         );
       }
 
-      // If not found in properties, check for separate SecurityGroupEgress resources
+      // Check for separate SecurityGroupEgress resources if not found in properties
       if (!hasEgressRule) {
-        const egressResources = template.findResources(
+        const egressResources = template2.findResources(
           "AWS::EC2::SecurityGroupEgress"
         );
         hasEgressRule = Object.values(egressResources).some(
@@ -634,10 +691,30 @@ describe("SecurityGroupConstruct", () => {
         );
       }
 
-      // Verify the rule exists in one of the locations
-      expect(hasEgressRule).toBe(true);
-      expect(sourceSg).toBeDefined();
-      expect(sourceSg.securityGroup).toBeDefined();
+      egressTestData = {
+        hasEgressRule,
+        sourceSg: sourceSg2,
+      };
+    });
+
+    test("allows connections from another security group", () => {
+      // Guard assertions
+      expect(ingressTestData).toBeDefined();
+      expect(ingressTestData.targetSg).toBeDefined();
+      expect(ingressTestData.targetSg.securityGroup).toBeDefined();
+
+      // Verify the rule exists
+      expect(ingressTestData.hasIngressRule).toBe(true);
+    });
+
+    test("allows connections to another security group", () => {
+      // Guard assertions
+      expect(egressTestData).toBeDefined();
+      expect(egressTestData.sourceSg).toBeDefined();
+      expect(egressTestData.sourceSg.securityGroup).toBeDefined();
+
+      // Verify the rule exists
+      expect(egressTestData.hasEgressRule).toBe(true);
     });
   });
 
@@ -649,110 +726,120 @@ describe("SecurityGroupConstruct", () => {
     test("adds Name tag with group name", () => {
       new SecurityGroupConstruct(stack, "SecurityGroup", {
         vpc,
-        groupName: "test-sg",
-        description: "Test security group description",
-        envName: "test",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
       });
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties("AWS::EC2::SecurityGroup", {
-        Tags: Match.arrayWith([
-          {
-            Key: "Name",
-            Value: "test-sg",
-          },
-        ]),
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::EC2::SecurityGroup", {
+          Tags: Match.arrayWith([
+            {
+              Key: "Name",
+              Value: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+            },
+          ]),
+        });
+      }).not.toThrow();
     });
 
     test("adds Environment tag with envName", () => {
       new SecurityGroupConstruct(stack, "SecurityGroup", {
         vpc,
-        groupName: "test-sg",
-        description: "Test security group description",
-        envName: "production",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.PRODUCTION,
       });
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties("AWS::EC2::SecurityGroup", {
-        Tags: Match.arrayWith([
-          {
-            Key: "Environment",
-            Value: "production",
-          },
-        ]),
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::EC2::SecurityGroup", {
+          Tags: Match.arrayWith([
+            {
+              Key: "Environment",
+              Value: TEST_CONSTANTS.ENVIRONMENTS.PRODUCTION,
+            },
+          ]),
+        });
+      }).not.toThrow();
     });
 
     test("adds ManagedBy tag", () => {
       new SecurityGroupConstruct(stack, "SecurityGroup", {
         vpc,
-        groupName: "test-sg",
-        description: "Test security group description",
-        envName: "test",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
       });
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties("AWS::EC2::SecurityGroup", {
-        Tags: Match.arrayWith([
-          {
-            Key: "ManagedBy",
-            Value: "CDK",
-          },
-        ]),
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::EC2::SecurityGroup", {
+          Tags: Match.arrayWith([
+            {
+              Key: "ManagedBy",
+              Value: "CDK",
+            },
+          ]),
+        });
+      }).not.toThrow();
     });
 
     test("adds ResourceType tag", () => {
       new SecurityGroupConstruct(stack, "SecurityGroup", {
         vpc,
-        groupName: "test-sg",
-        description: "Test security group description",
-        envName: "test",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
       });
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties("AWS::EC2::SecurityGroup", {
-        Tags: Match.arrayWith([
-          {
-            Key: "ResourceType",
-            Value: "SecurityGroup",
-          },
-        ]),
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::EC2::SecurityGroup", {
+          Tags: Match.arrayWith([
+            {
+              Key: "ResourceType",
+              Value: "SecurityGroup",
+            },
+          ]),
+        });
+      }).not.toThrow();
     });
 
     test("adds Project tag when projectName is provided", () => {
       new SecurityGroupConstruct(stack, "SecurityGroup", {
         vpc,
-        groupName: "test-sg",
-        description: "Test security group description",
-        envName: "test",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         projectName: "monitoring",
       });
 
       const template = Template.fromStack(stack);
 
-      template.hasResourceProperties("AWS::EC2::SecurityGroup", {
-        Tags: Match.arrayWith([
-          {
-            Key: "Project",
-            Value: "monitoring",
-          },
-        ]),
-      });
+      expect(() => {
+        template.hasResourceProperties("AWS::EC2::SecurityGroup", {
+          Tags: Match.arrayWith([
+            {
+              Key: "Project",
+              Value: "monitoring",
+            },
+          ]),
+        });
+      }).not.toThrow();
     });
 
     test("does not add Project tag when projectName is not provided", () => {
       new SecurityGroupConstruct(stack, "SecurityGroup", {
         vpc,
-        groupName: "test-sg",
-        description: "Test security group description",
-        envName: "test",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
       });
 
       const template = Template.fromStack(stack);
@@ -783,14 +870,14 @@ describe("SecurityGroupConstruct", () => {
         },
       });
       const productionVpc = new VpcConstruct(productionStack, "TestVpc", {
-        envName: "production",
+        envName: TEST_CONSTANTS.ENVIRONMENTS.PRODUCTION,
       }).vpc;
 
       const construct = new SecurityGroupConstruct(productionStack, "SecurityGroup", {
         vpc: productionVpc,
-        groupName: "prod-sg",
-        description: "Production security group description",
-        envName: "production",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.PROD_NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.PROD_DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.PRODUCTION,
         allowAllOutbound: true,
       });
 
@@ -807,14 +894,14 @@ describe("SecurityGroupConstruct", () => {
         },
       });
       const prodVpc = new VpcConstruct(prodStack, "TestVpc", {
-        envName: "prod",
+      envName: "prod",
       }).vpc;
 
       const construct = new SecurityGroupConstruct(prodStack, "SecurityGroup", {
         vpc: prodVpc,
-        groupName: "prod-sg",
-        description: "Production security group description",
-        envName: "prod",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.PROD_NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.PROD_DESCRIPTION,
+      envName: "prod",
         allowAllOutbound: true,
       });
 
@@ -824,9 +911,9 @@ describe("SecurityGroupConstruct", () => {
     test("warns when ingress rule allows access from anywhere", () => {
       const construct = new SecurityGroupConstruct(stack, "SecurityGroup", {
         vpc,
-        groupName: "test-sg",
-        description: "Test security group description",
-        envName: "test",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         ingressRules: [
           {
             peer: ec2.Peer.anyIpv4(),
@@ -842,9 +929,9 @@ describe("SecurityGroupConstruct", () => {
     test("warns when ingress rule allows all traffic", () => {
       const construct = new SecurityGroupConstruct(stack, "SecurityGroup", {
         vpc,
-        groupName: "test-sg",
-        description: "Test security group description",
-        envName: "test",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         ingressRules: [
           {
             peer: ec2.Peer.anyIpv4(),
@@ -859,9 +946,9 @@ describe("SecurityGroupConstruct", () => {
     test("warns when egress rule allows access to anywhere", () => {
       const construct = new SecurityGroupConstruct(stack, "SecurityGroup", {
         vpc,
-        groupName: "test-sg",
-        description: "Test security group description",
-        envName: "test",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
         egressRules: [
           {
             peer: ec2.Peer.anyIpv4(),
@@ -882,9 +969,9 @@ describe("SecurityGroupConstruct", () => {
     test("creates complete security group with all features", () => {
       const construct = new SecurityGroupConstruct(stack, "SecurityGroup", {
         vpc,
-        groupName: "web-server-sg",
-        description: "Security group for web servers allowing HTTP/HTTPS traffic",
-        envName: "production",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.WEB_SERVER_NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.WEB_SERVER_DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.PRODUCTION,
         projectName: "monitoring",
         allowAllOutbound: false,
         ingressRules: [
@@ -988,16 +1075,16 @@ describe("SecurityGroupConstruct", () => {
     test("works with multiple security groups in same stack", () => {
       const sg1 = new SecurityGroupConstruct(stack, "SecurityGroup1", {
         vpc,
-        groupName: "sg-1",
-        description: "First security group description",
-        envName: "test",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.SG1_NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.SG1_DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
       });
 
       const sg2 = new SecurityGroupConstruct(stack, "SecurityGroup2", {
         vpc,
-        groupName: "sg-2",
-        description: "Second security group description",
-        envName: "test",
+        groupName: TEST_CONSTANTS.SECURITY_GROUP.SG2_NAME,
+        description: TEST_CONSTANTS.SECURITY_GROUP.SG2_DESCRIPTION,
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
       });
 
       // Allow sg1 to connect to sg2

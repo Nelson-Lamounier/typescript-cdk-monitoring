@@ -431,13 +431,35 @@ test-constructs-security-group: ## Run Security Group construct tests
 	@echo "$(BLUE)Running Security Group construct tests...$(NC)"
 	yarn test tests/unit/constructs/networking/security-group-construct.test.ts
 
-test-constructs-vpc-flow-logs: ## Run VPC Flow Logs construct tests
-	@echo "$(BLUE)Running VPC Flow Logs construct tests...$(NC)"
-	yarn test tests/unit/constructs/networking/vpc-flow-logs-construct.test.ts
+test-constructs-vpc-peering-creation: ## Run VPC Peering creation tests
+	@echo "$(BLUE)Running VPC Peering creation tests...$(NC)"
+	yarn test tests/unit/constructs/networking/vpc-peering/vpc-peering-construct.creation.test.ts
 
-test-constructs-vpc-peering: ## Run VPC Peering construct tests
-	@echo "$(BLUE)Running VPC Peering construct tests...$(NC)"
-	yarn test tests/unit/constructs/networking/vpc-peering-construct.test.ts
+test-constructs-vpc-peering-configuration: ## Run VPC Peering configuration tests
+	@echo "$(BLUE)Running VPC Peering configuration tests...$(NC)"
+	yarn test tests/unit/constructs/networking/vpc-peering/vpc-peering-construct.configuration.test.ts
+
+test-constructs-vpc-peering-resources: ## Run VPC Peering resources tests
+	@echo "$(BLUE)Running VPC Peering resources tests...$(NC)"
+	yarn test tests/unit/constructs/networking/vpc-peering/vpc-peering-construct.resources.test.ts
+
+test-constructs-vpc-peering: test-constructs-vpc-peering-creation test-constructs-vpc-peering-configuration test-constructs-vpc-peering-resources ## Run all VPC Peering construct tests
+	@echo "$(GREEN)All VPC Peering construct tests completed$(NC)"
+
+test-constructs-vpc-flow-logs-creation: ## Run VPC Flow Logs creation tests
+	@echo "$(BLUE)Running VPC Flow Logs creation tests...$(NC)"
+	yarn test tests/unit/constructs/networking/vpc-flow-logs/vpc-flow-logs-construct.creation.test.ts
+
+test-constructs-vpc-flow-logs-configuration: ## Run VPC Flow Logs configuration tests
+	@echo "$(BLUE)Running VPC Flow Logs configuration tests...$(NC)"
+	yarn test tests/unit/constructs/networking/vpc-flow-logs/vpc-flow-logs-construct.configuration.test.ts
+
+test-constructs-vpc-flow-logs-removal-policy: ## Run VPC Flow Logs removal policy tests
+	@echo "$(BLUE)Running VPC Flow Logs removal policy tests...$(NC)"
+	yarn test tests/unit/constructs/networking/vpc-flow-logs/vpc-flow-logs-construct.removal-policy.test.ts
+
+test-constructs-vpc-flow-logs: test-constructs-vpc-flow-logs-creation test-constructs-vpc-flow-logs-configuration test-constructs-vpc-flow-logs-removal-policy ## Run all VPC Flow Logs construct tests
+	@echo "$(GREEN)All VPC Flow Logs construct tests completed$(NC)"
 
 test-constructs-networking: test-constructs-alb-listener test-constructs-alb-target-group test-constructs-security-group test-constructs-vpc-flow-logs test-constructs-vpc-peering ## Run all networking construct tests
 	@echo "$(GREEN)All networking construct tests completed$(NC)"

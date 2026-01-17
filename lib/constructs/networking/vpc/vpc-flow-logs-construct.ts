@@ -95,6 +95,20 @@ export class VpcFlowLogsConstruct extends Construct {
       maxAggregationInterval,
     } = props;
 
+    // ========================================
+    // Input Validation (must happen first)
+    // ========================================
+
+    // Validate VPC
+    if (!vpc) {
+      throw new Error("VPC is required for VpcFlowLogsConstruct");
+    }
+
+    // Validate environment name
+    if (!envName || envName.trim().length === 0) {
+      throw new Error("Environment name (envName) is required");
+    }
+
     // Environment-aware removal policy
     // Production: RETAIN (compliance, auditing)
     // Development: DESTROY (cost optimization)
