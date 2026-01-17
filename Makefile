@@ -483,7 +483,42 @@ test-constructs-grafana-datasource: ## Run Grafana datasource tests
 test-constructs-grafana: test-constructs-grafana-creation test-constructs-grafana-launch-type test-constructs-grafana-service test-constructs-grafana-datasource ## Run all Grafana construct tests
 	@echo "$(GREEN)All Grafana construct tests completed$(NC)"
 
-test-constructs: test-constructs-ecs test-constructs-networking test-constructs-grafana ## Run all construct tests
+test-constructs-prometheus-creation: ## Run Prometheus creation tests
+	@echo "$(BLUE)Running Prometheus creation tests...$(NC)"
+	yarn test tests/unit/constructs/services/monitoring/prometheus/prometheus-construct.creation.test.ts
+
+test-constructs-prometheus-launch-type: ## Run Prometheus launch type tests
+	@echo "$(BLUE)Running Prometheus launch type tests...$(NC)"
+	yarn test tests/unit/constructs/services/monitoring/prometheus/prometheus-construct.launch-type.test.ts
+
+test-constructs-prometheus-volumes: ## Run Prometheus volumes tests
+	@echo "$(BLUE)Running Prometheus volumes tests...$(NC)"
+	yarn test tests/unit/constructs/services/monitoring/prometheus/prometheus-construct.volumes.test.ts
+
+test-constructs-prometheus-service: ## Run Prometheus service configuration tests
+	@echo "$(BLUE)Running Prometheus service configuration tests...$(NC)"
+	yarn test tests/unit/constructs/services/monitoring/prometheus/prometheus-construct.service.test.ts
+
+test-constructs-prometheus-container: ## Run Prometheus container tests
+	@echo "$(BLUE)Running Prometheus container tests...$(NC)"
+	yarn test tests/unit/constructs/services/monitoring/prometheus/prometheus-construct.container.test.ts
+
+test-constructs-prometheus-alertmanager: ## Run Prometheus Alertmanager tests
+	@echo "$(BLUE)Running Prometheus Alertmanager tests...$(NC)"
+	yarn test tests/unit/constructs/services/monitoring/prometheus/prometheus-construct.alertmanager.test.ts
+
+test-constructs-prometheus-config: ## Run Prometheus configuration tests
+	@echo "$(BLUE)Running Prometheus configuration tests...$(NC)"
+	yarn test tests/unit/constructs/services/monitoring/prometheus/prometheus-construct.config.test.ts
+
+test-constructs-prometheus-validation: ## Run Prometheus validation tests
+	@echo "$(BLUE)Running Prometheus validation tests...$(NC)"
+	yarn test tests/unit/constructs/services/monitoring/prometheus/prometheus-construct.validation.test.ts
+
+test-constructs-prometheus: test-constructs-prometheus-creation test-constructs-prometheus-launch-type test-constructs-prometheus-volumes test-constructs-prometheus-service test-constructs-prometheus-container test-constructs-prometheus-alertmanager test-constructs-prometheus-config test-constructs-prometheus-validation ## Run all Prometheus construct tests
+	@echo "$(GREEN)All Prometheus construct tests completed$(NC)"
+
+test-constructs: test-constructs-ecs test-constructs-networking test-constructs-grafana test-constructs-prometheus ## Run all construct tests
 	@echo "$(GREEN)All construct tests completed$(NC)"
 
 # ============================================================================
