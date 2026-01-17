@@ -2,6 +2,7 @@
 
 import * as cdk from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
+
 import { VpcConstruct } from "../../../../../lib/constructs/networking/vpc/vpc-construct";
 import { VpcFlowLogsConstruct } from "../../../../../lib/constructs/networking/vpc/vpc-flow-logs-construct";
 import { TEST_CONFIG, BASE_TEST_CONSTANTS } from "../../../utils/stack-test-utils";
@@ -76,7 +77,6 @@ export const TEST_CONSTANTS = {
     RESOURCE_TYPE: "VpcFlowLogs",
   },
   IAM: {
-    ...BASE_TEST_CONSTANTS.IAM,
     SERVICE_PRINCIPAL: "vpc-flow-logs.amazonaws.com",
     KMS_ACTIONS: {
       DECRYPT: "kms:Decrypt",
