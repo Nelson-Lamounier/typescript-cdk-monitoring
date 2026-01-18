@@ -1,38 +1,41 @@
 # @format
 
-# .github/actions/deploy-cdk-stack/action.yml // test
 name: "Deploy CDK Stack"
-description: "Deploys a CDK stack with validation and error handling"
+description: "Simplified CDK stack deployment with inline validation and flexible context"
 
 inputs:
   stack-name:
-    description: "Name of the CDK stack to deploy"
+    description: "Name of the CDK stack to deploy (should contain project context)"
     required: true
   environment:
-    description: "Environment (pipeline, development, production)"
+    description: "Target environment (development, staging, production)"
     required: true
-  project-name:
-    description: "Project name for multi-project infrastructure"
-    required: false
-    default: "monitoring"
   aws-account-id:
-    description: "AWS Account ID"
+    description: "Target AWS Account ID"
     required: true
   aws-region:
     description: "AWS Region"
     required: true
-  dev-vpc-id:
-    description: "Development VPC ID (optional)"
+  additional-context:
+    description: "Additional CDK context as JSON (e.g., '{\"devVpcId\":\"vpc-123\",\"devAccountId\":\"123456789012\"}')"
     required: false
-    default: ""
-  dev-account-id:
-    description: "Development Account ID (optional)"
-    required: false
-    default: ""
+    default: "{}"
   additional-args:
-    description: "Additional CDK deploy arguments"
+    description: "Additional CDK deploy arguments (excluding --require-approval)"
     required: false
-    default: "--require-approval never"
+    default: ""
+  require-approval:
+    description: "CDK approval requirement (never, any-change, broadening)"
+    required: false
+    default: "never"
+  verify-bootstrap:
+    description: "Verify CDK bootstrap before deployment"
+    required: false
+    default: "false"
+  outputs-directory:
+    description: "Directory to save stack outputs (optional)"
+    required: false
+    default: ""
 
 outputs:
   deployment-status:
@@ -40,48 +43,312 @@ outputs:
     value: ${{ steps.deploy.outputs.status }}
   stack-outputs:
     description: "CloudFormation stack outputs (JSON)"
-    value: ${{ steps.deploy.outputs.stack_outputs }}
+    value: ${{ steps.outputs.outputs.stack_outputs }}
+  outputs-file:
+    description: "Path to saved outputs file (if outputs-directory specified)"
+    value: ${{ steps.save-outputs.outputs.file_path }}
 
 runs:
   using: "composite"
   steps:
-    - name: Validate Environment
+    - name: Validate Inputs
       shell: bash
       run: |
-        npx tsx scripts/deployment/validate-environment.ts \
-          --stack-name "${{ inputs.stack-name }}" \
-          --environment "${{ inputs.environment }}" \
-          --project-name "${{ inputs.project-name }}" \
-          --aws-account-id "${{ inputs.aws-account-id }}" \
-          --aws-region "${{ inputs.aws-region }}" \
-          --dev-vpc-id "${{ inputs.dev-vpc-id }}" \
-          --dev-account-id "${{ inputs.dev-account-id }}"
+        echo "Validating deployment inputs..."
+        echo ""
+        
+        # Validate stack name
+        if [ -z "${{ inputs.stack-name }}" ]; then
+          echo "ERROR: stack-name is required"
+          exit 1
+        fi
+        
+        # Validate environment
+        VALID_ENVIRONMENTS="development staging production"
+        if ! echo "$VALID_ENVIRONMENTS" | grep -qw "${{ inputs.environment }}"; then
+          echo "ERROR: Invalid environment: ${{ inputs.environment }}"
+          echo "Valid environments: $VALID_ENVIRONMENTS"
+          echo ""
+          echo "Note: This action is for deploying to target environments."
+          echo "For CI/CD pipeline validation, use CDK synth directly."
+          exit 1
+        fi
+        
+        # Validate AWS account ID format
+        if ! [[ "${{ inputs.aws-account-id }}" =~ ^[0-9]{12}$ ]]; then
+          echo "ERROR: Invalid AWS account ID format: ${{ inputs.aws-account-id }}"
+          echo "Expected: 12-digit number"
+          exit 1
+        fi
+        
+        # Validate AWS region format
+        if ! [[ "${{ inputs.aws-region }}" =~ ^[a-z]{2}-[a-z]+-[0-9]{1}$ ]]; then
+          echo "ERROR: Invalid AWS region format: ${{ inputs.aws-region }}"
+          echo "Expected format: eu-west-1, us-east-1, etc."
+          exit 1
+        fi
+        
+        # Validate additional context is valid JSON
+        if ! echo '${{ inputs.additional-context }}' | jq empty 2>/dev/null; then
+          echo "ERROR: additional-context is not valid JSON"
+          echo "Provided: ${{ inputs.additional-context }}"
+          exit 1
+        fi
+        
+        # Validate require-approval value
+        VALID_APPROVALS="never any-change broadening"
+        if ! echo "$VALID_APPROVALS" | grep -qw "${{ inputs.require-approval }}"; then
+          echo "ERROR: Invalid require-approval: ${{ inputs.require-approval }}"
+          echo "Valid values: $VALID_APPROVALS"
+          exit 1
+        fi
+        
+        echo "✓ Input validation passed"
+        echo ""
+        echo "Deployment Configuration:"
+        echo "  Stack Name: ${{ inputs.stack-name }}"
+        echo "  Environment: ${{ inputs.environment }}"
+        echo "  Account ID: ***${LAST_FOUR}"
+        echo "  Region: ${{ inputs.aws-region }}"
+        echo "  Approval: ${{ inputs.require-approval }}"
+        
+        CONTEXT_COUNT=$(echo '${{ inputs.additional-context }}' | jq 'length')
+        if [ "$CONTEXT_COUNT" -gt 0 ]; then
+          echo "  Additional Context: $CONTEXT_COUNT key(s)"
+          echo '${{ inputs.additional-context }}' | jq -r 'to_entries[] | "    \(.key): \(.value)"'
+        fi
+      env:
+        LAST_FOUR: ${{ inputs.aws-account-id }}
+
+    - name: Verify AWS Credentials
+      shell: bash
+      run: |
+        echo "Verifying AWS credentials..."
+        
+        CURRENT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text 2>&1)
+        
+        if [ $? -ne 0 ]; then
+          echo "ERROR: Cannot retrieve AWS account information"
+          echo "AWS CLI output: $CURRENT_ACCOUNT"
+          echo ""
+          echo "Troubleshooting:"
+          echo "  1. Verify AWS credentials are configured"
+          echo "  2. Check IAM role trust policy allows GitHub OIDC"
+          echo "  3. Ensure role has sts:GetCallerIdentity permission"
+          exit 1
+        fi
+        
+        echo "✓ Authenticated to AWS account: ***${CURRENT_ACCOUNT: -4}"
+        
+        if [ "$CURRENT_ACCOUNT" != "${{ inputs.aws-account-id }}" ]; then
+          echo ""
+          ACCOUNT_LAST4="${{ inputs.aws-account-id }}"
+          echo "WARNING: Current account (***${CURRENT_ACCOUNT: -4}) differs from target (***${ACCOUNT_LAST4: -4})"
+          echo "This may be expected for cross-account deployments via AssumeRole"
+        fi
 
     - name: Verify CDK Bootstrap
+      if: inputs.verify-bootstrap == 'true'
       shell: bash
       run: |
-        # Verify bootstrap - CDK can verify cross-account bootstrap if stacks are defined with target account
-        # This works because CDK uses the bootstrap deploy role which has CloudFormation read permissions
-        make verify-bootstrap \
-          AWS_ACCOUNT_ID="${{ inputs.aws-account-id }}" \
-          ENVIRONMENT="${{ inputs.environment }}" \
-          AWS_REGION="${{ inputs.aws-region }}" \
-          PROJECT_NAME="${{ inputs.project-name }}"
+        echo "Verifying CDK bootstrap in target account..."
+        echo "Account: ***${ACCOUNT_ID: -4}"
+        echo "Region: ${{ inputs.aws-region }}"
+        echo ""
+        
+        BOOTSTRAP_STACK="CDKToolkit"
+        
+        STACK_STATUS=$(aws cloudformation describe-stacks \
+          --stack-name "$BOOTSTRAP_STACK" \
+          --region "${{ inputs.aws-region }}" \
+          --query 'Stacks[0].StackStatus' \
+          --output text 2>&1)
+        
+        if [ $? -ne 0 ]; then
+          echo "ERROR: CDK bootstrap stack not found"
+          echo ""
+          echo "Please bootstrap the CDK environment:"
+          echo "  cdk bootstrap aws://${{ inputs.aws-account-id }}/${{ inputs.aws-region }}"
+          exit 1
+        fi
+        
+        if [[ "$STACK_STATUS" != *"COMPLETE"* ]]; then
+          echo "ERROR: CDK bootstrap stack is not in a healthy state"
+          echo "Status: $STACK_STATUS"
+          exit 1
+        fi
+        
+        echo "✓ CDK bootstrap verified: $STACK_STATUS"
+      env:
+        ACCOUNT_ID: ${{ inputs.aws-account-id }}
+
+    - name: Build CDK Context
+      id: context
+      shell: bash
+      run: |
+        echo "Building CDK context..."
+        
+        # Start with base context
+        CONTEXT_ARGS=""
+        CONTEXT_ARGS="$CONTEXT_ARGS --context environment=${{ inputs.environment }}"
+        
+        # Parse additional context and append
+        ADDITIONAL_CONTEXT='${{ inputs.additional-context }}'
+        
+        if [ "$ADDITIONAL_CONTEXT" != "{}" ]; then
+          echo "Processing additional context..."
+          while IFS= read -r line; do
+            KEY=$(echo "$line" | jq -r '.key')
+            VALUE=$(echo "$line" | jq -r '.value')
+            CONTEXT_ARGS="$CONTEXT_ARGS --context $KEY=$VALUE"
+            echo "  Added context: $KEY=$VALUE"
+          done < <(echo "$ADDITIONAL_CONTEXT" | jq -c 'to_entries[]')
+        fi
+        
+        # Export for next step
+        echo "$CONTEXT_ARGS" > /tmp/cdk-context-args.txt
+        echo "context_args=$CONTEXT_ARGS" >> $GITHUB_OUTPUT
+        
+        echo ""
+        echo "✓ Context built successfully"
 
     - name: Deploy Stack
       id: deploy
       shell: bash
       run: |
-        npx tsx scripts/deployment/deploy-stack.ts \
-          --stack-name "${{ inputs.stack-name }}" \
-          --environment "${{ inputs.environment }}" \
-          --project-name "${{ inputs.project-name }}" \
-          --aws-account-id "${{ inputs.aws-account-id }}" \
-          --aws-region "${{ inputs.aws-region }}" \
-          --dev-vpc-id "${{ inputs.dev-vpc-id }}" \
-          --dev-account-id "${{ inputs.dev-account-id }}" \
-          --additional-args "${{ inputs.additional-args }}"
+        echo "Deploying CDK stack..."
+        echo "Stack: ${{ inputs.stack-name }}"
+        echo ""
+        
+        # Record start time
+        START_TIME=$(date +%s)
+        
+        # Read context args
+        CONTEXT_ARGS=$(cat /tmp/cdk-context-args.txt)
+        
+        # Build deploy command
+        DEPLOY_CMD="npx cdk deploy ${{ inputs.stack-name }}"
+        DEPLOY_CMD="$DEPLOY_CMD $CONTEXT_ARGS"
+        DEPLOY_CMD="$DEPLOY_CMD --require-approval ${{ inputs.require-approval }}"
+        
+        # Add additional args if provided
+        if [ -n "${{ inputs.additional-args }}" ]; then
+          DEPLOY_CMD="$DEPLOY_CMD ${{ inputs.additional-args }}"
+        fi
+        
+        echo "Executing: $DEPLOY_CMD"
+        echo ""
+        
+        # Execute deployment
+        if eval "$DEPLOY_CMD"; then
+          END_TIME=$(date +%s)
+          DURATION=$((END_TIME - START_TIME))
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "duration=$DURATION" >> $GITHUB_OUTPUT
+          echo ""
+          echo "✓ Stack deployment successful (${DURATION}s)"
+        else
+          EXIT_CODE=$?
+          END_TIME=$(date +%s)
+          DURATION=$((END_TIME - START_TIME))
+          echo "status=failure" >> $GITHUB_OUTPUT
+          echo "duration=$DURATION" >> $GITHUB_OUTPUT
+          echo ""
+          echo "ERROR: Stack deployment failed (exit code: $EXIT_CODE, duration: ${DURATION}s)"
+          exit $EXIT_CODE
+        fi
       env:
-        # Set GitHub Actions output via script
-        GITHUB_OUTPUT: ${{ github.output }}
-        GITHUB_ACTIONS: "true"
+        CDK_ENVIRONMENT: ${{ inputs.environment }}
+        AWS_ACCOUNT_ID: ${{ inputs.aws-account-id }}
+        AWS_REGION: ${{ inputs.aws-region }}
+
+    - name: Retrieve Stack Outputs
+      id: outputs
+      if: steps.deploy.outputs.status == 'success'
+      shell: bash
+      run: |
+        echo "Retrieving CloudFormation stack outputs..."
+        
+        STACK_OUTPUTS=$(aws cloudformation describe-stacks \
+          --stack-name "${{ inputs.stack-name }}" \
+          --region "${{ inputs.aws-region }}" \
+          --query 'Stacks[0].Outputs' \
+          --output json 2>&1)
+        
+        if [ $? -eq 0 ]; then
+          # Escape output for GitHub Actions
+          ESCAPED_OUTPUTS=$(echo "$STACK_OUTPUTS" | jq -c '.')
+          echo "stack_outputs=$ESCAPED_OUTPUTS" >> $GITHUB_OUTPUT
+          
+          OUTPUT_COUNT=$(echo "$STACK_OUTPUTS" | jq 'length')
+          echo "✓ Retrieved $OUTPUT_COUNT stack output(s)"
+          
+          if [ "$OUTPUT_COUNT" -gt 0 ]; then
+            echo ""
+            echo "Stack Outputs:"
+            echo "$STACK_OUTPUTS" | jq -r '.[] | "  \(.OutputKey): \(.OutputValue)"'
+          fi
+        else
+          echo "WARNING: Could not retrieve stack outputs"
+          echo "stack_outputs=[]" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Save Outputs to File
+      id: save-outputs
+      if: steps.deploy.outputs.status == 'success' && inputs.outputs-directory != ''
+      shell: bash
+      run: |
+        echo "Saving stack outputs to file..."
+        
+        OUTPUTS_DIR="${{ inputs.outputs-directory }}"
+        mkdir -p "$OUTPUTS_DIR"
+        
+        # Sanitise stack name for filename
+        STACK_NAME_SAFE=$(echo "${{ inputs.stack-name }}" | tr '/' '-' | tr ':' '-')
+        OUTPUT_FILE="$OUTPUTS_DIR/${STACK_NAME_SAFE}-outputs.json"
+        
+        # Save outputs
+        echo '${{ steps.outputs.outputs.stack_outputs }}' | jq '.' > "$OUTPUT_FILE"
+        
+        echo "file_path=$OUTPUT_FILE" >> $GITHUB_OUTPUT
+        echo "✓ Outputs saved to: $OUTPUT_FILE"
+
+    - name: Generate Deployment Summary
+      if: always()
+      shell: bash
+      run: |
+        echo "## CDK Stack Deployment" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Stack**: \`${{ inputs.stack-name }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "**Environment**: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Region**: ${{ inputs.aws-region }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Account**: \`***${ACCOUNT_LAST4}\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ steps.deploy.outputs.status }}" = "success" ]; then
+          echo "### Status: ✓ Success" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Deployment completed in ${{ steps.deploy.outputs.duration }}s" >> $GITHUB_STEP_SUMMARY
+          
+          # Add outputs if available
+          if [ "${{ steps.outputs.outputs.stack_outputs }}" != "[]" ] && [ -n "${{ steps.outputs.outputs.stack_outputs }}" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Stack Outputs" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '${{ steps.outputs.outputs.stack_outputs }}' | jq -r '.[] | "- **\(.OutputKey)**: `\(.OutputValue)`"' >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Add outputs file location if saved
+          if [ -n "${{ steps.save-outputs.outputs.file_path }}" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Outputs saved to: \`${{ steps.save-outputs.outputs.file_path }}\`" >> $GITHUB_STEP_SUMMARY
+          fi
+        else
+          echo "### Status: ✗ Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Deployment failed after ${{ steps.deploy.outputs.duration }}s" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check deployment logs for details." >> $GITHUB_STEP_SUMMARY
+        fi
+      env:
+        ACCOUNT_LAST4: ${{ inputs.aws-account-id }}

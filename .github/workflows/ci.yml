@@ -23,39 +23,18 @@ jobs:
     name: Setup Dependencies
     runs-on: ubuntu-latest
     outputs:
-      cache-key: ${{ steps.cache-key.outputs.key }}
+      cache-key: ${{ steps.setup-node.outputs.cache-key }}
       node-version: ${{ env.NODE_VERSION }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Generate Dependency Cache Key
-        id: cache-key
-        run: |
-          HASH=$(cat yarn.lock package.json | sha256sum | cut -d' ' -f1)
-          echo "key=deps-${{ runner.os }}-node${{ env.NODE_VERSION }}-$HASH" >> $GITHUB_OUTPUT
-
-      - name: Cache Dependencies
-        id: cache-deps
-        uses: actions/cache@v4
-        with:
-          path: |
-            node_modules
-            .yarn/cache
-            .yarn/install-state.gz
-          key: ${{ steps.cache-key.outputs.key }}
-          restore-keys: |
-            deps-${{ runner.os }}-node${{ env.NODE_VERSION }}-
-
-      - name: Setup Infrastructure
-        uses: ./.github/actions/setup-infrastructure
+      - name: Setup Node.js and Yarn
+        id: setup-node
+        uses: ./.github/actions/setup-node-yarn
         with:
           node-version: ${{ env.NODE_VERSION }}
-
-      - name: Install Dependencies
-        if: steps.cache-deps.outputs.cache-hit != 'true'
-        run: make install
 
   # ============================================================================
   # Code Quality Jobs (Run in Parallel - Non-blocking)
@@ -70,19 +49,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore Dependencies Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            node_modules
-            .yarn/cache
-            .yarn/install-state.gz
-          key: ${{ needs.setup.outputs.cache-key }}
-          restore-keys: |
-            deps-${{ runner.os }}-node${{ needs.setup.outputs.node-version }}-
-
-      - name: Setup Infrastructure
-        uses: ./.github/actions/setup-infrastructure
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
         with:
           node-version: ${{ needs.setup.outputs.node-version }}
 
@@ -99,19 +67,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore Dependencies Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            node_modules
-            .yarn/cache
-            .yarn/install-state.gz
-          key: ${{ needs.setup.outputs.cache-key }}
-          restore-keys: |
-            deps-${{ runner.os }}-node${{ needs.setup.outputs.node-version }}-
-
-      - name: Setup Infrastructure
-        uses: ./.github/actions/setup-infrastructure
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
         with:
           node-version: ${{ needs.setup.outputs.node-version }}
 
@@ -145,19 +102,8 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
-      - name: Restore Dependencies Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            node_modules
-            .yarn/cache
-            .yarn/install-state.gz
-          key: ${{ needs.setup.outputs.cache-key }}
-          restore-keys: |
-            deps-${{ runner.os }}-node${{ needs.setup.outputs.node-version }}-
-
-      - name: Setup Infrastructure
-        uses: ./.github/actions/setup-infrastructure
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
         with:
           node-version: ${{ needs.setup.outputs.node-version }}
 
@@ -194,19 +140,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore Dependencies Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            node_modules
-            .yarn/cache
-            .yarn/install-state.gz
-          key: ${{ needs.setup.outputs.cache-key }}
-          restore-keys: |
-            deps-${{ runner.os }}-node${{ needs.setup.outputs.node-version }}-
-
-      - name: Setup Infrastructure
-        uses: ./.github/actions/setup-infrastructure
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
         with:
           node-version: ${{ needs.setup.outputs.node-version }}
 
@@ -234,19 +169,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore Dependencies Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            node_modules
-            .yarn/cache
-            .yarn/install-state.gz
-          key: ${{ needs.setup.outputs.cache-key }}
-          restore-keys: |
-            deps-${{ runner.os }}-node${{ needs.setup.outputs.node-version }}-
-
-      - name: Setup Infrastructure
-        uses: ./.github/actions/setup-infrastructure
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
         with:
           node-version: ${{ needs.setup.outputs.node-version }}
 
@@ -277,19 +201,8 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
-      - name: Restore Dependencies Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            node_modules
-            .yarn/cache
-            .yarn/install-state.gz
-          key: ${{ needs.setup.outputs.cache-key }}
-          restore-keys: |
-            deps-${{ runner.os }}-node${{ needs.setup.outputs.node-version }}-
-
-      - name: Setup Infrastructure
-        uses: ./.github/actions/setup-infrastructure
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
         with:
           node-version: ${{ needs.setup.outputs.node-version }}
 
@@ -324,7 +237,7 @@ jobs:
             git push origin HEAD:${{ github.ref_name }} || echo "Push failed - may need manual intervention"
           else
             echo "Skipping push on branch ${{ github.ref }}"
-            echo "⚠️ Snapshots updated but not pushed. Please commit manually or merge to main."
+            echo "Snapshots updated but not pushed. Please commit manually or merge to main."
           fi
 
       - name: Run Snapshot Tests
@@ -346,45 +259,15 @@ jobs:
     name: Build TypeScript
     needs: setup
     runs-on: ubuntu-latest
-    outputs:
-      build-cache-key: ${{ steps.build-cache.outputs.key }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore Dependencies Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            node_modules
-            .yarn/cache
-            .yarn/install-state.gz
-          key: ${{ needs.setup.outputs.cache-key }}
-          restore-keys: |
-            deps-${{ runner.os }}-node${{ needs.setup.outputs.node-version }}-
-
-      - name: Setup Infrastructure
-        uses: ./.github/actions/setup-infrastructure
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
         with:
           node-version: ${{ needs.setup.outputs.node-version }}
-
-      - name: Generate Build Cache Key
-        id: build-cache
-        run: |
-          HASH=$(find lib bin -type f \( -name "*.ts" -o -name "*.js" \) -exec sha256sum {} + 2>/dev/null | sha256sum | cut -d' ' -f1)
-          echo "key=build-${{ runner.os }}-$HASH" >> $GITHUB_OUTPUT
-
-      - name: Restore Build Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            dist
-            .turbo
-            cdk.out
-          key: ${{ steps.build-cache.outputs.key }}
-          restore-keys: |
-            build-${{ runner.os }}-
 
       - name: Build TypeScript
         run: make build
@@ -401,47 +284,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore Dependencies Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            node_modules
-            .yarn/cache
-            .yarn/install-state.gz
-          key: ${{ needs.setup.outputs.cache-key }}
-          restore-keys: |
-            deps-${{ runner.os }}-node${{ needs.setup.outputs.node-version }}-
-
-      - name: Setup Infrastructure
-        uses: ./.github/actions/setup-infrastructure
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
         with:
           node-version: ${{ needs.setup.outputs.node-version }}
-
-      - name: Restore Build Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            dist
-            .turbo
-            cdk.out
-          key: ${{ needs.build.outputs.build-cache-key }}
-          restore-keys: |
-            build-${{ runner.os }}-
 
       - name: Synthesize CDK Stacks
         run: |
           echo "Listing CDK stacks..."
-          CDK_ENVIRONMENT=pipeline npx cdk list --context environment=pipeline
+          npx cdk list --all
           echo "Synthesizing CDK stacks..."
-          CDK_ENVIRONMENT=pipeline npx cdk synth --context environment=pipeline --quiet
+          npx cdk synth --all --quiet
         env:
           AWS_REGION: eu-west-1
-          CDK_ENVIRONMENT: pipeline
 
-      - name: Upload CDK Outputs
+      - name: Upload CDK Synthesis
         uses: actions/upload-artifact@v4
         with:
-          name: cdk-outputs
+          name: cdk-synthesis
           path: cdk.out/
           retention-days: 7
           if-no-files-found: ignore
@@ -535,12 +395,12 @@ jobs:
           CRITICAL_FAILED=false
           if [[ "${{ needs.build.result }}" == "failure" ]]; then
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "❌ Build failed" >> $GITHUB_STEP_SUMMARY
+            echo "Build failed" >> $GITHUB_STEP_SUMMARY
             CRITICAL_FAILED=true
           fi
           if [[ "${{ needs.validate-cdk.result }}" == "failure" ]]; then
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "❌ CDK Validation failed" >> $GITHUB_STEP_SUMMARY
+            echo "CDK Validation failed" >> $GITHUB_STEP_SUMMARY
             CRITICAL_FAILED=true
           fi
 

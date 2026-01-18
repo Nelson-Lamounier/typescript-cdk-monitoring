@@ -1,0 +1,462 @@
+# @format
+
+name: Deploy Monitoring to Development
+
+on:
+  push:
+    branches:
+      - feature/pipeline
+    paths:
+      - "lib/stacks/**"
+      - "bin/**"
+      - "config/**"
+      - "handlers/**"
+      - "lambda/**"
+      - ".github/workflows/deploy-monitoring-dev.yml"
+      - ".github/actions/**"
+  workflow_dispatch:
+    inputs:
+      skip_verification:
+        description: "Skip post-deployment verification (use for hotfixes only)"
+        type: boolean
+        default: false
+
+env:
+  NODE_VERSION: "22"
+  AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-1' }}
+  ENVIRONMENT: "development"
+  PROJECT_NAME: "monitoring"
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-monitoring-development-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ===========================================================================
+  # Setup & Build
+  # ===========================================================================
+  setup:
+    name: Setup & Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      aws-account-id: ${{ steps.account-id.outputs.account_id }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Get AWS Account ID
+        id: account-id
+        run: |
+          ACCOUNT_ID="${{ vars.AWS_ACCOUNT_ID_DEV }}"
+          if [ -z "$ACCOUNT_ID" ]; then
+            echo "ERROR: AWS_ACCOUNT_ID_DEV not configured in repository variables"
+            echo "Configure in: Settings → Secrets and variables → Actions → Variables"
+            exit 1
+          fi
+          
+          # Validate format
+          if ! [[ "$ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+            echo "ERROR: Invalid AWS account ID format: $ACCOUNT_ID"
+            exit 1
+          fi
+          
+          echo "account_id=$ACCOUNT_ID" >> $GITHUB_OUTPUT
+          echo "Deploying to account: ***${ACCOUNT_ID: -4}"
+
+      - name: Build TypeScript
+        run: yarn build
+
+  # ===========================================================================
+  # Deploy Networking Stack
+  # ===========================================================================
+  deploy-networking:
+    name: Deploy Networking
+    needs: setup
+    uses: ./.github/workflows/_deploy-stack.yml
+    with:
+      stack-name: "development-Networking"
+      environment: "development"
+      aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
+      aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
+      require-approval: "never"
+      verify-bootstrap: false
+      outputs-directory: ".deployment-outputs"
+    secrets:
+      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE }}
+
+  # ===========================================================================
+  # Verify Networking Stack
+  # ===========================================================================
+  verify-networking:
+    name: Verify Networking
+    needs: [setup, deploy-networking]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: inputs.skip_verification != true
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Verify Networking Stack
+        run: |
+          echo "Verifying Networking Stack deployment..."
+          make verify-networking \
+            ENVIRONMENT=${{ env.ENVIRONMENT }} \
+            AWS_REGION=${{ env.AWS_REGION }}
+
+  # ===========================================================================
+  # Deploy EFS Stack
+  # ===========================================================================
+  deploy-efs:
+    name: Deploy EFS
+    needs: [setup, deploy-networking, verify-networking]
+    if: always() && needs.deploy-networking.result == 'success' && (needs.verify-networking.result == 'success' || needs.verify-networking.result == 'skipped')
+    uses: ./.github/workflows/_deploy-stack.yml
+    with:
+      stack-name: "development-MonitoringEfs"
+      environment: "development"
+      aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
+      aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
+      require-approval: "never"
+      outputs-directory: ".deployment-outputs"
+    secrets:
+      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE }}
+
+  # ===========================================================================
+  # Verify EFS Stack
+  # ===========================================================================
+  verify-efs:
+    name: Verify EFS
+    needs: [setup, deploy-efs]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: always() && needs.deploy-efs.result == 'success' && inputs.skip_verification != true
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Verify EFS Stack
+        run: |
+          echo "Verifying EFS Stack deployment..."
+          make verify-efs \
+            ENVIRONMENT=${{ env.ENVIRONMENT }} \
+            AWS_REGION=${{ env.AWS_REGION }}
+
+  # ===========================================================================
+  # Deploy Infrastructure Stack
+  # ===========================================================================
+  deploy-infra:
+    name: Deploy Infrastructure
+    needs: [setup, deploy-efs, verify-efs]
+    if: always() && needs.deploy-efs.result == 'success' && (needs.verify-efs.result == 'success' || needs.verify-efs.result == 'skipped')
+    uses: ./.github/workflows/_deploy-stack.yml
+    with:
+      stack-name: "development-MonitoringInfra"
+      environment: "development"
+      aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
+      aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
+      require-approval: "never"
+      outputs-directory: ".deployment-outputs"
+    secrets:
+      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE }}
+
+  # ===========================================================================
+  # Verify Infrastructure Stack
+  # ===========================================================================
+  verify-infra:
+    name: Verify Infrastructure
+    needs: [setup, deploy-infra]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: always() && needs.deploy-infra.result == 'success' && inputs.skip_verification != true
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Verify Infrastructure Stack
+        run: |
+          echo "Verifying Infrastructure Stack deployment..."
+          make verify-infra \
+            ENVIRONMENT=${{ env.ENVIRONMENT }} \
+            AWS_REGION=${{ env.AWS_REGION }}
+
+  # ===========================================================================
+  # Deploy Service Stack
+  # ===========================================================================
+  deploy-service:
+    name: Deploy Service
+    needs: [setup, deploy-infra, verify-infra]
+    if: always() && needs.deploy-infra.result == 'success' && (needs.verify-infra.result == 'success' || needs.verify-infra.result == 'skipped')
+    uses: ./.github/workflows/_deploy-stack.yml
+    with:
+      stack-name: "development-MonitoringService"
+      environment: "development"
+      aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
+      aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
+      require-approval: "never"
+      outputs-directory: ".deployment-outputs"
+    secrets:
+      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE }}
+
+  # ===========================================================================
+  # Verify Service Stack & Connectivity
+  # ===========================================================================
+  verify-service:
+    name: Verify Service
+    needs: [setup, deploy-service]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: always() && needs.deploy-service.result == 'success' && inputs.skip_verification != true
+    outputs:
+      alb-dns: ${{ steps.endpoints.outputs.alb_dns }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Verify Service Stack
+        run: |
+          echo "Verifying Service Stack deployment..."
+          make verify-service \
+            ENVIRONMENT=${{ env.ENVIRONMENT }} \
+            AWS_REGION=${{ env.AWS_REGION }}
+
+      - name: Verify Grafana-Prometheus Connectivity
+        run: |
+          echo "Verifying Grafana-Prometheus connectivity..."
+          make verify-grafana-prometheus \
+            ENVIRONMENT=${{ env.ENVIRONMENT }} \
+            AWS_REGION=${{ env.AWS_REGION }}
+
+      - name: Get Service Endpoints
+        id: endpoints
+        run: |
+          STACK_NAME="development-MonitoringInfra"
+          
+          ALB_DNS=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query 'Stacks[0].Outputs[?OutputKey==`LoadBalancerDns`].OutputValue' \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -n "$ALB_DNS" ] && [ "$ALB_DNS" != "None" ]; then
+            echo "alb_dns=$ALB_DNS" >> $GITHUB_OUTPUT
+            echo "Load Balancer DNS: $ALB_DNS"
+          else
+            echo "WARNING: Could not retrieve ALB DNS"
+          fi
+
+      - name: Smoke Test Endpoints
+        if: steps.endpoints.outputs.alb_dns != ''
+        run: |
+          ALB_DNS="${{ steps.endpoints.outputs.alb_dns }}"
+          
+          echo "Running smoke tests against endpoints..."
+          
+          # Test Grafana health endpoint
+          echo "Testing Grafana health..."
+          if curl -f -s --max-time 30 "http://${ALB_DNS}/grafana/api/health" | grep -q "ok"; then
+            echo "✓ Grafana is healthy"
+          else
+            echo "WARNING: Grafana health check failed"
+          fi
+          
+          # Test Prometheus metrics endpoint
+          echo "Testing Prometheus..."
+          if curl -f -s --max-time 30 "http://${ALB_DNS}/prometheus/-/healthy" | grep -q "Prometheus"; then
+            echo "✓ Prometheus is healthy"
+          else
+            echo "WARNING: Prometheus health check failed"
+          fi
+
+  # ===========================================================================
+  # Deployment Summary
+  # ===========================================================================
+  deployment-summary:
+    name: Deployment Summary
+    needs:
+      [
+        setup,
+        deploy-networking,
+        verify-networking,
+        deploy-efs,
+        verify-efs,
+        deploy-infra,
+        verify-infra,
+        deploy-service,
+        verify-service,
+      ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+
+    steps:
+      - name: Generate Deployment Summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+          ## Monitoring Infrastructure Deployment - Development
+
+          **Environment**: development
+          **Region**: ${{ env.AWS_REGION }}
+          **Account**: ***${{ needs.setup.outputs.aws-account-id }}
+          **Timestamp**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+
+          ### Deployment Status
+
+          | Stack | Deploy | Verify |
+          |-------|--------|--------|
+          | Networking | ${{ needs.deploy-networking.result }} | ${{ needs.verify-networking.result }} |
+          | EFS | ${{ needs.deploy-efs.result }} | ${{ needs.verify-efs.result }} |
+          | Infrastructure | ${{ needs.deploy-infra.result }} | ${{ needs.verify-infra.result }} |
+          | Service | ${{ needs.deploy-service.result }} | ${{ needs.verify-service.result }} |
+
+          EOF
+          
+          if [ -n "${{ needs.verify-service.outputs.alb-dns }}" ]; then
+            cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+          ### Access Points
+
+          - **Grafana Dashboard**: http://${{ needs.verify-service.outputs.alb-dns }}/grafana
+          - **Prometheus Metrics**: http://${{ needs.verify-service.outputs.alb-dns }}/prometheus
+
+          **Default Credentials**: admin/admin (change immediately after first login)
+
+          EOF
+          fi
+          
+          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+          ### Next Steps
+
+          1. Access Grafana and change default password
+          2. Configure data sources and dashboards
+          3. Verify metrics collection in Prometheus
+          4. Check CloudWatch logs for any errors
+
+          ### Rollback Instructions
+
+          If deployment fails, rollback using:
+          ```bash
+          make rollback ENVIRONMENT=development STACK_NAME=<failed-stack>
+          ```
+
+          EOF
+
+      - name: Check Deployment Status
+        run: |
+          echo "Checking overall deployment status..."
+          
+          FAILED=false
+          
+          # Check deployment results
+          if [[ "${{ needs.deploy-networking.result }}" == "failure" ]]; then
+            echo "ERROR: Networking deployment failed"
+            FAILED=true
+          fi
+          
+          if [[ "${{ needs.deploy-efs.result }}" == "failure" ]]; then
+            echo "ERROR: EFS deployment failed"
+            FAILED=true
+          fi
+          
+          if [[ "${{ needs.deploy-infra.result }}" == "failure" ]]; then
+            echo "ERROR: Infrastructure deployment failed"
+            FAILED=true
+          fi
+          
+          if [[ "${{ needs.deploy-service.result }}" == "failure" ]]; then
+            echo "ERROR: Service deployment failed"
+            FAILED=true
+          fi
+          
+          # Check verification results (only if not skipped)
+          if [[ "${{ inputs.skip_verification }}" != "true" ]]; then
+            if [[ "${{ needs.verify-networking.result }}" == "failure" ]]; then
+              echo "ERROR: Networking verification failed"
+              FAILED=true
+            fi
+            
+            if [[ "${{ needs.verify-efs.result }}" == "failure" ]]; then
+              echo "ERROR: EFS verification failed"
+              FAILED=true
+            fi
+            
+            if [[ "${{ needs.verify-infra.result }}" == "failure" ]]; then
+              echo "ERROR: Infrastructure verification failed"
+              FAILED=true
+            fi
+            
+            if [[ "${{ needs.verify-service.result }}" == "failure" ]]; then
+              echo "ERROR: Service verification failed"
+              FAILED=true
+            fi
+          fi
+          
+          if [[ "$FAILED" == "true" ]]; then
+            echo ""
+            echo "Deployment pipeline failed - check individual job logs"
+            exit 1
+          fi
+          
+          echo ""
+          echo "✓ All deployments and verifications passed successfully"

@@ -1,0 +1,111 @@
+# @format
+
+name: "Setup Node.js with Yarn and Caching"
+description: "Centralised composite action for Node.js, Yarn v4, and dependency caching"
+
+inputs:
+  node-version:
+    description: "Node.js version to use"
+    required: false
+    default: "22"
+  install-dependencies:
+    description: "Whether to install dependencies (default: true)"
+    required: false
+    default: "true"
+  cache-dependency-path:
+    description: "Path to package manager lockfile (default: yarn.lock)"
+    required: false
+    default: "yarn.lock"
+
+outputs:
+  cache-hit:
+    description: "Whether dependency cache was hit"
+    value: ${{ steps.cache-deps.outputs.cache-hit }}
+  cache-key:
+    description: "Dependency cache key used"
+    value: ${{ steps.cache-key.outputs.key }}
+  node-version:
+    description: "Node.js version installed"
+    value: ${{ inputs.node-version }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        # No built-in caching - we handle it explicitly below
+
+    - name: Enable Corepack for Yarn v4
+      shell: bash
+      run: |
+        echo "Enabling Corepack for Yarn v4+ package manager..."
+        corepack enable
+        echo "✓ Corepack enabled"
+
+    - name: Generate Dependency Cache Key
+      id: cache-key
+      shell: bash
+      run: |
+        HASH=$(cat yarn.lock package.json | sha256sum | cut -d' ' -f1)
+        CACHE_KEY="deps-${{ runner.os }}-node${{ inputs.node-version }}-$HASH"
+        echo "key=$CACHE_KEY" >> $GITHUB_OUTPUT
+        echo "Generated cache key: $CACHE_KEY"
+
+    - name: Cache Dependencies
+      id: cache-deps
+      uses: actions/cache@v4
+      with:
+        path: |
+          node_modules
+          .yarn/cache
+          .yarn/unplugged
+          .yarn/install-state.gz
+          .pnp.cjs
+          .pnp.loader.mjs
+        key: ${{ steps.cache-key.outputs.key }}
+        restore-keys: |
+          deps-${{ runner.os }}-node${{ inputs.node-version }}-
+
+    - name: Setup Turbo Cache
+      uses: actions/cache@v4
+      with:
+        path: .turbo
+        key: ${{ runner.os }}-turbo-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-turbo-
+
+    - name: Install Dependencies
+      if: inputs.install-dependencies == 'true'
+      shell: bash
+      run: |
+        if [ "${{ steps.cache-deps.outputs.cache-hit }}" = "true" ]; then
+          echo "Cache hit - running install to ensure binaries are linked..."
+        else
+          echo "Cache miss - installing dependencies..."
+        fi
+        
+        # Always run install to guarantee binaries (like CDK) exist
+        # With Yarn v4 this is fast when cache is warm, and fixes "command not found: cdk"
+        # --immutable ensures lockfile consistency and prevents accidental dependency changes
+        yarn install --immutable
+        
+        echo "✓ Dependencies ready"
+
+    - name: Verify Installation
+      if: inputs.install-dependencies == 'true'
+      shell: bash
+      run: |
+        echo "Verifying installation..."
+        echo "Node version: $(node --version)"
+        echo "Yarn version: $(yarn --version)"
+        echo "NPM version: $(npm --version)"
+        
+        # Verify CDK is available (critical for infrastructure workflows)
+        if command -v cdk &> /dev/null; then
+          echo "CDK version: $(cdk --version)"
+          echo "✓ CDK CLI available"
+        else
+          echo "WARNING: CDK CLI not found in PATH"
+        fi
