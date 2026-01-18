@@ -25,7 +25,6 @@ env:
   NODE_VERSION: "22"
   AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-1' }}
   ENVIRONMENT: "development"
-  PROJECT_NAME: "monitoring"
 
 permissions:
   id-token: write
@@ -43,6 +42,7 @@ jobs:
     name: Setup & Build
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment: development
     outputs:
       aws-account-id: ${{ steps.account-id.outputs.account_id }}
     
@@ -60,14 +60,19 @@ jobs:
         run: |
           ACCOUNT_ID="${{ vars.AWS_ACCOUNT_ID_DEV }}"
           if [ -z "$ACCOUNT_ID" ]; then
-            echo "ERROR: AWS_ACCOUNT_ID_DEV not configured in repository variables"
-            echo "Configure in: Settings → Secrets and variables → Actions → Variables"
+            echo "ERROR: AWS_ACCOUNT_ID_DEV not configured in environment variables"
+            echo "Configure in: Settings → Environments → development → Environment variables"
+            echo ""
+            echo "Required environment variables:"
+            echo "  - AWS_ACCOUNT_ID_DEV: Your AWS account ID (12 digits)"
+            echo ""
             exit 1
           fi
           
           # Validate format
           if ! [[ "$ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
             echo "ERROR: Invalid AWS account ID format: $ACCOUNT_ID"
+            echo "Expected format: 12-digit number (e.g., 123456789012)"
             exit 1
           fi
           
@@ -103,6 +108,7 @@ jobs:
     needs: [setup, deploy-networking]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment: development
     if: inputs.skip_verification != true
     
     steps:
@@ -154,6 +160,7 @@ jobs:
     needs: [setup, deploy-efs]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment: development
     if: always() && needs.deploy-efs.result == 'success' && inputs.skip_verification != true
     
     steps:
@@ -205,6 +212,7 @@ jobs:
     needs: [setup, deploy-infra]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment: development
     if: always() && needs.deploy-infra.result == 'success' && inputs.skip_verification != true
     
     steps:
@@ -256,6 +264,7 @@ jobs:
     needs: [setup, deploy-service]
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment: development
     if: always() && needs.deploy-service.result == 'success' && inputs.skip_verification != true
     outputs:
       alb-dns: ${{ steps.endpoints.outputs.alb_dns }}

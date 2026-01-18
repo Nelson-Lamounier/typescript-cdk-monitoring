@@ -119,6 +119,120 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  test-constructs:
+    name: Test Constructs
+    needs: setup
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    if: |
+      github.event_name == 'pull_request' || 
+      (github.event_name == 'push' && 
+       !contains(github.event.head_commit.message, '[skip ci]') && 
+       !contains(github.event.head_commit.message, '[ci skip]'))
+    env:
+      CDK_DOCKER_VERBOSE: "false"
+      CDK_DEBUG: "false"
+      CDK_ASSET_VERBOSE: "false"
+      DOCKER_BUILDKIT: "1"
+      BUILDKIT_PROGRESS: "quiet"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ needs.setup.outputs.node-version }}
+
+      - name: Run Construct Tests
+        run: make test-constructs
+
+      - name: Upload Construct Test Coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-constructs
+          path: coverage/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  test-stacks:
+    name: Test Stacks
+    needs: setup
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    if: |
+      github.event_name == 'pull_request' || 
+      (github.event_name == 'push' && 
+       !contains(github.event.head_commit.message, '[skip ci]') && 
+       !contains(github.event.head_commit.message, '[ci skip]'))
+    env:
+      CDK_DOCKER_VERBOSE: "false"
+      CDK_DEBUG: "false"
+      CDK_ASSET_VERBOSE: "false"
+      DOCKER_BUILDKIT: "1"
+      BUILDKIT_PROGRESS: "quiet"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ needs.setup.outputs.node-version }}
+
+      - name: Run Stack Tests
+        run: make test-stacks
+
+      - name: Upload Stack Test Coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-stacks
+          path: coverage/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  test-helpers:
+    name: Test Helpers
+    needs: setup
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    if: |
+      github.event_name == 'pull_request' || 
+      (github.event_name == 'push' && 
+       !contains(github.event.head_commit.message, '[skip ci]') && 
+       !contains(github.event.head_commit.message, '[ci skip]'))
+    env:
+      CDK_DOCKER_VERBOSE: "false"
+      CDK_DEBUG: "false"
+      CDK_ASSET_VERBOSE: "false"
+      DOCKER_BUILDKIT: "1"
+      BUILDKIT_PROGRESS: "quiet"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ needs.setup.outputs.node-version }}
+
+      - name: Run Helper Tests
+        run: make test-helpers
+
+      - name: Upload Helper Test Coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-helpers
+          path: coverage/
+          retention-days: 7
+          if-no-files-found: ignore
+
   test-security:
     name: Test Security
     needs: setup
@@ -311,7 +425,7 @@ jobs:
   # ============================================================================
   coverage-summary:
     name: Coverage Summary
-    needs: [test-unit, test-security, test-connectivity, test-snapshots]
+    needs: [test-unit, test-constructs, test-stacks, test-helpers, test-security, test-connectivity, test-snapshots]
     runs-on: ubuntu-latest
     if: always()
     continue-on-error: true
@@ -364,6 +478,9 @@ jobs:
         lint,
         typecheck,
         test-unit,
+        test-constructs,
+        test-stacks,
+        test-helpers,
         test-security,
         test-connectivity,
         test-snapshots,
@@ -384,6 +501,9 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Tests" >> $GITHUB_STEP_SUMMARY
           echo "- Unit Tests: ${{ needs.test-unit.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Construct Tests: ${{ needs.test-constructs.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Stack Tests: ${{ needs.test-stacks.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Helper Tests: ${{ needs.test-helpers.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Security Tests: ${{ needs.test-security.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Connectivity Tests: ${{ needs.test-connectivity.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Snapshot Tests: ${{ needs.test-snapshots.result }}" >> $GITHUB_STEP_SUMMARY
@@ -414,6 +534,9 @@ jobs:
           if [[ "${{ needs.lint.result }}" == "failure" ]] || \
              [[ "${{ needs.typecheck.result }}" == "failure" ]] || \
              [[ "${{ needs.test-unit.result }}" == "failure" ]] || \
+             [[ "${{ needs.test-constructs.result }}" == "failure" ]] || \
+             [[ "${{ needs.test-stacks.result }}" == "failure" ]] || \
+             [[ "${{ needs.test-helpers.result }}" == "failure" ]] || \
              [[ "${{ needs.test-security.result }}" == "failure" ]] || \
              [[ "${{ needs.test-connectivity.result }}" == "failure" ]] || \
              [[ "${{ needs.test-snapshots.result }}" == "failure" ]]; then
@@ -422,8 +545,8 @@ jobs:
 
           if [[ "$NON_CRITICAL_FAILED" == "true" ]]; then
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "⚠️  Some non-critical checks failed (see individual job results)" >> $GITHUB_STEP_SUMMARY
+            echo "Some non-critical checks failed (see individual job results)" >> $GITHUB_STEP_SUMMARY
           fi
 
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ All critical CI checks passed" >> $GITHUB_STEP_SUMMARY
+          echo "All critical CI checks passed" >> $GITHUB_STEP_SUMMARY
