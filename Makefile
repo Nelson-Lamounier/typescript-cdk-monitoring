@@ -132,10 +132,10 @@ verify-grafana-prometheus: ## Diagnose Grafana-Prometheus connectivity issues
 	@echo "AWS Region: $(AWS_REGION)"
 	@if [ -n "$(AWS_PROFILE)" ]; then \
 		echo "AWS Profile: $(AWS_PROFILE)"; \
-		npx tsx scripts/integration/deployment/monitoring/verify-grafana-prometheus-connectivity.ts -e $(ENVIRONMENT) -r $(AWS_REGION) -p $(AWS_PROFILE); \
+		npx tsx scripts/integration/deployment/monitoring/verify-datasource-connectivity.ts -e $(ENVIRONMENT) -r $(AWS_REGION) -p $(AWS_PROFILE); \
 	else \
 		echo "AWS Profile: (using default credentials)"; \
-		npx tsx scripts/integration/deployment/monitoring/verify-grafana-prometheus-connectivity.ts -e $(ENVIRONMENT) -r $(AWS_REGION); \
+		npx tsx scripts/integration/deployment/monitoring/verify-datasource-connectivity.ts -e $(ENVIRONMENT) -r $(AWS_REGION); \
 	fi
 
 verify-all: verify-networking verify-efs verify-infra verify-service ## Verify all stacks in order
@@ -153,7 +153,7 @@ verify-bootstrap: ## Verify CDK bootstrap stack
 		echo "Usage: make verify-bootstrap AWS_ACCOUNT_ID=<account-id> ENVIRONMENT=$(ENVIRONMENT) AWS_REGION=$(AWS_REGION)"; \
 		exit 1; \
 	fi
-	@npx tsx scripts/deployment/verify-bootstrap.ts \
+	@npx tsx scripts/integration/deployment/verify-bootstrap.ts \
 		--aws-account-id $(AWS_ACCOUNT_ID) \
 		--aws-region $(AWS_REGION) \
 		--environment $(ENVIRONMENT) \
@@ -164,7 +164,7 @@ verify-environment: ## Verify CDK deployment environment setup
 	@echo "Environment: $(ENVIRONMENT)"
 	@echo "AWS Region: $(AWS_REGION)"
 	@echo ""
-	@npx tsx scripts/deployment/verify-environment.ts \
+	@npx tsx scripts/integration/deployment/verify-environment.ts \
 		--environment $(ENVIRONMENT) \
 		--aws-region $(AWS_REGION) \
 		--auto-build-on-failure

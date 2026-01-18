@@ -364,13 +364,16 @@ jobs:
     steps:
       - name: Generate Deployment Summary
         run: |
-          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+          ACCOUNT_LAST4="${{ needs.setup.outputs.aws-account-id }}"
+          TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          
+          cat >> $GITHUB_STEP_SUMMARY << EOF
           ## Monitoring Infrastructure Deployment - Development
 
           **Environment**: development
           **Region**: ${{ env.AWS_REGION }}
-          **Account**: ***${{ needs.setup.outputs.aws-account-id }}
-          **Timestamp**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          **Account**: ***${ACCOUNT_LAST4: -4}
+          **Timestamp**: ${TIMESTAMP}
 
           ### Deployment Status
 
@@ -384,11 +387,12 @@ jobs:
           EOF
           
           if [ -n "${{ needs.verify-service.outputs.alb-dns }}" ]; then
-            cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+            ALB_DNS="${{ needs.verify-service.outputs.alb-dns }}"
+            cat >> $GITHUB_STEP_SUMMARY << EOF
           ### Access Points
 
-          - **Grafana Dashboard**: http://${{ needs.verify-service.outputs.alb-dns }}/grafana
-          - **Prometheus Metrics**: http://${{ needs.verify-service.outputs.alb-dns }}/prometheus
+          - **Grafana Dashboard**: http://${ALB_DNS}/grafana
+          - **Prometheus Metrics**: http://${ALB_DNS}/prometheus
 
           **Default Credentials**: admin/admin (change immediately after first login)
 
