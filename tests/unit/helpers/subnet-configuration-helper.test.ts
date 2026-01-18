@@ -96,23 +96,23 @@ const TEST_CONSTANTS = {
  * @param expectedName - Expected subnet name
  * @param expectedType - Expected subnet type
  * @param expectedCidrMask - Expected CIDR mask
- * @param expectedMapPublicIp - Expected mapPublicIpOnLaunch value (or undefined)
+ * @param shouldMapPublicIp - Whether mapPublicIpOnLaunch should be defined
+ * @param expectedMapPublicIp - Expected mapPublicIpOnLaunch value (if shouldMapPublicIp is true)
  */
 function assertSubnetDefaults(
   config: ReturnType<typeof SubnetConfigurationHelper.publicSubnet>,
   expectedName: string,
   expectedType: ec2.SubnetType,
   expectedCidrMask: number,
+  shouldMapPublicIp: boolean,
   expectedMapPublicIp?: boolean
 ): void {
   expect(config.name).toBe(expectedName);
   expect(config.subnetType).toBe(expectedType);
   expect(config.cidrMask).toBe(expectedCidrMask);
-  if (expectedMapPublicIp !== undefined) {
-    expect(config.mapPublicIpOnLaunch).toBe(expectedMapPublicIp);
-  } else {
-    expect(config.mapPublicIpOnLaunch).toBeUndefined();
-  }
+  
+  expect(shouldMapPublicIp ? config.mapPublicIpOnLaunch !== undefined : config.mapPublicIpOnLaunch === undefined).toBe(true);
+  expect(shouldMapPublicIp && expectedMapPublicIp !== undefined ? config.mapPublicIpOnLaunch === expectedMapPublicIp : true).toBe(true);
 }
 
 /**
@@ -126,8 +126,7 @@ function assertTags(
   expectedTags: Record<string, string>
 ): void {
   expect(tags).toBeDefined();
-  if (!tags) return;
-
+  
   Object.entries(expectedTags).forEach(([key, value]) => {
     expect(tags).toHaveProperty(key, value);
   });
@@ -157,6 +156,7 @@ describe("SubnetConfigurationHelper", () => {
         TEST_CONSTANTS.SUBNET_NAMES.PUBLIC,
         TEST_CONSTANTS.SUBNET_TYPES.PUBLIC,
         TEST_CONSTANTS.CIDR_MASKS.DEFAULT,
+        true,
         true
       );
 
@@ -251,7 +251,7 @@ describe("SubnetConfigurationHelper", () => {
         TEST_CONSTANTS.SUBNET_NAMES.PRIVATE,
         TEST_CONSTANTS.SUBNET_TYPES.PRIVATE_WITH_EGRESS,
         TEST_CONSTANTS.CIDR_MASKS.DEFAULT,
-        undefined
+        false
       );
 
       assertTags(config.tags, {
@@ -322,7 +322,7 @@ describe("SubnetConfigurationHelper", () => {
         TEST_CONSTANTS.SUBNET_NAMES.ISOLATED,
         TEST_CONSTANTS.SUBNET_TYPES.PRIVATE_ISOLATED,
         TEST_CONSTANTS.CIDR_MASKS.DEFAULT,
-        undefined
+        false
       );
 
       assertTags(config.tags, {
@@ -505,10 +505,69 @@ describe("SubnetConfigurationHelper", () => {
    * with proper Kubernetes tags, cluster name validation, and CIDR mask support.
    */
   describe("eksConfiguration", () => {
-    test("creates EKS-tagged subnets with default CIDR masks", () => {
-      const configs = SubnetConfigurationHelper.eksConfiguration(
+    let eksTestData: {
+      defaultConfigs: ReturnType<typeof SubnetConfigurationHelper.eksConfiguration>;
+      customCidrConfigs: ReturnType<typeof SubnetConfigurationHelper.eksConfiguration>;
+      productionConfigs: ReturnType<typeof SubnetConfigurationHelper.eksConfiguration>;
+      publicTagsValid: boolean;
+      privateTagsValid: boolean;
+      productionPublicTagsValid: boolean;
+      productionPrivateTagsValid: boolean;
+    };
+
+    beforeAll(() => {
+      // Pre-compute configurations
+      const defaultConfigs = SubnetConfigurationHelper.eksConfiguration(
         TEST_CONSTANTS.CLUSTER_NAMES.DEFAULT
       );
+      const customCidrConfigs = SubnetConfigurationHelper.eksConfiguration(
+        TEST_CONSTANTS.CLUSTER_NAMES.DEFAULT,
+        TEST_CONSTANTS.CIDR_MASKS.DEFAULT,
+        TEST_CONSTANTS.CIDR_MASKS.LARGE
+      );
+      const productionConfigs = SubnetConfigurationHelper.eksConfiguration(
+        TEST_CONSTANTS.CLUSTER_NAMES.PRODUCTION
+      );
+
+      // Pre-compute tag validations for default configs
+      const publicTags = defaultConfigs[0].tags ?? {};
+      const privateTags = defaultConfigs[1].tags ?? {};
+      
+      const publicTagsValid =
+        publicTags[TEST_CONSTANTS.KUBERNETES_TAGS.ROLE_ELB] === TEST_CONSTANTS.KUBERNETES_TAGS.ELB_VALUE &&
+        publicTags[`${TEST_CONSTANTS.KUBERNETES_TAGS.CLUSTER_PREFIX}${TEST_CONSTANTS.CLUSTER_NAMES.DEFAULT}`] === TEST_CONSTANTS.KUBERNETES_TAGS.CLUSTER_VALUE;
+
+      const privateTagsValid =
+        privateTags[TEST_CONSTANTS.KUBERNETES_TAGS.ROLE_INTERNAL_ELB] === TEST_CONSTANTS.KUBERNETES_TAGS.ELB_VALUE &&
+        privateTags[`${TEST_CONSTANTS.KUBERNETES_TAGS.CLUSTER_PREFIX}${TEST_CONSTANTS.CLUSTER_NAMES.DEFAULT}`] === TEST_CONSTANTS.KUBERNETES_TAGS.CLUSTER_VALUE;
+
+      // Pre-compute tag validations for production configs
+      const productionPublicTags = productionConfigs[0].tags ?? {};
+      const productionPrivateTags = productionConfigs[1].tags ?? {};
+
+      const productionPublicTagsValid =
+        productionPublicTags[`${TEST_CONSTANTS.KUBERNETES_TAGS.CLUSTER_PREFIX}${TEST_CONSTANTS.CLUSTER_NAMES.PRODUCTION}`] === TEST_CONSTANTS.KUBERNETES_TAGS.CLUSTER_VALUE;
+
+      const productionPrivateTagsValid =
+        productionPrivateTags[`${TEST_CONSTANTS.KUBERNETES_TAGS.CLUSTER_PREFIX}${TEST_CONSTANTS.CLUSTER_NAMES.PRODUCTION}`] === TEST_CONSTANTS.KUBERNETES_TAGS.CLUSTER_VALUE;
+
+      eksTestData = {
+        defaultConfigs,
+        customCidrConfigs,
+        productionConfigs,
+        publicTagsValid,
+        privateTagsValid,
+        productionPublicTagsValid,
+        productionPrivateTagsValid,
+      };
+    });
+
+    test("creates EKS-tagged subnets with default CIDR masks", () => {
+      // Guard assertion
+      expect(eksTestData).toBeDefined();
+      expect(eksTestData.defaultConfigs).toBeDefined();
+
+      const configs = eksTestData.defaultConfigs;
 
       expect(configs).toHaveLength(
         TEST_CONSTANTS.CONFIGURATION_COUNTS.TWO_TIER
@@ -520,37 +579,21 @@ describe("SubnetConfigurationHelper", () => {
         TEST_CONSTANTS.SUBNET_TYPES.PRIVATE_WITH_EGRESS
       );
 
-      // Check Kubernetes tags (use bracket notation for property names with special characters)
+      // Verify tags are defined
       expect(configs[0].tags).toBeDefined();
-      if (configs[0].tags) {
-        expect(configs[0].tags[TEST_CONSTANTS.KUBERNETES_TAGS.ROLE_ELB]).toBe(
-          TEST_CONSTANTS.KUBERNETES_TAGS.ELB_VALUE
-        );
-        expect(
-          configs[0].tags[
-            `${TEST_CONSTANTS.KUBERNETES_TAGS.CLUSTER_PREFIX}${TEST_CONSTANTS.CLUSTER_NAMES.DEFAULT}`
-          ]
-        ).toBe(TEST_CONSTANTS.KUBERNETES_TAGS.CLUSTER_VALUE);
-      }
       expect(configs[1].tags).toBeDefined();
-      if (configs[1].tags) {
-        expect(
-          configs[1].tags[TEST_CONSTANTS.KUBERNETES_TAGS.ROLE_INTERNAL_ELB]
-        ).toBe(TEST_CONSTANTS.KUBERNETES_TAGS.ELB_VALUE);
-        expect(
-          configs[1].tags[
-            `${TEST_CONSTANTS.KUBERNETES_TAGS.CLUSTER_PREFIX}${TEST_CONSTANTS.CLUSTER_NAMES.DEFAULT}`
-          ]
-        ).toBe(TEST_CONSTANTS.KUBERNETES_TAGS.CLUSTER_VALUE);
-      }
+
+      // Verify pre-computed tag validation
+      expect(eksTestData.publicTagsValid).toBe(true);
+      expect(eksTestData.privateTagsValid).toBe(true);
     });
 
     test("accepts custom CIDR masks", () => {
-      const configs = SubnetConfigurationHelper.eksConfiguration(
-        TEST_CONSTANTS.CLUSTER_NAMES.DEFAULT,
-        TEST_CONSTANTS.CIDR_MASKS.DEFAULT,
-        TEST_CONSTANTS.CIDR_MASKS.LARGE
-      );
+      // Guard assertion
+      expect(eksTestData).toBeDefined();
+      expect(eksTestData.customCidrConfigs).toBeDefined();
+
+      const configs = eksTestData.customCidrConfigs;
 
       expect(configs[0].cidrMask).toBe(TEST_CONSTANTS.CIDR_MASKS.DEFAULT);
       expect(configs[1].cidrMask).toBe(TEST_CONSTANTS.CIDR_MASKS.LARGE);
@@ -575,25 +618,18 @@ describe("SubnetConfigurationHelper", () => {
     );
 
     test("includes cluster name in Kubernetes tags", () => {
-      const clusterName = TEST_CONSTANTS.CLUSTER_NAMES.PRODUCTION;
-      const configs = SubnetConfigurationHelper.eksConfiguration(clusterName);
+      // Guard assertion
+      expect(eksTestData).toBeDefined();
+      expect(eksTestData.productionConfigs).toBeDefined();
+
+      const configs = eksTestData.productionConfigs;
 
       expect(configs[0].tags).toBeDefined();
-      if (configs[0].tags) {
-        expect(
-          configs[0].tags[
-            `${TEST_CONSTANTS.KUBERNETES_TAGS.CLUSTER_PREFIX}${clusterName}`
-          ]
-        ).toBe(TEST_CONSTANTS.KUBERNETES_TAGS.CLUSTER_VALUE);
-      }
       expect(configs[1].tags).toBeDefined();
-      if (configs[1].tags) {
-        expect(
-          configs[1].tags[
-            `${TEST_CONSTANTS.KUBERNETES_TAGS.CLUSTER_PREFIX}${clusterName}`
-          ]
-        ).toBe(TEST_CONSTANTS.KUBERNETES_TAGS.CLUSTER_VALUE);
-      }
+
+      // Verify pre-computed tag validation
+      expect(eksTestData.productionPublicTagsValid).toBe(true);
+      expect(eksTestData.productionPrivateTagsValid).toBe(true);
     });
 
     test.each([
