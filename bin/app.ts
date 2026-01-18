@@ -24,8 +24,8 @@ if (!envConfig) {
 }
 
 console.log(`Deploying to environment: ${envName}`);
-console.log(`Region: ${envConfig.region}`);
-console.log(`Account: ${envConfig.account}`);
+console.log(`Region: ${envConfig.region || "auto-detect"}`);
+console.log(`Account: ${envConfig.account || "auto-detect"}`);
 
 // Stack props
 const stackProps: cdk.StackProps = {
@@ -54,7 +54,5 @@ createMonitoringStacks(app, envName, envConfig, networkingStack);
 cdk.Tags.of(app).add("Environment", envName);
 cdk.Tags.of(app).add("ManagedBy", "CDK");
 cdk.Tags.of(app).add("Repository", "monitoring-iac");
-
-console.log(`All stacks initialised for ${envName}`);
 
 app.synth();

@@ -108,7 +108,7 @@ runs:
         echo "Deployment Configuration:"
         echo "  Stack Name: ${{ inputs.stack-name }}"
         echo "  Environment: ${{ inputs.environment }}"
-        echo "  Account ID: ***${LAST_FOUR}"
+        echo "  Account ID: ***${ACCOUNT_ID: -4}"
         echo "  Region: ${{ inputs.aws-region }}"
         echo "  Approval: ${{ inputs.require-approval }}"
         
@@ -118,7 +118,7 @@ runs:
           echo '${{ inputs.additional-context }}' | jq -r 'to_entries[] | "    \(.key): \(.value)"'
         fi
       env:
-        LAST_FOUR: ${{ inputs.aws-account-id }}
+        ACCOUNT_ID: ${{ inputs.aws-account-id }}
 
     - name: Verify AWS Credentials
       shell: bash
@@ -319,10 +319,10 @@ runs:
       run: |
         echo "## CDK Stack Deployment" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Stack**: \\\`${{ inputs.stack-name }}\\\`" >> $GITHUB_STEP_SUMMARY
+        printf '**Stack**: `%s`\n' "${{ inputs.stack-name }}" >> $GITHUB_STEP_SUMMARY
         echo "**Environment**: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
         echo "**Region**: ${{ inputs.aws-region }}" >> $GITHUB_STEP_SUMMARY
-        echo "**Account**: \\\`***${ACCOUNT_LAST4}\\\`" >> $GITHUB_STEP_SUMMARY
+        printf '**Account**: `***%s`\n' "${ACCOUNT_ID: -4}" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         
         if [ "${{ steps.deploy.outputs.status }}" = "success" ]; then
@@ -341,7 +341,7 @@ runs:
           # Add outputs file location if saved
           if [ -n "${{ steps.save-outputs.outputs.file_path }}" ]; then
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Outputs saved to: \\\`${{ steps.save-outputs.outputs.file_path }}\\\`" >> $GITHUB_STEP_SUMMARY
+            printf 'Outputs saved to: `%s`\n' "${{ steps.save-outputs.outputs.file_path }}" >> $GITHUB_STEP_SUMMARY
           fi
         else
           echo "### Status: ✗ Failed" >> $GITHUB_STEP_SUMMARY
@@ -351,4 +351,4 @@ runs:
           echo "Check deployment logs for details." >> $GITHUB_STEP_SUMMARY
         fi
       env:
-        ACCOUNT_LAST4: ${{ inputs.aws-account-id }}
+        ACCOUNT_ID: ${{ inputs.aws-account-id }}
