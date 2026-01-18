@@ -90,9 +90,9 @@ verify-networking: ## Verify Networking stack deployment and readiness
 	fi
 	@echo ""
 	@if [ -n "$(AWS_PROFILE)" ]; then \
-		npx tsx scripts/deployment/monitoring/verify-networking-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION) -p $(AWS_PROFILE); \
+		npx tsx scripts/integration/deployment/monitoring/verify-networking-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION) -p $(AWS_PROFILE); \
 	else \
-		npx tsx scripts/deployment/monitoring/verify-networking-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION); \
+		npx tsx scripts/integration/deployment/monitoring/verify-networking-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION); \
 	fi
 
 verify-efs: ## Verify EFS stack deployment and readiness
@@ -100,7 +100,7 @@ verify-efs: ## Verify EFS stack deployment and readiness
 	@echo "Environment: $(ENVIRONMENT)"
 	@echo "AWS Profile: $(AWS_PROFILE)"
 	@echo ""
-	@npx tsx scripts/deployment/monitoring/verify-efs-stack.ts -e $(ENVIRONMENT) -p $(AWS_PROFILE) -r $(AWS_REGION)
+	@npx tsx scripts/integration/deployment/monitoring/verify-efs-stack.ts -e $(ENVIRONMENT) -p $(AWS_PROFILE) -r $(AWS_REGION)
 
 verify-infra: ## Verify Infrastructure stack deployment and readiness
 	@echo "$(BLUE)Verifying Infrastructure Stack...$(NC)"
@@ -108,10 +108,10 @@ verify-infra: ## Verify Infrastructure stack deployment and readiness
 	@echo "AWS Region: $(AWS_REGION)"
 	@if [ -n "$(AWS_PROFILE)" ]; then \
 		echo "AWS Profile: $(AWS_PROFILE)"; \
-		npx tsx scripts/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION) -p $(AWS_PROFILE); \
+		npx tsx scripts/integration/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION) -p $(AWS_PROFILE); \
 	else \
 		echo "AWS Profile: (using default credentials)"; \
-		npx tsx scripts/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION); \
+		npx tsx scripts/integration/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION); \
 	fi
 
 verify-service: ## Verify Service stack deployment and readiness
@@ -120,10 +120,10 @@ verify-service: ## Verify Service stack deployment and readiness
 	@echo "AWS Region: $(AWS_REGION)"
 	@if [ -n "$(AWS_PROFILE)" ]; then \
 		echo "AWS Profile: $(AWS_PROFILE)"; \
-		npx tsx scripts/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION) -p $(AWS_PROFILE) --service-only || true; \
+		npx tsx scripts/integration/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION) -p $(AWS_PROFILE) --service-only || true; \
 	else \
 		echo "AWS Profile: (using default credentials)"; \
-		npx tsx scripts/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION) --service-only || true; \
+		npx tsx scripts/integration/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION) --service-only || true; \
 	fi
 
 verify-grafana-prometheus: ## Diagnose Grafana-Prometheus connectivity issues
