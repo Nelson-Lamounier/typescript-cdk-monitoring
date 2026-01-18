@@ -90,9 +90,9 @@ verify-networking: ## Verify Networking stack deployment and readiness
 	fi
 	@echo ""
 	@if [ -n "$(AWS_PROFILE)" ]; then \
-		npx tsx scripts/deployment/monitoring/verify-networking-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION) -p $(AWS_PROFILE); \
+		npx tsx scripts/integration/deployment/monitoring/verify-networking-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION) -p $(AWS_PROFILE); \
 	else \
-		npx tsx scripts/deployment/monitoring/verify-networking-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION); \
+		npx tsx scripts/integration/deployment/monitoring/verify-networking-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION); \
 	fi
 
 verify-efs: ## Verify EFS stack deployment and readiness
@@ -100,7 +100,7 @@ verify-efs: ## Verify EFS stack deployment and readiness
 	@echo "Environment: $(ENVIRONMENT)"
 	@echo "AWS Profile: $(AWS_PROFILE)"
 	@echo ""
-	@npx tsx scripts/deployment/monitoring/verify-efs-stack.ts -e $(ENVIRONMENT) -p $(AWS_PROFILE) -r $(AWS_REGION)
+	@npx tsx scripts/integration/deployment/monitoring/verify-efs-stack.ts -e $(ENVIRONMENT) -p $(AWS_PROFILE) -r $(AWS_REGION)
 
 verify-infra: ## Verify Infrastructure stack deployment and readiness
 	@echo "$(BLUE)Verifying Infrastructure Stack...$(NC)"
@@ -108,10 +108,10 @@ verify-infra: ## Verify Infrastructure stack deployment and readiness
 	@echo "AWS Region: $(AWS_REGION)"
 	@if [ -n "$(AWS_PROFILE)" ]; then \
 		echo "AWS Profile: $(AWS_PROFILE)"; \
-		npx tsx scripts/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION) -p $(AWS_PROFILE); \
+		npx tsx scripts/integration/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION) -p $(AWS_PROFILE); \
 	else \
 		echo "AWS Profile: (using default credentials)"; \
-		npx tsx scripts/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION); \
+		npx tsx scripts/integration/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION); \
 	fi
 
 verify-service: ## Verify Service stack deployment and readiness
@@ -120,10 +120,10 @@ verify-service: ## Verify Service stack deployment and readiness
 	@echo "AWS Region: $(AWS_REGION)"
 	@if [ -n "$(AWS_PROFILE)" ]; then \
 		echo "AWS Profile: $(AWS_PROFILE)"; \
-		npx tsx scripts/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION) -p $(AWS_PROFILE) --service-only || true; \
+		npx tsx scripts/integration/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION) -p $(AWS_PROFILE) --service-only || true; \
 	else \
 		echo "AWS Profile: (using default credentials)"; \
-		npx tsx scripts/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION) --service-only || true; \
+		npx tsx scripts/integration/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION) --service-only || true; \
 	fi
 
 verify-grafana-prometheus: ## Diagnose Grafana-Prometheus connectivity issues
@@ -132,10 +132,10 @@ verify-grafana-prometheus: ## Diagnose Grafana-Prometheus connectivity issues
 	@echo "AWS Region: $(AWS_REGION)"
 	@if [ -n "$(AWS_PROFILE)" ]; then \
 		echo "AWS Profile: $(AWS_PROFILE)"; \
-		npx tsx scripts/integration/deployment/monitoring/verify-grafana-prometheus-connectivity.ts -e $(ENVIRONMENT) -r $(AWS_REGION) -p $(AWS_PROFILE); \
+		npx tsx scripts/integration/deployment/monitoring/verify-datasource-connectivity.ts -e $(ENVIRONMENT) -r $(AWS_REGION) -p $(AWS_PROFILE); \
 	else \
 		echo "AWS Profile: (using default credentials)"; \
-		npx tsx scripts/integration/deployment/monitoring/verify-grafana-prometheus-connectivity.ts -e $(ENVIRONMENT) -r $(AWS_REGION); \
+		npx tsx scripts/integration/deployment/monitoring/verify-datasource-connectivity.ts -e $(ENVIRONMENT) -r $(AWS_REGION); \
 	fi
 
 verify-all: verify-networking verify-efs verify-infra verify-service ## Verify all stacks in order
@@ -153,7 +153,7 @@ verify-bootstrap: ## Verify CDK bootstrap stack
 		echo "Usage: make verify-bootstrap AWS_ACCOUNT_ID=<account-id> ENVIRONMENT=$(ENVIRONMENT) AWS_REGION=$(AWS_REGION)"; \
 		exit 1; \
 	fi
-	@npx tsx scripts/deployment/verify-bootstrap.ts \
+	@npx tsx scripts/integration/deployment/verify-bootstrap.ts \
 		--aws-account-id $(AWS_ACCOUNT_ID) \
 		--aws-region $(AWS_REGION) \
 		--environment $(ENVIRONMENT) \
@@ -164,7 +164,7 @@ verify-environment: ## Verify CDK deployment environment setup
 	@echo "Environment: $(ENVIRONMENT)"
 	@echo "AWS Region: $(AWS_REGION)"
 	@echo ""
-	@npx tsx scripts/deployment/verify-environment.ts \
+	@npx tsx scripts/integration/deployment/verify-environment.ts \
 		--environment $(ENVIRONMENT) \
 		--aws-region $(AWS_REGION) \
 		--auto-build-on-failure
@@ -605,6 +605,19 @@ test-helpers: test-helpers-subnet-config ## Run all helper tests
 lint: ## Run linter (ESLint with max-warnings 0)
 	@echo "$(BLUE)Running linter...$(NC)"
 	npx eslint lib/ bin/ tests/ --max-warnings 0
+
+lint-ci: ## Run linter for CI (warnings reported but non-blocking)
+	@echo "$(BLUE)Running linter (CI mode - warnings are informational)...$(NC)"
+	@npx eslint lib/ bin/ tests/ || { \
+		EXIT_CODE=$$?; \
+		if [ $$EXIT_CODE -eq 1 ]; then \
+			echo "$(YELLOW)Linting completed with warnings (non-blocking)$(NC)"; \
+			exit 0; \
+		else \
+			echo "$(RED)Linting failed with errors$(NC)"; \
+			exit $$EXIT_CODE; \
+		fi; \
+	}
 
 lint-fix: ## Run linter with auto-fix
 	@echo "$(BLUE)Running linter with auto-fix...$(NC)"

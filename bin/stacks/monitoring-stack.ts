@@ -49,7 +49,6 @@ export function createMonitoringStacks(
   // ============================================================================
   // 1. MONITORING EFS STACK (Storage Layer)
   // ============================================================================
-  console.log(`Creating ${stackNamePrefix}Efs stack...`);
 
   const efsStack = new MonitoringEfsStack(app, `${stackNamePrefix}Efs`, {
     ...stackProps,
@@ -75,7 +74,6 @@ export function createMonitoringStacks(
   // ============================================================================
   // 2. MONITORING INFRASTRUCTURE STACK (Compute Layer)
   // ============================================================================
-  console.log(`Creating ${stackNamePrefix}Infra stack...`);
 
   const infraStack = new MonitoringInfraStack(app, `${stackNamePrefix}Infra`, {
     ...stackProps,
@@ -110,7 +108,6 @@ export function createMonitoringStacks(
   // ============================================================================
   // 3. MONITORING SERVICE STACK (Application Layer)
   // ============================================================================
-  console.log(`Creating ${stackNamePrefix}Service stack...`);
 
   const serviceStack = new MonitoringServiceStack(
     app,
@@ -145,8 +142,6 @@ export function createMonitoringStacks(
   serviceStack.addDependency(networkingStack);
   serviceStack.addDependency(efsStack);
   serviceStack.addDependency(infraStack);
-
-  console.log(`✅ All monitoring stacks created for ${envName}`);
 
   return {
     efsStack,

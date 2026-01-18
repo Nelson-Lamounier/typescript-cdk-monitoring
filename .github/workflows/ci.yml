@@ -23,39 +23,18 @@ jobs:
     name: Setup Dependencies
     runs-on: ubuntu-latest
     outputs:
-      cache-key: ${{ steps.cache-key.outputs.key }}
+      cache-key: ${{ steps.setup-node.outputs.cache-key }}
       node-version: ${{ env.NODE_VERSION }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Generate Dependency Cache Key
-        id: cache-key
-        run: |
-          HASH=$(cat yarn.lock package.json | sha256sum | cut -d' ' -f1)
-          echo "key=deps-${{ runner.os }}-node${{ env.NODE_VERSION }}-$HASH" >> $GITHUB_OUTPUT
-
-      - name: Cache Dependencies
-        id: cache-deps
-        uses: actions/cache@v4
-        with:
-          path: |
-            node_modules
-            .yarn/cache
-            .yarn/install-state.gz
-          key: ${{ steps.cache-key.outputs.key }}
-          restore-keys: |
-            deps-${{ runner.os }}-node${{ env.NODE_VERSION }}-
-
-      - name: Setup Infrastructure
-        uses: ./.github/actions/setup-infrastructure
+      - name: Setup Node.js and Yarn
+        id: setup-node
+        uses: ./.github/actions/setup-node-yarn
         with:
           node-version: ${{ env.NODE_VERSION }}
-
-      - name: Install Dependencies
-        if: steps.cache-deps.outputs.cache-hit != 'true'
-        run: make install
 
   # ============================================================================
   # Code Quality Jobs (Run in Parallel - Non-blocking)
@@ -64,30 +43,18 @@ jobs:
     name: Lint Code
     needs: setup
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore Dependencies Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            node_modules
-            .yarn/cache
-            .yarn/install-state.gz
-          key: ${{ needs.setup.outputs.cache-key }}
-          restore-keys: |
-            deps-${{ runner.os }}-node${{ needs.setup.outputs.node-version }}-
-
-      - name: Setup Infrastructure
-        uses: ./.github/actions/setup-infrastructure
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
         with:
           node-version: ${{ needs.setup.outputs.node-version }}
 
       - name: Run ESLint
-        run: make lint
+        run: make lint-ci
 
   typecheck:
     name: Type Check
@@ -99,19 +66,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore Dependencies Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            node_modules
-            .yarn/cache
-            .yarn/install-state.gz
-          key: ${{ needs.setup.outputs.cache-key }}
-          restore-keys: |
-            deps-${{ runner.os }}-node${{ needs.setup.outputs.node-version }}-
-
-      - name: Setup Infrastructure
-        uses: ./.github/actions/setup-infrastructure
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
         with:
           node-version: ${{ needs.setup.outputs.node-version }}
 
@@ -145,19 +101,8 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
-      - name: Restore Dependencies Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            node_modules
-            .yarn/cache
-            .yarn/install-state.gz
-          key: ${{ needs.setup.outputs.cache-key }}
-          restore-keys: |
-            deps-${{ runner.os }}-node${{ needs.setup.outputs.node-version }}-
-
-      - name: Setup Infrastructure
-        uses: ./.github/actions/setup-infrastructure
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
         with:
           node-version: ${{ needs.setup.outputs.node-version }}
 
@@ -169,6 +114,120 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-unit
+          path: coverage/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  test-constructs:
+    name: Test Constructs
+    needs: setup
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    if: |
+      github.event_name == 'pull_request' || 
+      (github.event_name == 'push' && 
+       !contains(github.event.head_commit.message, '[skip ci]') && 
+       !contains(github.event.head_commit.message, '[ci skip]'))
+    env:
+      CDK_DOCKER_VERBOSE: "false"
+      CDK_DEBUG: "false"
+      CDK_ASSET_VERBOSE: "false"
+      DOCKER_BUILDKIT: "1"
+      BUILDKIT_PROGRESS: "quiet"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ needs.setup.outputs.node-version }}
+
+      - name: Run Construct Tests
+        run: make test-constructs
+
+      - name: Upload Construct Test Coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-constructs
+          path: coverage/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  test-stacks:
+    name: Test Stacks
+    needs: setup
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    if: |
+      github.event_name == 'pull_request' || 
+      (github.event_name == 'push' && 
+       !contains(github.event.head_commit.message, '[skip ci]') && 
+       !contains(github.event.head_commit.message, '[ci skip]'))
+    env:
+      CDK_DOCKER_VERBOSE: "false"
+      CDK_DEBUG: "false"
+      CDK_ASSET_VERBOSE: "false"
+      DOCKER_BUILDKIT: "1"
+      BUILDKIT_PROGRESS: "quiet"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ needs.setup.outputs.node-version }}
+
+      - name: Run Stack Tests
+        run: make test-stacks
+
+      - name: Upload Stack Test Coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-stacks
+          path: coverage/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  test-helpers:
+    name: Test Helpers
+    needs: setup
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    if: |
+      github.event_name == 'pull_request' || 
+      (github.event_name == 'push' && 
+       !contains(github.event.head_commit.message, '[skip ci]') && 
+       !contains(github.event.head_commit.message, '[ci skip]'))
+    env:
+      CDK_DOCKER_VERBOSE: "false"
+      CDK_DEBUG: "false"
+      CDK_ASSET_VERBOSE: "false"
+      DOCKER_BUILDKIT: "1"
+      BUILDKIT_PROGRESS: "quiet"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ needs.setup.outputs.node-version }}
+
+      - name: Run Helper Tests
+        run: make test-helpers
+
+      - name: Upload Helper Test Coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-helpers
           path: coverage/
           retention-days: 7
           if-no-files-found: ignore
@@ -194,19 +253,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore Dependencies Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            node_modules
-            .yarn/cache
-            .yarn/install-state.gz
-          key: ${{ needs.setup.outputs.cache-key }}
-          restore-keys: |
-            deps-${{ runner.os }}-node${{ needs.setup.outputs.node-version }}-
-
-      - name: Setup Infrastructure
-        uses: ./.github/actions/setup-infrastructure
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
         with:
           node-version: ${{ needs.setup.outputs.node-version }}
 
@@ -234,19 +282,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore Dependencies Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            node_modules
-            .yarn/cache
-            .yarn/install-state.gz
-          key: ${{ needs.setup.outputs.cache-key }}
-          restore-keys: |
-            deps-${{ runner.os }}-node${{ needs.setup.outputs.node-version }}-
-
-      - name: Setup Infrastructure
-        uses: ./.github/actions/setup-infrastructure
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
         with:
           node-version: ${{ needs.setup.outputs.node-version }}
 
@@ -277,19 +314,8 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
-      - name: Restore Dependencies Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            node_modules
-            .yarn/cache
-            .yarn/install-state.gz
-          key: ${{ needs.setup.outputs.cache-key }}
-          restore-keys: |
-            deps-${{ runner.os }}-node${{ needs.setup.outputs.node-version }}-
-
-      - name: Setup Infrastructure
-        uses: ./.github/actions/setup-infrastructure
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
         with:
           node-version: ${{ needs.setup.outputs.node-version }}
 
@@ -324,7 +350,7 @@ jobs:
             git push origin HEAD:${{ github.ref_name }} || echo "Push failed - may need manual intervention"
           else
             echo "Skipping push on branch ${{ github.ref }}"
-            echo "⚠️ Snapshots updated but not pushed. Please commit manually or merge to main."
+            echo "Snapshots updated but not pushed. Please commit manually or merge to main."
           fi
 
       - name: Run Snapshot Tests
@@ -346,45 +372,15 @@ jobs:
     name: Build TypeScript
     needs: setup
     runs-on: ubuntu-latest
-    outputs:
-      build-cache-key: ${{ steps.build-cache.outputs.key }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore Dependencies Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            node_modules
-            .yarn/cache
-            .yarn/install-state.gz
-          key: ${{ needs.setup.outputs.cache-key }}
-          restore-keys: |
-            deps-${{ runner.os }}-node${{ needs.setup.outputs.node-version }}-
-
-      - name: Setup Infrastructure
-        uses: ./.github/actions/setup-infrastructure
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
         with:
           node-version: ${{ needs.setup.outputs.node-version }}
-
-      - name: Generate Build Cache Key
-        id: build-cache
-        run: |
-          HASH=$(find lib bin -type f \( -name "*.ts" -o -name "*.js" \) -exec sha256sum {} + 2>/dev/null | sha256sum | cut -d' ' -f1)
-          echo "key=build-${{ runner.os }}-$HASH" >> $GITHUB_OUTPUT
-
-      - name: Restore Build Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            dist
-            .turbo
-            cdk.out
-          key: ${{ steps.build-cache.outputs.key }}
-          restore-keys: |
-            build-${{ runner.os }}-
 
       - name: Build TypeScript
         run: make build
@@ -401,47 +397,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore Dependencies Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            node_modules
-            .yarn/cache
-            .yarn/install-state.gz
-          key: ${{ needs.setup.outputs.cache-key }}
-          restore-keys: |
-            deps-${{ runner.os }}-node${{ needs.setup.outputs.node-version }}-
-
-      - name: Setup Infrastructure
-        uses: ./.github/actions/setup-infrastructure
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
         with:
           node-version: ${{ needs.setup.outputs.node-version }}
-
-      - name: Restore Build Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            dist
-            .turbo
-            cdk.out
-          key: ${{ needs.build.outputs.build-cache-key }}
-          restore-keys: |
-            build-${{ runner.os }}-
 
       - name: Synthesize CDK Stacks
         run: |
           echo "Listing CDK stacks..."
-          CDK_ENVIRONMENT=pipeline npx cdk list --context environment=pipeline
+          npx cdk list --all
           echo "Synthesizing CDK stacks..."
-          CDK_ENVIRONMENT=pipeline npx cdk synth --context environment=pipeline --quiet
+          npx cdk synth --all --quiet
         env:
           AWS_REGION: eu-west-1
-          CDK_ENVIRONMENT: pipeline
 
-      - name: Upload CDK Outputs
+      - name: Upload CDK Synthesis
         uses: actions/upload-artifact@v4
         with:
-          name: cdk-outputs
+          name: cdk-synthesis
           path: cdk.out/
           retention-days: 7
           if-no-files-found: ignore
@@ -451,7 +424,7 @@ jobs:
   # ============================================================================
   coverage-summary:
     name: Coverage Summary
-    needs: [test-unit, test-security, test-connectivity, test-snapshots]
+    needs: [test-unit, test-constructs, test-stacks, test-helpers, test-security, test-connectivity, test-snapshots]
     runs-on: ubuntu-latest
     if: always()
     continue-on-error: true
@@ -504,6 +477,9 @@ jobs:
         lint,
         typecheck,
         test-unit,
+        test-constructs,
+        test-stacks,
+        test-helpers,
         test-security,
         test-connectivity,
         test-snapshots,
@@ -524,6 +500,9 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Tests" >> $GITHUB_STEP_SUMMARY
           echo "- Unit Tests: ${{ needs.test-unit.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Construct Tests: ${{ needs.test-constructs.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Stack Tests: ${{ needs.test-stacks.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Helper Tests: ${{ needs.test-helpers.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Security Tests: ${{ needs.test-security.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Connectivity Tests: ${{ needs.test-connectivity.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Snapshot Tests: ${{ needs.test-snapshots.result }}" >> $GITHUB_STEP_SUMMARY
@@ -535,12 +514,12 @@ jobs:
           CRITICAL_FAILED=false
           if [[ "${{ needs.build.result }}" == "failure" ]]; then
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "❌ Build failed" >> $GITHUB_STEP_SUMMARY
+            echo "Build failed" >> $GITHUB_STEP_SUMMARY
             CRITICAL_FAILED=true
           fi
           if [[ "${{ needs.validate-cdk.result }}" == "failure" ]]; then
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "❌ CDK Validation failed" >> $GITHUB_STEP_SUMMARY
+            echo "CDK Validation failed" >> $GITHUB_STEP_SUMMARY
             CRITICAL_FAILED=true
           fi
 
@@ -554,6 +533,9 @@ jobs:
           if [[ "${{ needs.lint.result }}" == "failure" ]] || \
              [[ "${{ needs.typecheck.result }}" == "failure" ]] || \
              [[ "${{ needs.test-unit.result }}" == "failure" ]] || \
+             [[ "${{ needs.test-constructs.result }}" == "failure" ]] || \
+             [[ "${{ needs.test-stacks.result }}" == "failure" ]] || \
+             [[ "${{ needs.test-helpers.result }}" == "failure" ]] || \
              [[ "${{ needs.test-security.result }}" == "failure" ]] || \
              [[ "${{ needs.test-connectivity.result }}" == "failure" ]] || \
              [[ "${{ needs.test-snapshots.result }}" == "failure" ]]; then
@@ -562,8 +544,8 @@ jobs:
 
           if [[ "$NON_CRITICAL_FAILED" == "true" ]]; then
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "⚠️  Some non-critical checks failed (see individual job results)" >> $GITHUB_STEP_SUMMARY
+            echo "Some non-critical checks failed (see individual job results)" >> $GITHUB_STEP_SUMMARY
           fi
 
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ All critical CI checks passed" >> $GITHUB_STEP_SUMMARY
+          echo "All critical CI checks passed" >> $GITHUB_STEP_SUMMARY

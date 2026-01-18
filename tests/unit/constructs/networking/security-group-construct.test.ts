@@ -56,17 +56,23 @@ describe("SecurityGroupConstruct", () => {
   let stack: cdk.Stack;
   let vpc: ec2.IVpc;
 
-  beforeEach(() => {
-    app = createTestApp();
-    stack = new cdk.Stack(app, "TestStack", {
+  // Helper to create fresh test environment
+  const createTestEnvironment = () => {
+    const testApp = createTestApp();
+    const testStack = new cdk.Stack(testApp, "TestStack", {
       env: { account: TEST_CONFIG.account, region: TEST_CONFIG.region },
     });
-
-    // Create a VPC for testing
-    const vpcConstruct = new VpcConstruct(stack, "TestVpc", {
+    const vpcConstruct = new VpcConstruct(testStack, "TestVpc", {
       envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
     });
-    vpc = vpcConstruct.vpc;
+    return { testApp, testStack, testVpc: vpcConstruct.vpc };
+  };
+
+  beforeEach(() => {
+    const env = createTestEnvironment();
+    app = env.testApp;
+    stack = env.testStack;
+    vpc = env.testVpc;
   });
 
   // ============================================
@@ -514,207 +520,203 @@ describe("SecurityGroupConstruct", () => {
   // ============================================
 
   describe("Security Group Connections", () => {
-    let ingressTestData: {
-      hasIngressRule: boolean;
-      targetSg: SecurityGroupConstruct;
-    };
-    let egressTestData: {
-      hasEgressRule: boolean;
-      sourceSg: SecurityGroupConstruct;
+    let connectionTestData: {
+      ingressTest: {
+        sourceSg: SecurityGroupConstruct;
+        targetSg: SecurityGroupConstruct;
+        hasIngressRule: boolean;
+      };
+      egressTest: {
+        sourceSg: SecurityGroupConstruct;
+        targetSg: SecurityGroupConstruct;
+        hasEgressRule: boolean;
+      };
     };
 
     beforeAll(() => {
-      // Pre-compute ingress test data
-      const sourceSg = new SecurityGroupConstruct(stack, "SourceSG", {
-        vpc,
-        groupName: TEST_CONSTANTS.SECURITY_GROUP.SOURCE_NAME,
+      // Create isolated test environment that doesn't use the shared beforeEach stack
+      const connectionTestApp = createTestApp();
+      const connectionTestStack = new cdk.Stack(connectionTestApp, "ConnectionTestStack", {
+        env: { account: TEST_CONFIG.account, region: TEST_CONFIG.region },
+      });
+      const connectionTestVpc = new VpcConstruct(connectionTestStack, "TestVpc", {
+        envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
+      }).vpc;
+
+      // Setup for ingress test
+      const ingressSourceSg = new SecurityGroupConstruct(connectionTestStack, "SourceSG", {
+        vpc: connectionTestVpc,
+        groupName: `${TEST_CONSTANTS.SECURITY_GROUP.SOURCE_NAME}-conn-from`,
         description: TEST_CONSTANTS.SECURITY_GROUP.SOURCE_DESCRIPTION,
         envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
       });
 
-      const targetSg = new SecurityGroupConstruct(stack, "TargetSG", {
-        vpc,
-        groupName: TEST_CONSTANTS.SECURITY_GROUP.TARGET_NAME,
+      const ingressTargetSg = new SecurityGroupConstruct(connectionTestStack, "TargetSG", {
+        vpc: connectionTestVpc,
+        groupName: `${TEST_CONSTANTS.SECURITY_GROUP.TARGET_NAME}-conn-from`,
         description: TEST_CONSTANTS.SECURITY_GROUP.TARGET_DESCRIPTION,
         envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
       });
 
-      targetSg.allowFrom(
-        sourceSg.securityGroup,
+      ingressTargetSg.allowFrom(
+        ingressSourceSg.securityGroup,
         ec2.Port.tcp(COMMON_PORTS.HTTP),
         "Allow HTTP from source security group"
       );
 
-      const template = Template.fromStack(stack);
-
-      // Find the target security group resource
-      const securityGroupResources = template.findResources(
-        "AWS::EC2::SecurityGroup"
-      );
-      const targetSgResource = Object.values(securityGroupResources).find(
-        (resource: Record<string, unknown>) =>
-          (resource.Properties as Record<string, unknown>).GroupName ===
-          TEST_CONSTANTS.SECURITY_GROUP.TARGET_NAME
-      ) as Record<string, unknown> | undefined;
-
-      const targetSgProps = targetSgResource
-        ? (targetSgResource.Properties as Record<string, unknown>)
-        : {};
-
-      // Check SecurityGroupIngress property
-      let hasIngressRule = false;
-      const ingressRules = targetSgProps.SecurityGroupIngress as
-        | Array<Record<string, unknown>>
-        | undefined;
-
-      if (ingressRules && Array.isArray(ingressRules)) {
-        hasIngressRule = ingressRules.some((rule) => {
-          const hasSourceSg = rule.SourceSecurityGroupId !== undefined;
-          const fromPortMatches = rule.FromPort === COMMON_PORTS.HTTP;
-          const toPortMatches = rule.ToPort === COMMON_PORTS.HTTP;
-          const protocolMatches = rule.IpProtocol === "tcp";
-          const descriptionMatches =
-            rule.Description === "Allow HTTP from source security group";
-          return (
-            hasSourceSg &&
-            fromPortMatches &&
-            toPortMatches &&
-            protocolMatches &&
-            descriptionMatches
-          );
-        });
-      }
-
-      // Check for separate SecurityGroupIngress resources if not found in properties
-      if (!hasIngressRule) {
-        const ingressResources = template.findResources(
-          "AWS::EC2::SecurityGroupIngress"
-        );
-        hasIngressRule = Object.values(ingressResources).some(
-          (resource: Record<string, unknown>) => {
-            const props = resource.Properties as Record<string, unknown>;
-            const hasGroupId = props.GroupId !== undefined;
-            const hasSourceSg = props.SourceSecurityGroupId !== undefined;
-            const fromPortMatches = props.FromPort === COMMON_PORTS.HTTP;
-            const toPortMatches = props.ToPort === COMMON_PORTS.HTTP;
-            const protocolMatches = props.IpProtocol === "tcp";
-            const descriptionMatches =
-              props.Description === "Allow HTTP from source security group";
-            return (
-              hasGroupId &&
-              hasSourceSg &&
-              fromPortMatches &&
-              toPortMatches &&
-              protocolMatches &&
-              descriptionMatches
-            );
-          }
-        );
-      }
-
-      ingressTestData = {
-        hasIngressRule,
-        targetSg,
-      };
-
-      // Pre-compute egress test data
-      const sourceSg2 = new SecurityGroupConstruct(stack, "SourceSG2", {
-        vpc,
-        groupName: `${TEST_CONSTANTS.SECURITY_GROUP.SOURCE_NAME}-2`,
+      // Setup for egress test
+      const egressSourceSg = new SecurityGroupConstruct(connectionTestStack, "SourceSG2", {
+        vpc: connectionTestVpc,
+        groupName: `${TEST_CONSTANTS.SECURITY_GROUP.SOURCE_NAME}-conn-to`,
         description: TEST_CONSTANTS.SECURITY_GROUP.SOURCE_DESCRIPTION,
         envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
       });
 
-      const targetSg2 = new SecurityGroupConstruct(stack, "TargetSG2", {
-        vpc,
-        groupName: `${TEST_CONSTANTS.SECURITY_GROUP.TARGET_NAME}-2`,
+      const egressTargetSg = new SecurityGroupConstruct(connectionTestStack, "TargetSG2", {
+        vpc: connectionTestVpc,
+        groupName: `${TEST_CONSTANTS.SECURITY_GROUP.TARGET_NAME}-conn-to`,
         description: TEST_CONSTANTS.SECURITY_GROUP.TARGET_DESCRIPTION,
         envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
       });
 
-      sourceSg2.allowTo(
-        targetSg2.securityGroup,
+      egressSourceSg.allowTo(
+        egressTargetSg.securityGroup,
         ec2.Port.tcp(COMMON_PORTS.HTTPS),
         "Allow HTTPS to target security group"
       );
 
-      const template2 = Template.fromStack(stack);
-
-      // Find the source security group resource
-      const securityGroupResources2 = template2.findResources(
+      // Pre-compute template (single synthesis)
+      const template = Template.fromStack(connectionTestStack);
+      const securityGroupResources = template.findResources(
         "AWS::EC2::SecurityGroup"
       );
-      const sourceSgResource = Object.values(securityGroupResources2).find(
+      const ingressResources = template.findResources(
+        "AWS::EC2::SecurityGroupIngress"
+      );
+      const egressResources = template.findResources(
+        "AWS::EC2::SecurityGroupEgress"
+      );
+
+      // Pre-compute ingress rule check
+      const ingressTargetGroupName = `${TEST_CONSTANTS.SECURITY_GROUP.TARGET_NAME}-conn-from`;
+      const targetSgResource = Object.values(securityGroupResources).find(
         (resource: Record<string, unknown>) =>
           (resource.Properties as Record<string, unknown>).GroupName ===
-          `${TEST_CONSTANTS.SECURITY_GROUP.SOURCE_NAME}-2`
+          ingressTargetGroupName
       ) as Record<string, unknown> | undefined;
 
-      const sourceSgProps = sourceSgResource
-        ? (sourceSgResource.Properties as Record<string, unknown>)
-        : {};
+      const targetSgIngressRules = targetSgResource
+        ? ((targetSgResource.Properties as Record<string, unknown>)
+            .SecurityGroupIngress as Array<Record<string, unknown>> | undefined)
+        : undefined;
 
-      // Check SecurityGroupEgress property
-      let hasEgressRule = false;
-      const egressRules = sourceSgProps.SecurityGroupEgress as
-        | Array<Record<string, unknown>>
-        | undefined;
-
-      if (egressRules && Array.isArray(egressRules)) {
-        hasEgressRule = egressRules.some(
+      const hasInlineIngressRule =
+        targetSgIngressRules?.some(
           (rule) =>
-            rule.DestinationSecurityGroupId &&
+            rule.SourceSecurityGroupId !== undefined &&
+            rule.FromPort === COMMON_PORTS.HTTP &&
+            rule.ToPort === COMMON_PORTS.HTTP &&
+            rule.IpProtocol === "tcp" &&
+            rule.Description === "Allow HTTP from source security group"
+        ) ?? false;
+
+      const hasSeparateIngressRule = Object.values(ingressResources).some(
+        (resource: Record<string, unknown>) => {
+          const props = resource.Properties as Record<string, unknown>;
+          return (
+            props.GroupId !== undefined &&
+            props.SourceSecurityGroupId !== undefined &&
+            props.FromPort === COMMON_PORTS.HTTP &&
+            props.ToPort === COMMON_PORTS.HTTP &&
+            props.IpProtocol === "tcp" &&
+            props.Description === "Allow HTTP from source security group"
+          );
+        }
+      );
+
+      const hasIngressRule = hasInlineIngressRule || hasSeparateIngressRule;
+
+      // Pre-compute egress rule check
+      const egressSourceGroupName = `${TEST_CONSTANTS.SECURITY_GROUP.SOURCE_NAME}-conn-to`;
+      const sourceSgResource = Object.values(securityGroupResources).find(
+        (resource: Record<string, unknown>) =>
+          (resource.Properties as Record<string, unknown>).GroupName ===
+          egressSourceGroupName
+      ) as Record<string, unknown> | undefined;
+
+      const sourceSgEgressRules = sourceSgResource
+        ? ((sourceSgResource.Properties as Record<string, unknown>)
+            .SecurityGroupEgress as Array<Record<string, unknown>> | undefined)
+        : undefined;
+
+      const hasInlineEgressRule =
+        sourceSgEgressRules?.some(
+          (rule) =>
+            rule.DestinationSecurityGroupId !== undefined &&
             rule.FromPort === COMMON_PORTS.HTTPS &&
             rule.ToPort === COMMON_PORTS.HTTPS &&
             rule.IpProtocol === "tcp" &&
             rule.Description === "Allow HTTPS to target security group"
-        );
-      }
+        ) ?? false;
 
-      // Check for separate SecurityGroupEgress resources if not found in properties
-      if (!hasEgressRule) {
-        const egressResources = template2.findResources(
-          "AWS::EC2::SecurityGroupEgress"
-        );
-        hasEgressRule = Object.values(egressResources).some(
-          (resource: Record<string, unknown>) => {
-            const props = resource.Properties as Record<string, unknown>;
-            return (
-              props.GroupId &&
-              props.DestinationSecurityGroupId &&
-              props.FromPort === COMMON_PORTS.HTTPS &&
-              props.ToPort === COMMON_PORTS.HTTPS &&
-              props.IpProtocol === "tcp" &&
-              props.Description === "Allow HTTPS to target security group"
-            );
-          }
-        );
-      }
+      const hasSeparateEgressRule = Object.values(egressResources).some(
+        (resource: Record<string, unknown>) => {
+          const props = resource.Properties as Record<string, unknown>;
+          return (
+            props.GroupId !== undefined &&
+            props.DestinationSecurityGroupId !== undefined &&
+            props.FromPort === COMMON_PORTS.HTTPS &&
+            props.ToPort === COMMON_PORTS.HTTPS &&
+            props.IpProtocol === "tcp" &&
+            props.Description === "Allow HTTPS to target security group"
+          );
+        }
+      );
 
-      egressTestData = {
-        hasEgressRule,
-        sourceSg: sourceSg2,
+      const hasEgressRule = hasInlineEgressRule || hasSeparateEgressRule;
+
+      connectionTestData = {
+        ingressTest: {
+          sourceSg: ingressSourceSg,
+          targetSg: ingressTargetSg,
+          hasIngressRule,
+        },
+        egressTest: {
+          sourceSg: egressSourceSg,
+          targetSg: egressTargetSg,
+          hasEgressRule,
+        },
       };
     });
 
     test("allows connections from another security group", () => {
-      // Guard assertions
-      expect(ingressTestData).toBeDefined();
-      expect(ingressTestData.targetSg).toBeDefined();
-      expect(ingressTestData.targetSg.securityGroup).toBeDefined();
+      // Guard assertion
+      expect(connectionTestData).toBeDefined();
+      expect(connectionTestData.ingressTest).toBeDefined();
 
-      // Verify the rule exists
-      expect(ingressTestData.hasIngressRule).toBe(true);
+      // Verify constructs were created
+      expect(connectionTestData.ingressTest.targetSg).toBeDefined();
+      expect(connectionTestData.ingressTest.targetSg.securityGroup).toBeDefined();
+      expect(connectionTestData.ingressTest.sourceSg).toBeDefined();
+      expect(connectionTestData.ingressTest.sourceSg.securityGroup).toBeDefined();
+
+      // Verify the ingress rule was created
+      expect(connectionTestData.ingressTest.hasIngressRule).toBe(true);
     });
 
     test("allows connections to another security group", () => {
-      // Guard assertions
-      expect(egressTestData).toBeDefined();
-      expect(egressTestData.sourceSg).toBeDefined();
-      expect(egressTestData.sourceSg.securityGroup).toBeDefined();
+      // Guard assertion
+      expect(connectionTestData).toBeDefined();
+      expect(connectionTestData.egressTest).toBeDefined();
 
-      // Verify the rule exists
-      expect(egressTestData.hasEgressRule).toBe(true);
+      // Verify constructs were created
+      expect(connectionTestData.egressTest.sourceSg).toBeDefined();
+      expect(connectionTestData.egressTest.sourceSg.securityGroup).toBeDefined();
+      expect(connectionTestData.egressTest.targetSg).toBeDefined();
+      expect(connectionTestData.egressTest.targetSg.securityGroup).toBeDefined();
+
+      // Verify the egress rule was created
+      expect(connectionTestData.egressTest.hasEgressRule).toBe(true);
     });
   });
 
