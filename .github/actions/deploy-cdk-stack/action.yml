@@ -331,11 +331,13 @@ runs:
           echo "Deployment completed in ${{ steps.deploy.outputs.duration }}s" >> $GITHUB_STEP_SUMMARY
           
           # Add outputs if available
-          if [ "${{ steps.outputs.outputs.stack_outputs }}" != "[]" ] && [ -n "${{ steps.outputs.outputs.stack_outputs }}" ]; then
+          # Store outputs in variable to avoid bash interpolation issues
+          STACK_OUTPUTS='${{ steps.outputs.outputs.stack_outputs }}'
+          if [ -n "$STACK_OUTPUTS" ] && [ "$STACK_OUTPUTS" != "[]" ]; then
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### Stack Outputs" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo '${{ steps.outputs.outputs.stack_outputs }}' | jq -r '.[] | "- **\(.OutputKey)**: `\(.OutputValue)`"' >> $GITHUB_STEP_SUMMARY
+            echo "$STACK_OUTPUTS" | jq -r '.[] | "- **\(.OutputKey)**: `\(.OutputValue)`"' >> $GITHUB_STEP_SUMMARY
           fi
           
           # Add outputs file location if saved
