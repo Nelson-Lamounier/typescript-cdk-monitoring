@@ -65,3 +65,5 @@ prompts/*
 *.txt
 
 *docs/*
+
+iam/*
