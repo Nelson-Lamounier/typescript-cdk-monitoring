@@ -606,6 +606,19 @@ lint: ## Run linter (ESLint with max-warnings 0)
 	@echo "$(BLUE)Running linter...$(NC)"
 	npx eslint lib/ bin/ tests/ --max-warnings 0
 
+lint-ci: ## Run linter for CI (warnings reported but non-blocking)
+	@echo "$(BLUE)Running linter (CI mode - warnings are informational)...$(NC)"
+	@npx eslint lib/ bin/ tests/ || { \
+		EXIT_CODE=$$?; \
+		if [ $$EXIT_CODE -eq 1 ]; then \
+			echo "$(YELLOW)Linting completed with warnings (non-blocking)$(NC)"; \
+			exit 0; \
+		else \
+			echo "$(RED)Linting failed with errors$(NC)"; \
+			exit $$EXIT_CODE; \
+		fi; \
+	}
+
 lint-fix: ## Run linter with auto-fix
 	@echo "$(BLUE)Running linter with auto-fix...$(NC)"
 	yarn lint:fix

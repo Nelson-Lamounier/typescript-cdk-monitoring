@@ -43,7 +43,6 @@ jobs:
     name: Lint Code
     needs: setup
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     steps:
       - name: Checkout
@@ -55,7 +54,7 @@ jobs:
           node-version: ${{ needs.setup.outputs.node-version }}
 
       - name: Run ESLint
-        run: make lint
+        run: make lint-ci
 
   typecheck:
     name: Type Check

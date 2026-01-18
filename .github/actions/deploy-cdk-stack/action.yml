@@ -319,10 +319,10 @@ runs:
       run: |
         echo "## CDK Stack Deployment" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Stack**: \`${{ inputs.stack-name }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "**Stack**: \\\`${{ inputs.stack-name }}\\\`" >> $GITHUB_STEP_SUMMARY
         echo "**Environment**: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
         echo "**Region**: ${{ inputs.aws-region }}" >> $GITHUB_STEP_SUMMARY
-        echo "**Account**: \`***${ACCOUNT_LAST4}\`" >> $GITHUB_STEP_SUMMARY
+        echo "**Account**: \\\`***${ACCOUNT_LAST4}\\\`" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         
         if [ "${{ steps.deploy.outputs.status }}" = "success" ]; then
@@ -341,7 +341,7 @@ runs:
           # Add outputs file location if saved
           if [ -n "${{ steps.save-outputs.outputs.file_path }}" ]; then
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Outputs saved to: \`${{ steps.save-outputs.outputs.file_path }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "Outputs saved to: \\\`${{ steps.save-outputs.outputs.file_path }}\\\`" >> $GITHUB_STEP_SUMMARY
           fi
         else
           echo "### Status: ✗ Failed" >> $GITHUB_STEP_SUMMARY
