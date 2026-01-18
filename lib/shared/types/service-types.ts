@@ -132,6 +132,7 @@ export interface PrometheusServiceConstructProps {
   cpu?: number;
   memoryMiB?: number;
   containerPort?: number;
+  hostPort?: number; // Static host port for Grafana datasource connectivity
   logRetention?: logs.RetentionDays;
   logGroupKmsKey?: cdk.aws_kms.IKey;
   dataVolume: PrometheusVolumeConfig;

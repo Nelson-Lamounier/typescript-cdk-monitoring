@@ -125,6 +125,8 @@ export class PrometheusConstruct extends Construct {
 
     const cpu = props.cpu ?? DEFAULT_PROMETHEUS_CPU_MIB;
     const memoryMiB = props.memoryMiB ?? DEFAULT_PROMETHEUS_MEMORY_MIB;
+    const containerPort = props.containerPort ?? DEFAULT_PROMETHEUS_PORT;
+    const hostPort = props.hostPort ?? containerPort; // Use static port for Grafana connectivity
 
     this.taskDefConstruct = new EcsTaskDefinitionConstruct(
       this,
@@ -141,7 +143,8 @@ export class PrometheusConstruct extends Construct {
           {
             name: "prometheus",
             image: ecs.ContainerImage.fromRegistry(DEFAULT_PROMETHEUS_IMAGE),
-            containerPort: props.containerPort ?? DEFAULT_PROMETHEUS_PORT,
+            containerPort: containerPort,
+            hostPort: hostPort, // Pass hostPort for static port mapping
             cpu: isFargate ? cpu : props.cpu,
             memoryLimitMiB: isFargate ? undefined : memoryMiB,
             memoryReservationMiB: isFargate ? undefined : memoryMiB,

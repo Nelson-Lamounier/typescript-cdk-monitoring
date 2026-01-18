@@ -28,6 +28,7 @@ import {
   GRAFANA_ADMIN_SECRET,
   NODE_EXPORTER,
 } from "../../shared/constants/monitoring-constants";
+import { DEFAULT_PROMETHEUS_PORT } from "../../shared/constants/service-constants";
 import { validateEnvName } from "../../shared/utils/validation";
 import { isProductionEnvironment } from "../../shared/utils/environment";
 
@@ -217,6 +218,7 @@ export class MonitoringServiceStack extends cdk.Stack {
       enableExecuteCommand,
       enableCircuitBreaker,
       logRetention,
+      hostPort: DEFAULT_PROMETHEUS_PORT, // Static port for Grafana connectivity
       // Apply memory/CPU overrides if provided
       ...(props.prometheusProps?.cpu && { cpu: props.prometheusProps.cpu }),
       ...(props.prometheusProps?.memoryMiB && {
@@ -526,19 +528,15 @@ export class MonitoringServiceStack extends cdk.Stack {
     // ========================================================================
     // SECURITY GROUP CONNECTIONS
     // ========================================================================
-    // CRITICAL: Both Prometheus and Grafana use bridge networking with dynamic ports
-    // Container ports are fixed (9090 for Prometheus, 3000 for Grafana)
-    // BUT host ports are dynamic (32768-65535) because hostPort is not specified
-    // ALB must be allowed to reach the dynamic host port range
+    // UPDATED: Prometheus now uses static port mapping (hostPort: 9090)
+    // Grafana still uses bridge networking with dynamic ports
+    // ALB must be allowed to reach both static and dynamic ports
 
-    // Allow ALB to reach Prometheus on dynamic port range (bridge networking)
+    // Allow ALB to reach Prometheus on static port (bridge networking with hostPort)
     this.prometheusService.connections.allowFrom(
       props.loadBalancer,
-      ec2.Port.tcpRange(
-        BRIDGE_NETWORK_DYNAMIC_PORT_RANGE.MIN,
-        BRIDGE_NETWORK_DYNAMIC_PORT_RANGE.MAX
-      ),
-      "Allow ALB to reach Prometheus on dynamic ports (bridge networking)"
+      ec2.Port.tcp(MONITORING_PORTS.PROMETHEUS),
+      "Allow ALB to reach Prometheus on port 9090 (static mapping)"
     );
 
     // Allow ALB to reach Grafana on dynamic port range (bridge networking)

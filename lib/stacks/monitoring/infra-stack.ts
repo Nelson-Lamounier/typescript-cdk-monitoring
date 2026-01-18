@@ -584,6 +584,15 @@ export class MonitoringInfraStack extends cdk.Stack {
       "Allow ALB to reach Prometheus on port 9090"
     );
 
+    // CRITICAL: Allow ECS instances to communicate with each other on Prometheus port
+    // Required for Grafana (running on same EC2) to access Prometheus via private IP
+    // Without this, Grafana cannot reach Prometheus datasource
+    ltConstruct.securityGroup.addIngressRule(
+      ltConstruct.securityGroup,
+      ec2.Port.tcp(MONITORING_PORTS.PROMETHEUS),
+      "Allow ECS instances to access Prometheus within VPC (Grafana datasource)"
+    );
+
     // CRITICAL: Allow ECS instances to connect to EFS
     // Without this rule, EFS mounting will fail!
     // We add an egress rule from ECS to EFS instead of ingress on EFS

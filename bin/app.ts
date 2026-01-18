@@ -23,15 +23,30 @@ if (!envConfig) {
   );
 }
 
+// Allow context override for CI/CD deployments
+// This enables explicit account/region specification in GitHub Actions
+const contextAccount = app.node.tryGetContext("accountId");
+const contextRegion = app.node.tryGetContext("awsRegion");
+
+const targetAccount = contextAccount || envConfig.account;
+const targetRegion = contextRegion || envConfig.region;
+
 console.log(`Deploying to environment: ${envName}`);
-console.log(`Region: ${envConfig.region || "auto-detect"}`);
-console.log(`Account: ${envConfig.account || "auto-detect"}`);
+console.log(`Region: ${targetRegion || "auto-detect"}`);
+console.log(`Account: ${targetAccount || "auto-detect"}`);
+
+if (contextAccount) {
+  console.log(`  (Account overridden via context)`);
+}
+if (contextRegion) {
+  console.log(`  (Region overridden via context)`);
+}
 
 // Stack props
 const stackProps: cdk.StackProps = {
   env: {
-    account: envConfig.account,
-    region: envConfig.region,
+    account: targetAccount,
+    region: targetRegion,
   },
 };
 
