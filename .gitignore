@@ -56,10 +56,10 @@ coverage/
 tests/integration/.generated-templates/
 
 # Deployment outputs (contains sensitive information)
-.deployment-outputs/
+deployment-outputs/
 
 # Verification reports (generated during CI/CD)
-.verification-reports/
+verification-reports/
 
 *prompts/*
 prompts/*

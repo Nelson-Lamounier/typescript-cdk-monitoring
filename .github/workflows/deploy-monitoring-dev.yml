@@ -97,7 +97,7 @@ jobs:
       aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
       require-approval: "never"
       verify-bootstrap: false
-      outputs-directory: ".deployment-outputs"
+      outputs-directory: "deployment-outputs"
     secrets:
       AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE }}
 
@@ -125,7 +125,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: development-Networking-outputs
-          path: .deployment-outputs
+          path: deployment-outputs
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -143,15 +143,15 @@ jobs:
           node --loader tsx scripts/integration/deployment/monitoring/verify-networking-stack.ts \
             --environment ${{ env.ENVIRONMENT }} \
             --aws-region ${{ env.AWS_REGION }} \
-            --outputs-file .deployment-outputs/development-Networking-outputs.json \
-            --report-file .verification-reports/development-networking-verification.json
+            --outputs-file deployment-outputs/development-Networking-outputs.json \
+            --report-file verification-reports/development-networking-verification.json
       
       - name: Upload Verification Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: networking-verification-report
-          path: .verification-reports/development-networking-verification.json
+          path: verification-reports/development-networking-verification.json
           retention-days: 30
           if-no-files-found: warn
 
@@ -169,7 +169,7 @@ jobs:
       aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
       aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
       require-approval: "never"
-      outputs-directory: ".deployment-outputs"
+      outputs-directory: "deployment-outputs"
     secrets:
       AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE }}
 
@@ -221,7 +221,7 @@ jobs:
       aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
       aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
       require-approval: "never"
-      outputs-directory: ".deployment-outputs"
+      outputs-directory: "deployment-outputs"
     secrets:
       AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE }}
 
@@ -273,7 +273,7 @@ jobs:
       aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
       aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
       require-approval: "never"
-      outputs-directory: ".deployment-outputs"
+      outputs-directory: "deployment-outputs"
     secrets:
       AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE }}
 

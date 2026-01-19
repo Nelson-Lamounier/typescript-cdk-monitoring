@@ -583,7 +583,7 @@ program
   )
   .option(
     "--report-file <path>",
-    "Path to write verification report JSON (default: .verification-reports/<env>-networking-verification.json)"
+    "Path to write verification report JSON (default: verification-reports/<env>-networking-verification.json)"
   )
   .option(
     "-v, --verbose",
@@ -601,7 +601,7 @@ if (!VALID_ENVIRONMENTS.includes(options.environment)) {
 
 // Default report file path
 const defaultReportFile = path.join(
-  ".verification-reports",
+  "verification-reports",
   `${options.environment}-networking-verification.json`
 );
 
