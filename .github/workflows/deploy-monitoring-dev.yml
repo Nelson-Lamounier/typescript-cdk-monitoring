@@ -99,7 +99,7 @@ jobs:
       verify-bootstrap: false
       outputs-directory: "deployment-outputs"
     secrets:
-      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE }}
+      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_DEV }}
 
   # ===========================================================================
   # Verify Networking Stack
@@ -130,7 +130,7 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE }}
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_DEV }}
           aws-region: ${{ env.AWS_REGION }}
           audience: sts.amazonaws.com
 
@@ -142,19 +142,19 @@ jobs:
           
           echo "Current Account: $CURRENT_ACCOUNT"
           echo "Target Account:  $TARGET_ACCOUNT"
-          echo "Region: ${{ env.AWS_REGION }}"
-          echo ""
           
           if [ "$CURRENT_ACCOUNT" != "$TARGET_ACCOUNT" ]; then
-            echo "❌ ERROR: Wrong account!"
-            echo "Verification is running in: $CURRENT_ACCOUNT"
-            echo "Resources were deployed to: $TARGET_ACCOUNT"
             echo ""
-            echo "Solution: AWS_OIDC_ROLE must assume into development account"
+            echo "❌ ERROR: AWS_OIDC_ROLE_DEV is configured for wrong account"
+            echo "   Current: $CURRENT_ACCOUNT"
+            echo "   Expected: $TARGET_ACCOUNT"
+            echo ""
+            echo "Fix: Update AWS_OIDC_ROLE_DEV secret to point to development account:"
+            echo "   arn:aws:iam::$TARGET_ACCOUNT:role/GitHubOIDCRole"
             exit 1
-          else
-            echo "✅ Correct account - resources should be accessible"
           fi
+          
+          echo "✅ Authenticated to correct development account"
 
       - name: Verify Networking Stack
         run: |
@@ -192,7 +192,7 @@ jobs:
       require-approval: "never"
       outputs-directory: "deployment-outputs"
     secrets:
-      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE }}
+      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_DEV }}
 
   # ===========================================================================
   # Verify EFS Stack
@@ -217,7 +217,7 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE }}
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_DEV }}
           aws-region: ${{ env.AWS_REGION }}
           audience: sts.amazonaws.com
 
@@ -244,7 +244,7 @@ jobs:
       require-approval: "never"
       outputs-directory: "deployment-outputs"
     secrets:
-      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE }}
+      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_DEV }}
 
   # ===========================================================================
   # Verify Infrastructure Stack
@@ -269,7 +269,7 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE }}
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_DEV }}
           aws-region: ${{ env.AWS_REGION }}
           audience: sts.amazonaws.com
 
@@ -296,7 +296,7 @@ jobs:
       require-approval: "never"
       outputs-directory: "deployment-outputs"
     secrets:
-      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE }}
+      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_DEV }}
 
   # ===========================================================================
   # Verify Service Stack & Connectivity
@@ -323,7 +323,7 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE }}
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_DEV }}
           aws-region: ${{ env.AWS_REGION }}
           audience: sts.amazonaws.com
 
