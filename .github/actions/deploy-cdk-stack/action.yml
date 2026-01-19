@@ -330,8 +330,11 @@ runs:
       run: |
         echo "Saving stack outputs to file..."
         
-        OUTPUTS_DIR="${{ inputs.outputs-directory }}"
+        # Use GITHUB_WORKSPACE to ensure absolute path
+        OUTPUTS_DIR="${GITHUB_WORKSPACE}/${{ inputs.outputs-directory }}"
         mkdir -p "$OUTPUTS_DIR"
+        
+        echo "Output directory: $OUTPUTS_DIR"
         
         # Sanitise stack name for filename
         STACK_NAME_SAFE=$(echo "${{ inputs.stack-name }}" | tr '/' '-' | tr ':' '-')
@@ -342,6 +345,14 @@ runs:
           cp "/tmp/cdk-outputs/stack-outputs.json" "$OUTPUT_FILE"
           echo "file_path=$OUTPUT_FILE" >> $GITHUB_OUTPUT
           echo "✓ Outputs saved to: $OUTPUT_FILE"
+          
+          # Verify file was created
+          if [ -f "$OUTPUT_FILE" ]; then
+            echo "✓ File verified at: $OUTPUT_FILE"
+            ls -lh "$OUTPUT_FILE"
+          else
+            echo "⚠ Warning: File not found after copy"
+          fi
         else
           # Fallback: save from GitHub output
           if [ -n "${{ steps.outputs.outputs.stack_outputs }}" ] && [ "${{ steps.outputs.outputs.stack_outputs }}" != "[]" ]; then

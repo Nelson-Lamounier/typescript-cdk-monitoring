@@ -58,6 +58,9 @@ tests/integration/.generated-templates/
 # Deployment outputs (contains sensitive information)
 .deployment-outputs/
 
+# Verification reports (generated during CI/CD)
+.verification-reports/
+
 *prompts/*
 prompts/*
 .prompts.txt

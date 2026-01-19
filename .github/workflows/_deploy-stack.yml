@@ -101,6 +101,23 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.stack-name }}-outputs
-          path: ${{ inputs.outputs-directory }}
+          path: ${{ github.workspace }}/${{ inputs.outputs-directory }}
           retention-days: 30
-          if-no-files-found: ignore
+          if-no-files-found: warn
+      
+      - name: Debug Outputs Directory
+        if: failure() && inputs.outputs-directory != ''
+        shell: bash
+        run: |
+          echo "Debugging outputs directory issue..."
+          echo "Expected path: ${{ github.workspace }}/${{ inputs.outputs-directory }}"
+          echo ""
+          if [ -d "${{ github.workspace }}/${{ inputs.outputs-directory }}" ]; then
+            echo "Directory exists. Contents:"
+            ls -la "${{ github.workspace }}/${{ inputs.outputs-directory }}"
+          else
+            echo "Directory does not exist"
+          fi
+          echo ""
+          echo "Workspace contents:"
+          ls -la "${{ github.workspace }}"

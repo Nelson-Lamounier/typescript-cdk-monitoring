@@ -121,6 +121,12 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - name: Download Stack Outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: development-Networking-outputs
+          path: .deployment-outputs
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -130,10 +136,24 @@ jobs:
 
       - name: Verify Networking Stack
         run: |
-          echo "Verifying Networking Stack deployment..."
-          make verify-networking \
-            ENVIRONMENT=${{ env.ENVIRONMENT }} \
-            AWS_REGION=${{ env.AWS_REGION }}
+          echo "Verifying Networking Stack deployment (optimised)..."
+          
+          # Use CDK outputs file instead of CloudFormation API
+          # This is faster and works better in cross-account scenarios
+          node --loader tsx scripts/integration/deployment/monitoring/verify-networking-stack.ts \
+            --environment ${{ env.ENVIRONMENT }} \
+            --aws-region ${{ env.AWS_REGION }} \
+            --outputs-file .deployment-outputs/development-Networking-outputs.json \
+            --report-file .verification-reports/development-networking-verification.json
+      
+      - name: Upload Verification Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: networking-verification-report
+          path: .verification-reports/development-networking-verification.json
+          retention-days: 30
+          if-no-files-found: warn
 
   # ===========================================================================
   # Deploy EFS Stack

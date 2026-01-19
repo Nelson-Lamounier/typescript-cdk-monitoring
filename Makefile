@@ -83,16 +83,37 @@ verify-networking: ## Verify Networking stack deployment and readiness
 	@echo "$(BLUE)Verifying Networking Stack...$(NC)"
 	@echo "Environment: $(ENVIRONMENT)"
 	@echo "AWS Region: $(AWS_REGION)"
+	@if [ -n "$(OUTPUTS_FILE)" ]; then \
+		echo "Using outputs file: $(OUTPUTS_FILE)"; \
+	fi
 	@if [ -n "$(AWS_PROFILE)" ]; then \
 		echo "AWS Profile: $(AWS_PROFILE)"; \
 	else \
 		echo "AWS Profile: (using default credentials)"; \
 	fi
 	@echo ""
-	@if [ -n "$(AWS_PROFILE)" ]; then \
-		npx tsx scripts/integration/deployment/monitoring/verify-networking-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION) -p $(AWS_PROFILE); \
+	@if [ -n "$(AWS_PROFILE)" ] && [ -n "$(OUTPUTS_FILE)" ]; then \
+		npx tsx scripts/integration/deployment/monitoring/verify-networking-stack.ts \
+			-e $(ENVIRONMENT) \
+			-r $(AWS_REGION) \
+			-p $(AWS_PROFILE) \
+			-o $(OUTPUTS_FILE) \
+			-v; \
+	elif [ -n "$(OUTPUTS_FILE)" ]; then \
+		npx tsx scripts/integration/deployment/monitoring/verify-networking-stack.ts \
+			-e $(ENVIRONMENT) \
+			-r $(AWS_REGION) \
+			-o $(OUTPUTS_FILE); \
+	elif [ -n "$(AWS_PROFILE)" ]; then \
+		npx tsx scripts/integration/deployment/monitoring/verify-networking-stack.ts \
+			-e $(ENVIRONMENT) \
+			-r $(AWS_REGION) \
+			-p $(AWS_PROFILE) \
+			-v; \
 	else \
-		npx tsx scripts/integration/deployment/monitoring/verify-networking-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION); \
+		npx tsx scripts/integration/deployment/monitoring/verify-networking-stack.ts \
+			-e $(ENVIRONMENT) \
+			-r $(AWS_REGION); \
 	fi
 
 verify-efs: ## Verify EFS stack deployment and readiness
