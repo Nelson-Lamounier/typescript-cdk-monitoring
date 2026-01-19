@@ -24,12 +24,14 @@ import { EnvironmentConfig } from "../../config/environments";
  * @param envName Environment name (e.g., 'development', 'pipeline', 'production')
  * @param envConfig Environment configuration
  * @param networkingStack The networking stack (for VPC reference)
+ * @param stackProps Stack properties including env (account/region)
  */
 export function createMonitoringStacks(
   app: cdk.App,
   envName: string,
   envConfig: EnvironmentConfig,
-  networkingStack: NetworkingStack
+  networkingStack: NetworkingStack,
+  stackProps: cdk.StackProps
 ): {
   efsStack: MonitoringEfsStack;
   infraStack: MonitoringInfraStack;
@@ -37,14 +39,6 @@ export function createMonitoringStacks(
 } {
   const stackNamePrefix = `${envName}-Monitoring`;
   const projectName = "monitoring";
-
-  // Stack props with environment configuration
-  const stackProps: cdk.StackProps = {
-    env: {
-      account: envConfig.account,
-      region: envConfig.region,
-    },
-  };
 
   // ============================================================================
   // 1. MONITORING EFS STACK (Storage Layer)

@@ -60,7 +60,7 @@ const { networkingStack } = deployFoundationStacks(app, envConfig, stackProps);
 // MONITORING STACKS
 // ============================================================================
 
-createMonitoringStacks(app, envName, envConfig, networkingStack);
+createMonitoringStacks(app, envName, envConfig, networkingStack, stackProps);
 
 // ============================================================================
 // STACK TAGGING

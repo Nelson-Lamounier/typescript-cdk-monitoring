@@ -267,6 +267,9 @@ runs:
       env:
         CDK_ENVIRONMENT: ${{ inputs.environment }}
         AWS_ACCOUNT_ID: ${{ inputs.aws-account-id }}
+        AWS_ACCOUNT_ID_DEV: ${{ inputs.aws-account-id }}  # For development environment
+        AWS_ACCOUNT_ID_STAGING: ${{ inputs.aws-account-id }}  # For staging environment
+        AWS_ACCOUNT_ID_PROD: ${{ inputs.aws-account-id }}  # For production environment
         AWS_REGION: ${{ inputs.aws-region }}
 
     - name: Retrieve Stack Outputs
