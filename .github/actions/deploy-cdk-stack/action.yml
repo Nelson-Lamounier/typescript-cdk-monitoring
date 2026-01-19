@@ -325,7 +325,7 @@ runs:
 
     - name: Save Outputs to File
       id: save-outputs
-      if: steps.deploy.outputs.status == 'success' && inputs.outputs-directory != ''
+      if: always() && inputs.outputs-directory != ''
       shell: bash
       run: |
         echo "Saving stack outputs to file..."
@@ -339,6 +339,13 @@ runs:
         # Sanitise stack name for filename
         STACK_NAME_SAFE=$(echo "${{ inputs.stack-name }}" | tr '/' '-' | tr ':' '-')
         OUTPUT_FILE="$OUTPUTS_DIR/${STACK_NAME_SAFE}-outputs.json"
+        
+        # Only save if deployment was successful
+        if [ "${{ steps.deploy.outputs.status }}" != "success" ]; then
+          echo "⚠ Deployment did not succeed, skipping output save"
+          echo "Creating empty directory for artifact upload consistency"
+          exit 0
+        fi
         
         # Copy CDK outputs file if it exists
         if [ -f "/tmp/cdk-outputs/stack-outputs.json" ]; then
@@ -362,6 +369,29 @@ runs:
           else
             echo "⚠ No outputs to save"
           fi
+        fi
+
+    - name: Verify Outputs Directory for Artifact Upload
+      if: always() && inputs.outputs-directory != ''
+      shell: bash
+      run: |
+        echo "=== Verifying Outputs Directory (from composite action) ==="
+        OUTPUTS_DIR="${GITHUB_WORKSPACE}/${{ inputs.outputs-directory }}"
+        echo "Expected directory: $OUTPUTS_DIR"
+        
+        if [ -d "$OUTPUTS_DIR" ]; then
+          echo "✓ Directory exists"
+          echo "Contents:"
+          ls -la "$OUTPUTS_DIR"
+          
+          FILE_COUNT=$(find "$OUTPUTS_DIR" -type f | wc -l)
+          echo "Total files: $FILE_COUNT"
+        else
+          echo "✗ Directory does not exist!"
+          echo "This will cause artifact upload to fail"
+          echo ""
+          echo "Checking workspace..."
+          ls -la "${GITHUB_WORKSPACE}"
         fi
 
     - name: Generate Deployment Summary
