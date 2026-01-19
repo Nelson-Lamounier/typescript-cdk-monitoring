@@ -192,6 +192,13 @@ runs:
         CONTEXT_ARGS=""
         CONTEXT_ARGS="$CONTEXT_ARGS --context environment=${{ inputs.environment }}"
         
+        # Add account ID and region as context (critical for cross-account deployments)
+        # CDK app.ts expects these as context parameters, not environment variables
+        CONTEXT_ARGS="$CONTEXT_ARGS --context accountId=${{ inputs.aws-account-id }}"
+        CONTEXT_ARGS="$CONTEXT_ARGS --context awsRegion=${{ inputs.aws-region }}"
+        echo "  Added account context: accountId=${{ inputs.aws-account-id }}"
+        echo "  Added region context: awsRegion=${{ inputs.aws-region }}"
+        
         # Parse additional context and append
         ADDITIONAL_CONTEXT='${{ inputs.additional-context }}'
         
