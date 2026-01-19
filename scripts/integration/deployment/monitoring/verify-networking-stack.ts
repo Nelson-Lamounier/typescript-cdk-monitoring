@@ -309,49 +309,35 @@ async function verifyNetworkingStack(
     Logger.keyValue("Stack Name", stackName);
     Logger.keyValue("Environment", config.environment);
     Logger.keyValue("Region", config.region);
-  }
-
-  // Detect authentication method
-  const isOidcAuth = !!process.env.AWS_SESSION_TOKEN;
-  if (config.verbose) {
-    if (isOidcAuth) {
-      Logger.keyValue("Auth Method", "OIDC (environment variables)");
-    } else if (config.profile) {
-      Logger.keyValue("Auth Method", `AWS Profile: ${config.profile}`);
-    } else {
-      Logger.keyValue("Auth Method", "Default credentials");
-    }
     console.log("");
   }
 
+  // Create AWS clients
   const { cfn, ec2, accountId } = await createClients(config);
-  
   summary.accountId = accountId || undefined;
 
-  if (config.verbose) {
-    if (accountId) {
-      Logger.keyValue("AWS Account ID", accountId);
-    }
+  if (config.verbose && accountId) {
+    Logger.keyValue("AWS Account ID", accountId);
     console.log("");
   }
 
-  // Check 1: Stack exists and is in valid state
+  // Check 1: Stack outputs exist
   summary.totalChecks++;
   if (config.verbose) {
-    Logger.subsection("Stack Status");
+    Logger.subsection("Stack Outputs");
   }
 
-  // Try to read from outputs file first (optimised path)
+  // Read from outputs file (preferred) or CloudFormation
   let stackInfo = null;
   if (config.outputsFile) {
     if (config.verbose) {
-      Logger.info(`Reading stack outputs from file: ${config.outputsFile}`);
+      Logger.info(`Reading from: ${config.outputsFile}`);
     }
     stackInfo = await getStackOutputsFromFile(stackName, config.outputsFile);
     if (stackInfo) {
       summary.verificationMethod = "cdk-outputs-file";
       if (config.verbose) {
-        Logger.success("Stack outputs loaded from CDK outputs file");
+        Logger.success("✓ Outputs loaded from file");
       }
     }
   }

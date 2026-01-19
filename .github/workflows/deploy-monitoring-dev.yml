@@ -134,12 +134,33 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           audience: sts.amazonaws.com
 
+      - name: Verify AWS Account
+        run: |
+          echo "=== AWS Account Verification ==="
+          CURRENT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+          TARGET_ACCOUNT="${{ needs.setup.outputs.aws-account-id }}"
+          
+          echo "Current Account: $CURRENT_ACCOUNT"
+          echo "Target Account:  $TARGET_ACCOUNT"
+          echo "Region: ${{ env.AWS_REGION }}"
+          echo ""
+          
+          if [ "$CURRENT_ACCOUNT" != "$TARGET_ACCOUNT" ]; then
+            echo "❌ ERROR: Wrong account!"
+            echo "Verification is running in: $CURRENT_ACCOUNT"
+            echo "Resources were deployed to: $TARGET_ACCOUNT"
+            echo ""
+            echo "Solution: AWS_OIDC_ROLE must assume into development account"
+            exit 1
+          else
+            echo "✅ Correct account - resources should be accessible"
+          fi
+
       - name: Verify Networking Stack
         run: |
-          echo "Verifying Networking Stack deployment (optimised)..."
+          echo "Verifying Networking Stack deployment..."
           
-          # Use CDK outputs file instead of CloudFormation API
-          # This is faster and works better in cross-account scenarios
+          # Use outputs file + AWS validation (same OIDC role as deployment)
           npx tsx scripts/integration/deployment/monitoring/verify-networking-stack.ts \
             --environment ${{ env.ENVIRONMENT }} \
             --aws-region ${{ env.AWS_REGION }} \
