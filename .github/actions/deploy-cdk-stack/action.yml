@@ -238,6 +238,10 @@ runs:
         DEPLOY_CMD="$DEPLOY_CMD $CONTEXT_ARGS"
         DEPLOY_CMD="$DEPLOY_CMD --require-approval ${{ inputs.require-approval }}"
         
+        # Add outputs file to capture stack outputs during deployment
+        mkdir -p /tmp/cdk-outputs
+        DEPLOY_CMD="$DEPLOY_CMD --outputs-file /tmp/cdk-outputs/stack-outputs.json"
+        
         # Add additional args if provided
         if [ -n "${{ inputs.additional-args }}" ]; then
           DEPLOY_CMD="$DEPLOY_CMD ${{ inputs.additional-args }}"
@@ -279,29 +283,45 @@ runs:
       run: |
         echo "Retrieving CloudFormation stack outputs..."
         
-        STACK_OUTPUTS=$(aws cloudformation describe-stacks \
-          --stack-name "${{ inputs.stack-name }}" \
-          --region "${{ inputs.aws-region }}" \
-          --query 'Stacks[0].Outputs' \
-          --output json 2>&1)
+        # CDK saves outputs to file during deployment
+        OUTPUTS_FILE="/tmp/cdk-outputs/stack-outputs.json"
         
-        if [ $? -eq 0 ]; then
-          # Escape output for GitHub Actions
-          ESCAPED_OUTPUTS=$(echo "$STACK_OUTPUTS" | jq -c '.')
-          echo "stack_outputs=$ESCAPED_OUTPUTS" >> $GITHUB_OUTPUT
+        if [ -f "$OUTPUTS_FILE" ]; then
+          echo "Reading outputs from CDK outputs file..."
           
-          OUTPUT_COUNT=$(echo "$STACK_OUTPUTS" | jq 'length')
-          echo "✓ Retrieved $OUTPUT_COUNT stack output(s)"
+          # Extract outputs for this specific stack
+          STACK_OUTPUTS=$(jq -r '.["${{ inputs.stack-name }}"] // []' "$OUTPUTS_FILE")
           
-          if [ "$OUTPUT_COUNT" -gt 0 ]; then
-            echo ""
-            echo "Stack Outputs:"
-            echo "$STACK_OUTPUTS" | jq -r '.[] | "  \(.OutputKey): \(.OutputValue)"'
+          if [ "$STACK_OUTPUTS" != "[]" ] && [ "$STACK_OUTPUTS" != "null" ]; then
+            # Convert CDK output format to CloudFormation format
+            # CDK format: {"OutputKey": "value"}
+            # CFN format: [{"OutputKey": "key", "OutputValue": "value"}]
+            FORMATTED_OUTPUTS=$(echo "$STACK_OUTPUTS" | jq -c '[to_entries[] | {OutputKey: .key, OutputValue: .value}]')
+            
+            # Escape output for GitHub Actions
+            echo "stack_outputs=$FORMATTED_OUTPUTS" >> $GITHUB_OUTPUT
+            
+            OUTPUT_COUNT=$(echo "$FORMATTED_OUTPUTS" | jq 'length')
+            echo "✓ Retrieved $OUTPUT_COUNT stack output(s) from CDK outputs file"
+            
+            if [ "$OUTPUT_COUNT" -gt 0 ]; then
+              echo ""
+              echo "Stack Outputs:"
+              echo "$FORMATTED_OUTPUTS" | jq -r '.[] | "  \(.OutputKey): \(.OutputValue)"'
+            fi
+          else
+            echo "No outputs found for stack: ${{ inputs.stack-name }}"
+            echo "stack_outputs=[]" >> $GITHUB_OUTPUT
           fi
         else
-          echo "WARNING: Could not retrieve stack outputs"
+          echo "WARNING: CDK outputs file not found at: $OUTPUTS_FILE"
+          echo "This may indicate the deployment succeeded but outputs were not captured."
           echo "stack_outputs=[]" >> $GITHUB_OUTPUT
         fi
+      env:
+        CDK_ENVIRONMENT: ${{ inputs.environment }}
+        AWS_ACCOUNT_ID: ${{ inputs.aws-account-id }}
+        AWS_REGION: ${{ inputs.aws-region }}
 
     - name: Save Outputs to File
       id: save-outputs
@@ -317,11 +337,21 @@ runs:
         STACK_NAME_SAFE=$(echo "${{ inputs.stack-name }}" | tr '/' '-' | tr ':' '-')
         OUTPUT_FILE="$OUTPUTS_DIR/${STACK_NAME_SAFE}-outputs.json"
         
-        # Save outputs
-        echo '${{ steps.outputs.outputs.stack_outputs }}' | jq '.' > "$OUTPUT_FILE"
-        
-        echo "file_path=$OUTPUT_FILE" >> $GITHUB_OUTPUT
-        echo "✓ Outputs saved to: $OUTPUT_FILE"
+        # Copy CDK outputs file if it exists
+        if [ -f "/tmp/cdk-outputs/stack-outputs.json" ]; then
+          cp "/tmp/cdk-outputs/stack-outputs.json" "$OUTPUT_FILE"
+          echo "file_path=$OUTPUT_FILE" >> $GITHUB_OUTPUT
+          echo "✓ Outputs saved to: $OUTPUT_FILE"
+        else
+          # Fallback: save from GitHub output
+          if [ -n "${{ steps.outputs.outputs.stack_outputs }}" ] && [ "${{ steps.outputs.outputs.stack_outputs }}" != "[]" ]; then
+            echo '${{ steps.outputs.outputs.stack_outputs }}' | jq '.' > "$OUTPUT_FILE"
+            echo "file_path=$OUTPUT_FILE" >> $GITHUB_OUTPUT
+            echo "✓ Outputs saved to: $OUTPUT_FILE"
+          else
+            echo "⚠ No outputs to save"
+          fi
+        fi
 
     - name: Generate Deployment Summary
       if: always()
