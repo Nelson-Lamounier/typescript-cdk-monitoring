@@ -6,7 +6,7 @@ name: Deploy Monitoring to Development
 on:
   push:
     branches:
-      - feature/pipeline
+      - feature/services-troubleshooting
     paths:
       - "lib/stacks/**"
       - "bin/**"
