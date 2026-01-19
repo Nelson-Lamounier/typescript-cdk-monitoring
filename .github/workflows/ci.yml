@@ -420,16 +420,27 @@ jobs:
           if-no-files-found: ignore
 
   # ============================================================================
-  # Coverage Aggregation (Runs After All Tests)
+  # Coverage Aggregation & Publishing (Runs After All Tests)
   # ============================================================================
   coverage-summary:
-    name: Coverage Summary
+    name: Coverage Summary & Report
     needs: [test-unit, test-constructs, test-stacks, test-helpers, test-security, test-connectivity, test-snapshots]
     runs-on: ubuntu-latest
     if: always()
     continue-on-error: true
+    permissions:
+      contents: write
+      pages: write
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: Download All Coverage Reports
         uses: actions/download-artifact@v4
         with:
@@ -437,35 +448,182 @@ jobs:
           merge-multiple: true
           path: coverage/
 
-      - name: Generate Coverage Summary
+      - name: Generate Comprehensive Coverage Report
+        id: coverage-report
         run: |
+          echo "Generating comprehensive coverage report..."
+          
+          # Run tests with coverage to consolidate all reports
+          yarn test --coverage --silent || true
+          
+          # Check if coverage files exist
+          if [ ! -f "coverage/index.html" ]; then
+            echo "Coverage HTML report not found. Generating fresh coverage..."
+            yarn test:coverage
+          fi
+          
+          echo "coverage_generated=true" >> $GITHUB_OUTPUT
+          
+          # Extract coverage metrics
           if [ -f "coverage/coverage-summary.json" ]; then
-            echo "## Test Coverage Summary" >> $GITHUB_STEP_SUMMARY
-            node -e "
-              const fs = require('fs');
-              try {
-                const coverage = JSON.parse(fs.readFileSync('coverage/coverage-summary.json', 'utf8'));
-                const total = coverage.total;
-                console.log(\`- **Lines**: \${total.lines.pct}%\`);
-                console.log(\`- **Functions**: \${total.functions.pct}%\`);
-                console.log(\`- **Branches**: \${total.branches.pct}%\`);
-                console.log(\`- **Statements**: \${total.statements.pct}%\`);
-              } catch (e) {
-                console.log('Coverage data not available');
-              }
-            " >> $GITHUB_STEP_SUMMARY
+            STATEMENTS=$(jq -r '.total.statements.pct' coverage/coverage-summary.json)
+            BRANCHES=$(jq -r '.total.branches.pct' coverage/coverage-summary.json)
+            FUNCTIONS=$(jq -r '.total.functions.pct' coverage/coverage-summary.json)
+            LINES=$(jq -r '.total.lines.pct' coverage/coverage-summary.json)
+            
+            echo "statements_pct=$STATEMENTS" >> $GITHUB_OUTPUT
+            echo "branches_pct=$BRANCHES" >> $GITHUB_OUTPUT
+            echo "functions_pct=$FUNCTIONS" >> $GITHUB_OUTPUT
+            echo "lines_pct=$LINES" >> $GITHUB_OUTPUT
+            
+            echo "Coverage Metrics:"
+            echo "  Statements: ${STATEMENTS}%"
+            echo "  Branches: ${BRANCHES}%"
+            echo "  Functions: ${FUNCTIONS}%"
+            echo "  Lines: ${LINES}%"
           else
-            echo "Coverage report not found" >> $GITHUB_STEP_SUMMARY
+            echo "Coverage summary not found"
+            echo "statements_pct=0" >> $GITHUB_OUTPUT
+            echo "branches_pct=0" >> $GITHUB_OUTPUT
+            echo "functions_pct=0" >> $GITHUB_OUTPUT
+            echo "lines_pct=0" >> $GITHUB_OUTPUT
           fi
 
-      - name: Upload Combined Coverage
+      - name: Generate Coverage Badge Data
+        if: steps.coverage-report.outputs.coverage_generated == 'true'
+        run: |
+          LINES_PCT="${{ steps.coverage-report.outputs.lines_pct }}"
+          
+          # Determine badge colour based on coverage
+          if (( $(echo "$LINES_PCT >= 80" | bc -l) )); then
+            BADGE_COLOR="brightgreen"
+          elif (( $(echo "$LINES_PCT >= 70" | bc -l) )); then
+            BADGE_COLOR="green"
+          elif (( $(echo "$LINES_PCT >= 60" | bc -l) )); then
+            BADGE_COLOR="yellow"
+          elif (( $(echo "$LINES_PCT >= 50" | bc -l) )); then
+            BADGE_COLOR="orange"
+          else
+            BADGE_COLOR="red"
+          fi
+          
+          echo "Badge colour: $BADGE_COLOR (${LINES_PCT}%)"
+          echo "BADGE_COLOR=$BADGE_COLOR" >> $GITHUB_ENV
+          echo "LINES_PCT=$LINES_PCT" >> $GITHUB_ENV
+
+      - name: Upload Combined Coverage Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-reports
+          name: coverage-report-html
           path: coverage/
           retention-days: 30
           if-no-files-found: ignore
+
+      - name: Generate Coverage Summary for PR/Commit
+        if: steps.coverage-report.outputs.coverage_generated == 'true'
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          ## Test Coverage Report
+          
+          ### Coverage Metrics
+          
+          | Metric | Coverage | Status |
+          |--------|----------|--------|
+          | **Statements** | ${{ steps.coverage-report.outputs.statements_pct }}% | $([ $(echo "${{ steps.coverage-report.outputs.statements_pct }} >= 70" | bc -l) -eq 1 ] && echo "✅" || echo "⚠️") |
+          | **Branches** | ${{ steps.coverage-report.outputs.branches_pct }}% | $([ $(echo "${{ steps.coverage-report.outputs.branches_pct }} >= 70" | bc -l) -eq 1 ] && echo "✅" || echo "⚠️") |
+          | **Functions** | ${{ steps.coverage-report.outputs.functions_pct }}% | $([ $(echo "${{ steps.coverage-report.outputs.functions_pct }} >= 70" | bc -l) -eq 1 ] && echo "✅" || echo "⚠️") |
+          | **Lines** | ${{ steps.coverage-report.outputs.lines_pct }}% | $([ $(echo "${{ steps.coverage-report.outputs.lines_pct }} >= 70" | bc -l) -eq 1 ] && echo "✅" || echo "⚠️") |
+          
+          ### Coverage Thresholds
+          
+          - 🎯 **Target**: 70% minimum coverage
+          - ✅ **Pass**: ≥70%
+          - ⚠️ **Warning**: 50-69%
+          - ❌ **Fail**: <50%
+          
+          ### HTML Coverage Report
+          
+          📊 **Interactive Coverage Report**: Download the \`coverage-report-html\` artifact from this workflow run to view the detailed HTML report.
+          
+          To view locally:
+          1. Download the \`coverage-report-html\` artifact
+          2. Extract the archive
+          3. Open \`index.html\` in your browser
+          
+          ### Coverage by Module
+          
+          EOF
+          
+          # Add top uncovered files
+          if [ -f "coverage/coverage-summary.json" ]; then
+            echo "#### Files Needing Attention (Lowest Coverage)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            jq -r '
+              to_entries | 
+              map(select(.key != "total")) | 
+              sort_by(.value.lines.pct) | 
+              limit(10; .[]) | 
+              "| \(.key | split("/") | .[-1]) | \(.value.lines.pct)% | \(.value.lines.covered)/\(.value.lines.total) |"
+            ' coverage/coverage-summary.json | sed '1i| File | Coverage | Lines |' | sed '2i|------|----------|-------|' >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          
+          ### Quick Actions
+          
+          - **Run locally**: \`make test-coverage\`
+          - **View report**: \`open coverage/index.html\`
+          - **Update snapshots**: \`make test-update-snapshots\`
+          
+          EOF
+
+      - name: Check Coverage Thresholds
+        if: steps.coverage-report.outputs.coverage_generated == 'true'
+        run: |
+          LINES_PCT="${{ steps.coverage-report.outputs.lines_pct }}"
+          BRANCHES_PCT="${{ steps.coverage-report.outputs.branches_pct }}"
+          FUNCTIONS_PCT="${{ steps.coverage-report.outputs.functions_pct }}"
+          STATEMENTS_PCT="${{ steps.coverage-report.outputs.statements_pct }}"
+          
+          echo "Checking coverage thresholds..."
+          echo "  Lines: ${LINES_PCT}% (minimum: 50%)"
+          echo "  Branches: ${BRANCHES_PCT}% (minimum: 50%)"
+          echo "  Functions: ${FUNCTIONS_PCT}% (minimum: 50%)"
+          echo "  Statements: ${STATEMENTS_PCT}% (minimum: 50%)"
+          
+          THRESHOLD_FAILED=false
+          
+          # Minimum thresholds (non-blocking, warning only)
+          if (( $(echo "$LINES_PCT < 50" | bc -l) )); then
+            echo "::warning::Lines coverage (${LINES_PCT}%) is below 50% threshold"
+            THRESHOLD_FAILED=true
+          fi
+          
+          if (( $(echo "$BRANCHES_PCT < 50" | bc -l) )); then
+            echo "::warning::Branches coverage (${BRANCHES_PCT}%) is below 50% threshold"
+            THRESHOLD_FAILED=true
+          fi
+          
+          if (( $(echo "$FUNCTIONS_PCT < 50" | bc -l) )); then
+            echo "::warning::Functions coverage (${FUNCTIONS_PCT}%) is below 50% threshold"
+            THRESHOLD_FAILED=true
+          fi
+          
+          if (( $(echo "$STATEMENTS_PCT < 50" | bc -l) )); then
+            echo "::warning::Statements coverage (${STATEMENTS_PCT}%) is below 50% threshold"
+            THRESHOLD_FAILED=true
+          fi
+          
+          if [ "$THRESHOLD_FAILED" = true ]; then
+            echo ""
+            echo "::warning::Coverage is below recommended thresholds. Consider adding more tests."
+            echo "This is a warning only - CI will not fail."
+          else
+            echo ""
+            echo "✅ All coverage thresholds met!"
+          fi
 
   # ============================================================================
   # Summary Job (Shows Overall Status)

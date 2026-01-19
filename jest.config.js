@@ -8,7 +8,15 @@ module.exports = {
   verbose: false,
   collectCoverage: false,
   coverageDirectory: "coverage",
-  coverageReporters: ["text", "text-summary", "json", "lcov", "html"],
+  coverageReporters: [
+    "text",
+    "text-summary",
+    "json",
+    "json-summary", // Required for CI coverage summary
+    "lcov",
+    "html",
+    "clover",
+  ],
   
   // Only collect coverage from source files
   collectCoverageFrom: [
