@@ -6,7 +6,7 @@ name: Deploy Monitoring to Development
 on:
   push:
     branches:
-      - feature/services-troubleshooting
+      - develop
     paths:
       - "lib/stacks/**"
       - "bin/**"
@@ -145,7 +145,7 @@ jobs:
           
           if [ "$CURRENT_ACCOUNT" != "$TARGET_ACCOUNT" ]; then
             echo ""
-            echo "❌ ERROR: AWS_OIDC_ROLE_DEV is configured for wrong account"
+            echo "ERROR: AWS_OIDC_ROLE_DEV is configured for wrong account"
             echo "   Current: $CURRENT_ACCOUNT"
             echo "   Expected: $TARGET_ACCOUNT"
             echo ""

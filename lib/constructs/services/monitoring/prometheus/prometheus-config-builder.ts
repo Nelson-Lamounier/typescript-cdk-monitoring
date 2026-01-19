@@ -51,6 +51,15 @@ export function buildPrometheusConfig(
   // Add external URL if provided (required for subpath serving behind ALB)
   if (props.externalUrl) {
     command.push(`--web.external-url=${props.externalUrl}`);
+    
+    // Extract route prefix from external URL (e.g., /prometheus from http://alb/prometheus)
+    // The route prefix is needed to make Prometheus serve all endpoints under the prefix
+    // including health checks (/-/healthy becomes /prometheus/-/healthy on the container)
+    const urlMatch = props.externalUrl.match(/https?:\/\/[^/]+(\/[^?#]*)?/);
+    if (urlMatch && urlMatch[1]) {
+      const routePrefix = urlMatch[1];
+      command.push(`--web.route-prefix=${routePrefix}`);
+    }
   }
 
   return { command, configContent: config };

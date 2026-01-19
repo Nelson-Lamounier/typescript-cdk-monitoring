@@ -437,14 +437,20 @@ async function getAutoScalingGroup(
 async function getInstanceHealth(
   ec2Client: EC2Client,
   instanceIds: string[]
-): Promise<{ healthy: number; unhealthy: number }> {
+): Promise<{
+  healthy: number;
+  unhealthy: number;
+  initialising: number;
+  details: Array<{ id: string; instanceStatus: string; systemStatus: string }>;
+}> {
   if (instanceIds.length === 0) {
-    return { healthy: 0, unhealthy: 0 };
+    return { healthy: 0, unhealthy: 0, initialising: 0, details: [] };
   }
 
   try {
     const command = new DescribeInstanceStatusCommand({
       InstanceIds: instanceIds,
+      IncludeAllInstances: true, // Include instances that are initializing
     });
 
     const response = await ec2Client.send(command);
@@ -452,19 +458,45 @@ async function getInstanceHealth(
 
     let healthy = 0;
     let unhealthy = 0;
+    let initialising = 0;
+    const details: Array<{
+      id: string;
+      instanceStatus: string;
+      systemStatus: string;
+    }> = [];
 
     statuses.forEach((status) => {
-      if (status.InstanceStatus?.Status === "ok") {
+      const instanceStatus = status.InstanceStatus?.Status || "unknown";
+      const systemStatus = status.SystemStatus?.Status || "unknown";
+
+      details.push({
+        id: status.InstanceId || "unknown",
+        instanceStatus,
+        systemStatus,
+      });
+
+      // Check if both instance and system checks are OK
+      if (instanceStatus === "ok" && systemStatus === "ok") {
         healthy++;
+      } else if (
+        instanceStatus === "initializing" ||
+        systemStatus === "initializing"
+      ) {
+        initialising++;
       } else {
         unhealthy++;
       }
     });
 
-    return { healthy, unhealthy };
+    return { healthy, unhealthy, initialising, details };
   } catch (error: any) {
     logPermissionWarning("EC2 DescribeInstanceStatus", error);
-    return { healthy: 0, unhealthy: instanceIds.length };
+    return {
+      healthy: 0,
+      unhealthy: instanceIds.length,
+      initialising: 0,
+      details: [],
+    };
   }
 }
 
@@ -824,6 +856,147 @@ async function checkAlbHealth(dnsName: string): Promise<{
   });
 }
 
+async function verifySecurityGroupForHealthChecks(
+  securityGroups: any[],
+  albSecurityGroupId?: string
+): Promise<{
+  hasDynamicPortRange: boolean;
+  hasStaticPrometheusPort: boolean;
+  details: string[];
+}> {
+  const details: string[] = [];
+  let hasDynamicPortRange = false;
+  let hasStaticPrometheusPort = false;
+
+  for (const sg of securityGroups) {
+    const ingressRules = sg.IpPermissions || [];
+
+    // Check for dynamic port range (32768-65535) from ALB
+    const dynamicPortRule = ingressRules.find(
+      (rule: any) =>
+        rule.IpProtocol === "tcp" &&
+        rule.FromPort === 32768 &&
+        rule.ToPort === 65535 &&
+        (albSecurityGroupId
+          ? rule.UserIdGroupPairs?.some(
+              (pair: any) => pair.GroupId === albSecurityGroupId
+            )
+          : true)
+    );
+
+    if (dynamicPortRule) {
+      hasDynamicPortRange = true;
+      details.push(
+        `✓ Dynamic port range (32768-65535) allowed from ${
+          albSecurityGroupId ? `ALB SG ${albSecurityGroupId}` : "source"
+        }`
+      );
+    }
+
+    // Check for static Prometheus port (9090) - may be used with hostPort
+    const prometheusPortRule = ingressRules.find(
+      (rule: any) =>
+        rule.IpProtocol === "tcp" &&
+        rule.FromPort === 9090 &&
+        rule.ToPort === 9090
+    );
+
+    if (prometheusPortRule) {
+      hasStaticPrometheusPort = true;
+      details.push("✓ Static Prometheus port (9090) allowed");
+    }
+
+    // Check for NFS port (2049) for EFS
+    const nfsPortRule = ingressRules.find(
+      (rule: any) =>
+        rule.IpProtocol === "tcp" &&
+        rule.FromPort === 2049 &&
+        rule.ToPort === 2049
+    );
+
+    if (nfsPortRule) {
+      details.push("✓ NFS port (2049) allowed for EFS mounting");
+    }
+  }
+
+  return {
+    hasDynamicPortRange,
+    hasStaticPrometheusPort,
+    details,
+  };
+}
+
+async function checkSsmAgentConnectivity(
+  ssmClient: SSMClient,
+  instanceIds: string[]
+): Promise<{
+  reachable: number;
+  unreachable: number;
+  details: Array<{ id: string; pingStatus: string }>;
+}> {
+  if (instanceIds.length === 0) {
+    return { reachable: 0, unreachable: 0, details: [] };
+  }
+
+  const details: Array<{ id: string; pingStatus: string }> = [];
+  let reachable = 0;
+  let unreachable = 0;
+
+  for (const instanceId of instanceIds) {
+    try {
+      // Send a simple command to test SSM connectivity
+      const sendCommand = new SendCommandCommand({
+        DocumentName: "AWS-RunShellScript",
+        InstanceIds: [instanceId],
+        Parameters: {
+          commands: ["echo 'SSM connectivity test'"],
+        },
+        TimeoutSeconds: 10,
+      });
+
+      const sendResponse = await ssmClient.send(sendCommand);
+      const commandId = sendResponse.Command?.CommandId;
+
+      if (!commandId) {
+        details.push({ id: instanceId, pingStatus: "unreachable" });
+        unreachable++;
+        continue;
+      }
+
+      // Wait a bit for command to execute
+      await sleep(2);
+
+      // Check command status
+      const getCommand = new GetCommandInvocationCommand({
+        CommandId: commandId,
+        InstanceId: instanceId,
+      });
+
+      const getResponse = await ssmClient.send(getCommand);
+
+      if (
+        getResponse.Status === "Success" ||
+        getResponse.Status === "InProgress"
+      ) {
+        details.push({ id: instanceId, pingStatus: "reachable" });
+        reachable++;
+      } else {
+        details.push({
+          id: instanceId,
+          pingStatus: getResponse.Status || "unknown",
+        });
+        unreachable++;
+      }
+    } catch (error: any) {
+      logPermissionWarning(`SSM connectivity check for ${instanceId}`, error);
+      details.push({ id: instanceId, pingStatus: "error" });
+      unreachable++;
+    }
+  }
+
+  return { reachable, unreachable, details };
+}
+
 async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
   checks: CheckCounts;
   state: VerificationState;
@@ -1072,22 +1245,58 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
 
         checks.total++;
 
-        if (health.unhealthy === 0) {
+        if (health.initialising > 0) {
+          Logger.warning(
+            `Instance Health: ${health.healthy}/${state.instanceIds.length} healthy, ${health.initialising} initializing, ${health.unhealthy} unhealthy`
+          );
+          Logger.info(
+            "Instances are still initializing. This is normal for newly launched instances."
+          );
+          Logger.info(
+            "Instance status checks typically take 2-5 minutes to complete."
+          );
+          checks.warnings++;
+
+          if (config.verbose) {
+            health.details.forEach((detail) => {
+              Logger.info(
+                `   ${detail.id}: instance=${detail.instanceStatus}, system=${detail.systemStatus}`
+              );
+            });
+          }
+        } else if (health.unhealthy > 0) {
+          Logger.error(
+            `Instance Health: ${health.healthy}/${state.instanceIds.length} healthy, ${health.unhealthy} unhealthy`
+          );
+          Logger.info(
+            "CRITICAL: Unhealthy instances detected. Service deployment will fail."
+          );
+          Logger.info("Troubleshooting steps:");
+          Logger.info("  1. Wait 2-5 minutes for status checks to complete");
+          Logger.info("  2. Check instance system log for boot errors");
+          Logger.info("  3. Verify security groups allow required traffic");
+          Logger.info("  4. Check VPC networking configuration");
+          checks.failed++;
+          state.readinessIssues++;
+
+          if (config.verbose) {
+            health.details.forEach((detail) => {
+              Logger.error(
+                `   ${detail.id}: instance=${detail.instanceStatus}, system=${detail.systemStatus}`
+              );
+            });
+          }
+        } else {
           Logger.success(
             `Instance Health: ${health.healthy}/${state.instanceIds.length} healthy`
           );
           checks.passed++;
-        } else {
-          Logger.warning(
-            `Instance Health: ${health.healthy}/${state.instanceIds.length} healthy, ${health.unhealthy} unhealthy`
-          );
-          checks.warnings++;
-        }
 
-        if (config.verbose) {
-          state.instanceIds.forEach((id) => {
-            Logger.info(`Instance ${id}: health checked`);
-          });
+          if (config.verbose) {
+            state.instanceIds.forEach((id) => {
+              Logger.info(`Instance ${id}: all status checks passed`);
+            });
+          }
         }
       } else {
         Logger.warning("No EC2 instances found (ASG may be scaling up)");
@@ -1372,8 +1581,159 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
 
   console.log("");
 
-  // 7. CloudWatch Log Groups
-  Logger.subsection("7. CloudWatch Log Groups");
+  // 6.5. Security Group Health Check Validation
+  Logger.subsection("6.5. Security Group Health Check Validation");
+  Logger.info(
+    "Verifying security group rules support ALB health checks and service communication..."
+  );
+  console.log("");
+
+  if (securityGroups.length > 0) {
+    // Get ALB security group ID for validation
+    let albSecurityGroupId: string | undefined;
+    if (state.albArn) {
+      try {
+        const albCommand = new DescribeLoadBalancersCommand({
+          LoadBalancerArns: [state.albArn],
+        });
+        const albResponse = await elbv2Client.send(albCommand);
+        albSecurityGroupId =
+          albResponse.LoadBalancers?.[0]?.SecurityGroups?.[0];
+      } catch (error: any) {
+        logPermissionWarning("ELBv2 DescribeLoadBalancers", error);
+      }
+    }
+
+    const sgValidation = await verifySecurityGroupForHealthChecks(
+      securityGroups,
+      albSecurityGroupId
+    );
+
+    checks.total++;
+
+    if (sgValidation.hasDynamicPortRange || sgValidation.hasStaticPrometheusPort) {
+      Logger.success(
+        "Security groups configured for ALB health checks (bridge networking)"
+      );
+      checks.passed++;
+
+      sgValidation.details.forEach((detail) => {
+        Logger.info(`   ${detail}`);
+      });
+
+      if (!sgValidation.hasDynamicPortRange) {
+        Logger.warning(
+          "   ⚠️  Dynamic port range (32768-65535) not found - required for Grafana health checks"
+        );
+        Logger.info(
+          "      Grafana uses dynamic host ports with bridge networking"
+        );
+        checks.warnings++;
+      }
+
+      if (!sgValidation.hasStaticPrometheusPort && state.registeredInstances > 0) {
+        Logger.info(
+          "   ℹ️  Static Prometheus port (9090) not configured - Prometheus may use dynamic ports"
+        );
+        Logger.info(
+          "      If Prometheus uses hostPort: 9090, this rule is needed"
+        );
+      }
+    } else {
+      Logger.error(
+        "CRITICAL: Security groups NOT configured for ALB health checks"
+      );
+      Logger.info(
+        "ALB health checks will fail without proper security group rules."
+      );
+      Logger.info("Required rules:");
+      Logger.info(
+        "  - TCP 32768-65535 from ALB security group (for dynamic ports)"
+      );
+      Logger.info(
+        "  - OR TCP 9090 from ALB security group (if using static hostPort)"
+      );
+      checks.failed++;
+      state.readinessIssues++;
+
+      sgValidation.details.forEach((detail) => {
+        Logger.info(`   ${detail}`);
+      });
+    }
+  } else {
+    Logger.warning("No security groups found - cannot validate health check rules");
+    checks.warnings++;
+  }
+
+  console.log("");
+
+  // 7. SSM Agent Connectivity
+  Logger.subsection("7. SSM Agent Connectivity");
+  Logger.info(
+    "Verifying SSM Agent is running and accessible on EC2 instances..."
+  );
+  console.log("");
+
+  if (state.instanceIds.length > 0) {
+    const ssmConnectivity = await checkSsmAgentConnectivity(
+      ssmClient,
+      state.instanceIds
+    );
+
+    checks.total++;
+
+    if (ssmConnectivity.reachable === state.instanceIds.length) {
+      Logger.success(
+        `SSM Agent: All instances reachable (${ssmConnectivity.reachable}/${state.instanceIds.length})`
+      );
+      checks.passed++;
+
+      if (config.verbose) {
+        ssmConnectivity.details.forEach((detail) => {
+          Logger.info(`   ${detail.id}: ${detail.pingStatus}`);
+        });
+      }
+    } else if (ssmConnectivity.reachable > 0) {
+      Logger.warning(
+        `SSM Agent: ${ssmConnectivity.reachable}/${state.instanceIds.length} instances reachable`
+      );
+      Logger.info(
+        "Some instances may still be installing SSM Agent or configuring networking."
+      );
+      checks.warnings++;
+
+      ssmConnectivity.details.forEach((detail) => {
+        const status =
+          detail.pingStatus === "reachable"
+            ? "✓ reachable"
+            : `✗ ${detail.pingStatus}`;
+        Logger.info(`   ${detail.id}: ${status}`);
+      });
+    } else {
+      Logger.error(
+        `SSM Agent: No instances reachable (0/${state.instanceIds.length})`
+      );
+      Logger.info("CRITICAL: Cannot manage instances without SSM Agent.");
+      Logger.info("Troubleshooting steps:");
+      Logger.info("  1. Check VPC endpoints for ssm, ssmmessages, ec2messages");
+      Logger.info("  2. Verify IAM instance profile has SSM permissions");
+      Logger.info("  3. Check security groups allow HTTPS outbound (443)");
+      Logger.info("  4. Verify SSM Agent is installed and running");
+      checks.failed++;
+      state.readinessIssues++;
+
+      ssmConnectivity.details.forEach((detail) => {
+        Logger.error(`   ${detail.id}: ${detail.pingStatus}`);
+      });
+    }
+  } else {
+    Logger.info("No instances found - skipping SSM connectivity check");
+  }
+
+  console.log("");
+
+  // 8. CloudWatch Log Groups
+  Logger.subsection("8. CloudWatch Log Groups");
   if (stackInfo.outputs.taskLogGroupName) {
     const taskLogGroup = await getLogGroup(
       logsClient,
@@ -1416,8 +1776,8 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
 
   console.log("");
 
-  // 8. EFS Mount Target & Subnet Verification
-  Logger.subsection("8. EFS Mount Target & Subnet Verification");
+  // 9. EFS Mount Target & Subnet Verification
+  Logger.subsection("9. EFS Mount Target & Subnet Verification");
   state.efsFileSystemId = await getEfsFileSystemId(
     ssmClient,
     config.environment
@@ -1507,8 +1867,8 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
 
   console.log("");
 
-  // 9. SSM State Manager Associations
-  Logger.subsection("9. SSM State Manager Associations");
+  // 10. SSM State Manager Associations
+  Logger.subsection("10. SSM State Manager Associations");
   const associations = await getSsmAssociations(
     ssmClient,
     stackName,
@@ -1778,8 +2138,8 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
 
   console.log("");
 
-  // 10. SSM Parameters
-  Logger.subsection("10. SSM Parameters (Infrastructure Discovery)");
+  // 11. SSM Parameters
+  Logger.subsection("11. SSM Parameters (Infrastructure Discovery)");
 
   const infraParamPrefix = `${paramPrefix}/infra/config`;
   let infraFound = 0;
@@ -1877,8 +2237,8 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
 
   console.log("");
 
-  // 11. EventBridge Rules
-  Logger.subsection("11. EventBridge Rules");
+  // 12. EventBridge Rules
+  Logger.subsection("12. EventBridge Rules");
 
   try {
     const command = new ListRulesCommand({});
@@ -1910,8 +2270,8 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
 
   console.log("");
 
-  // 12. Bootstrap Metadata
-  Logger.subsection("12. Bootstrap Metadata");
+  // 13. Bootstrap Metadata
+  Logger.subsection("13. Bootstrap Metadata");
 
   const metadataPrefix = `/bootstrap/${config.environment}/instances`;
 
@@ -1953,8 +2313,8 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
 
   console.log("");
 
-  // 13. Actual EFS Mount Verification
-  Logger.subsection("13. Actual EFS Mount Verification");
+  // 14. Actual EFS Mount Verification
+  Logger.subsection("14. Actual EFS Mount Verification");
   Logger.info(
     "This section runs actual SSM commands to verify EFS is mounted."
   );
@@ -2038,8 +2398,8 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
 
   console.log("");
 
-  // 14. ALB Health Check
-  Logger.subsection("14. ALB Health Check");
+  // 15. ALB Health Check
+  Logger.subsection("15. ALB Health Check");
 
   if (state.albDns) {
     const healthCheck = await checkAlbHealth(state.albDns);
@@ -2073,8 +2433,8 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
 
   console.log("");
 
-  // 15. Service Stack Deployment Readiness
-  Logger.subsection("15. Service Stack Deployment Readiness");
+  // 16. Service Stack Deployment Readiness
+  Logger.subsection("16. Service Stack Deployment Readiness");
   console.log(
     "Checking prerequisites for MonitoringServiceStack deployment..."
   );
@@ -2143,6 +2503,26 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
     checks.passed++;
   }
 
+  // Critical: All instances must be healthy
+  if (state.healthyInstances < state.instanceIds.length) {
+    const unhealthy = state.instanceIds.length - state.healthyInstances;
+    Logger.error(
+      `CRITICAL: ${unhealthy} unhealthy instance(s) - service deployment will fail`
+    );
+    Logger.info(
+      "EC2 instance status checks must pass before deploying services."
+    );
+    Logger.info("Wait for instances to complete initialization (2-5 minutes).");
+    Logger.info("Run this verification again once all instances are healthy.");
+    state.readinessIssues++;
+    checks.failed++;
+  } else if (state.healthyInstances > 0) {
+    Logger.success(
+      `All EC2 instances healthy (${state.healthyInstances}/${state.instanceIds.length})`
+    );
+    checks.passed++;
+  }
+
   // Critical: ALB must be active
   if (state.albState !== "active") {
     Logger.error("CRITICAL: ALB not active");
@@ -2173,6 +2553,36 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
   } else {
     Logger.success("All required SSM parameters present");
     checks.passed++;
+  }
+
+  // Critical: Security groups must allow health check traffic
+  if (securityGroups.length > 0) {
+    const sgValidation = await verifySecurityGroupForHealthChecks(
+      securityGroups
+    );
+
+    if (!sgValidation.hasDynamicPortRange && !sgValidation.hasStaticPrometheusPort) {
+      Logger.error(
+        "CRITICAL: Security groups not configured for ALB health checks"
+      );
+      Logger.info(
+        "ALB must be able to reach containers on their assigned ports."
+      );
+      Logger.info("Required: TCP 32768-65535 from ALB security group");
+      state.readinessIssues++;
+      checks.failed++;
+    } else if (!sgValidation.hasDynamicPortRange) {
+      Logger.warning(
+        "Security groups missing dynamic port range - Grafana health checks may fail"
+      );
+      Logger.info(
+        "If Grafana uses dynamic ports, add rule: TCP 32768-65535 from ALB SG"
+      );
+      checks.warnings++;
+    } else {
+      Logger.success("Security groups configured for ALB health checks");
+      checks.passed++;
+    }
   }
 
   // Important: ECS agent should be configured

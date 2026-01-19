@@ -440,6 +440,19 @@ export class SuppressionManager {
    * Apply all relevant suppressions to a stack
    * This is the recommended way to apply suppressions
    */
+  /**
+   * Apply suppressions to a stack based on its type
+   * 
+   * Stack types are organized by domain:
+   * - Monitoring Domain: MonitoringStack, MonitoringEfsStack, MonitoringInfraStack, MonitoringServiceStack
+   * - Networking Domain: NetworkingStack, LoadBalancerStack, CertificateStack
+   * - Compute Domain: ComputeStack
+   * - Webapp Domain: WebappEcrStack (isolated - separate pipeline)
+   * 
+   * @param stack - The CDK stack to apply suppressions to
+   * @param stackType - The type of stack (determines which suppressions to apply)
+   * @param envName - Optional environment name for environment-specific suppressions
+   */
   static applyToStack(
     stack: cdk.Stack,
     stackType:
@@ -450,7 +463,8 @@ export class SuppressionManager {
       | "MonitoringServiceStack"
       | "NetworkingStack"
       | "LoadBalancerStack"
-      | "CertificateStack",
+      | "CertificateStack"
+      | "WebappEcrStack", // Webapp domain - isolated from monitoring
     envName?: string
   ): void {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -461,7 +475,7 @@ export class SuppressionManager {
     // All stacks get CDK-managed resource suppressions
     suppressions.push(...this.getCdkManagedResourceSuppressions());
 
-    // Stack-specific suppressions
+    // Stack-specific suppressions organized by domain
     switch (stackType) {
       case "ComputeStack":
         suppressions.push(...this.getEcsEnvironmentVariableSuppressions());
@@ -472,6 +486,7 @@ export class SuppressionManager {
         }
         break;
 
+      // ===== MONITORING DOMAIN =====
       case "MonitoringStack":
       case "MonitoringInfraStack":
         suppressions.push(...this.getMonitoringSuppressions());
@@ -500,6 +515,7 @@ export class SuppressionManager {
         }
         break;
 
+      // ===== NETWORKING DOMAIN =====
       case "NetworkingStack":
         suppressions.push(...this.getNetworkingSuppressions());
         break;
@@ -510,7 +526,16 @@ export class SuppressionManager {
         break;
 
       case "CertificateStack":
-        // Certificate stack typically doesn't need suppressions
+        // Certificate stack typically doesn't need additional suppressions
+        break;
+
+      // ===== WEBAPP DOMAIN (ISOLATED) =====
+      case "WebappEcrStack":
+        // Webapp stacks are isolated from monitoring domain
+        // They only get base CDK suppressions + ECR-specific suppressions
+        suppressions.push(...this.getEcrPermissionSuppressions());
+        // Note: WebappEcrStack deploys independently in a separate pipeline
+        // and should not depend on or affect monitoring stack deployments
         break;
     }
 
