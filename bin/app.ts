@@ -8,6 +8,7 @@ import { environments } from "../config/environments";
 
 import { deployFoundationStacks } from "./stacks/foundation-stack";
 import { createMonitoringStacks } from "./stacks/monitoring-stack";
+import { createWebappStacks } from "./stacks/webapp-stack";
 
 const app = new cdk.App();
 
@@ -61,6 +62,12 @@ const { networkingStack } = deployFoundationStacks(app, envConfig, stackProps);
 // ============================================================================
 
 createMonitoringStacks(app, envName, envConfig, networkingStack, stackProps);
+
+// ============================================================================
+// WEBAPP STACKS
+// ============================================================================
+
+createWebappStacks(app, envName, envConfig, networkingStack, stackProps);
 
 // ============================================================================
 // STACK TAGGING

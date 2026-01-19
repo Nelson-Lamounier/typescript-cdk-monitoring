@@ -178,51 +178,51 @@ export const projects: Record<string, ProjectConfig> = {
   },
 
   /**
-   * Example: Web application project
-   * Uncomment and customize for your web application
+   * Web application project
+   * Containerised web application with ECR repository
    */
-  // webapp: {
-  //   name: "webapp",
-  //   type: ProjectType.WEBAPP,
-  //   description: "Next.js web application",
-  //   networking: {
-  //     maxAzs: 2,
-  //     enableVpcFlowLogs: true,
-  //     enableVpcEndpoints: true,
-  //   },
-  //   compute: {
-  //     instanceType: "t3.small",
-  //     minCapacity: 1,
-  //     maxCapacity: 3,
-  //     desiredCapacity: 1,
-  //     enableContainerInsights: false,
-  //   },
-  //   storage: {
-  //     ebsVolumes: [
-  //       {
-  //         deviceName: "/dev/xvdf",
-  //         sizeGB: 20,
-  //         mountPath: "/mnt/app-data",
-  //         volumeType: "gp3",
-  //         deleteOnTermination: false,
-  //       },
-  //     ],
-  //   },
-  //   loadBalancer: {
-  //     internetFacing: true,
-  //     enableHttps: true,
-  //     allowedIpRanges: [], // Configure IP restrictions as needed
-  //   },
-  //   environmentOverrides: {
-  //     production: {
-  //       compute: {
-  //         instanceType: "t3.medium",
-  //         minCapacity: 2,
-  //         maxCapacity: 5,
-  //       },
-  //     },
-  //   },
-  // },
+  webapp: {
+    name: "webapp",
+    type: ProjectType.WEBAPP,
+    description: "Web application with container registry",
+    networking: {
+      maxAzs: 2,
+      enableVpcFlowLogs: true,
+      enableVpcEndpoints: true,
+    },
+    compute: {
+      instanceType: "t3.small",
+      minCapacity: 1,
+      maxCapacity: 3,
+      desiredCapacity: 1,
+      enableContainerInsights: false,
+    },
+    storage: {
+      ebsVolumes: [
+        {
+          deviceName: "/dev/xvdf",
+          sizeGB: 20,
+          mountPath: "/mnt/app-data",
+          volumeType: "gp3",
+          deleteOnTermination: false,
+        },
+      ],
+    },
+    loadBalancer: {
+      internetFacing: true,
+      enableHttps: true,
+      allowedIpRanges: [], // Configure IP restrictions as needed
+    },
+    environmentOverrides: {
+      production: {
+        compute: {
+          instanceType: "t3.medium",
+          minCapacity: 2,
+          maxCapacity: 5,
+        },
+      },
+    },
+  },
 };
 
 /**
