@@ -276,6 +276,24 @@ runs:
         AWS_ACCOUNT_ID_PROD: ${{ inputs.aws-account-id }}  # For production environment
         AWS_REGION: ${{ inputs.aws-region }}
 
+    - name: Create Outputs Directory (Always)
+      if: always() && inputs.outputs-directory != ''
+      shell: bash
+      run: |
+        echo "=== Creating outputs directory (unconditional) ==="
+        OUTPUTS_DIR="${GITHUB_WORKSPACE}/${{ inputs.outputs-directory }}"
+        echo "Target directory: $OUTPUTS_DIR"
+        
+        mkdir -p "$OUTPUTS_DIR"
+        
+        if [ -d "$OUTPUTS_DIR" ]; then
+          echo "✓ Directory exists: $OUTPUTS_DIR"
+          ls -la "$OUTPUTS_DIR" || echo "Empty directory"
+        else
+          echo "✗ ERROR: Failed to create directory!"
+          exit 1
+        fi
+
     - name: Retrieve Stack Outputs
       id: outputs
       if: steps.deploy.outputs.status == 'success'
@@ -323,6 +341,15 @@ runs:
         AWS_ACCOUNT_ID: ${{ inputs.aws-account-id }}
         AWS_REGION: ${{ inputs.aws-region }}
 
+    - name: Debug Outputs Directory Input
+      if: always()
+      shell: bash
+      run: |
+        echo "=== Checking outputs-directory input ==="
+        echo "Input value: '${{ inputs.outputs-directory }}'"
+        echo "Is empty: $([ -z '${{ inputs.outputs-directory }}' ] && echo 'YES' || echo 'NO')"
+        echo "Condition will evaluate to: $([ -n '${{ inputs.outputs-directory }}' ] && echo 'TRUE - step will run' || echo 'FALSE - step will skip')"
+    
     - name: Save Outputs to File
       id: save-outputs
       if: always() && inputs.outputs-directory != ''
@@ -332,7 +359,16 @@ runs:
         
         # Use GITHUB_WORKSPACE to ensure absolute path
         OUTPUTS_DIR="${GITHUB_WORKSPACE}/${{ inputs.outputs-directory }}"
+        echo "Creating directory: $OUTPUTS_DIR"
         mkdir -p "$OUTPUTS_DIR"
+        
+        # Verify directory was created
+        if [ -d "$OUTPUTS_DIR" ]; then
+          echo "✓ Directory created successfully"
+        else
+          echo "✗ ERROR: Directory creation failed!"
+          exit 1
+        fi
         
         echo "Output directory: $OUTPUTS_DIR"
         
@@ -340,10 +376,13 @@ runs:
         STACK_NAME_SAFE=$(echo "${{ inputs.stack-name }}" | tr '/' '-' | tr ':' '-')
         OUTPUT_FILE="$OUTPUTS_DIR/${STACK_NAME_SAFE}-outputs.json"
         
+        echo "Target output file: $OUTPUT_FILE"
+        
         # Only save if deployment was successful
         if [ "${{ steps.deploy.outputs.status }}" != "success" ]; then
           echo "⚠ Deployment did not succeed, skipping output save"
-          echo "Creating empty directory for artifact upload consistency"
+          echo "Directory created for artifact upload consistency"
+          echo "Status was: ${{ steps.deploy.outputs.status }}"
           exit 0
         fi
         
