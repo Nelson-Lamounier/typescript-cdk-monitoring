@@ -50,6 +50,8 @@ make get-alb-dns
 Access your services:
 - **Prometheus**: `http://<ALB-DNS>:9090`
 - **Grafana**: `http://<ALB-DNS>:3000` (default credentials: admin/admin)
+  - 4 pre-built dashboards automatically provisioned
+  - See [Grafana Dashboards Documentation](docs/GRAFANA_DASHBOARDS.md) for details
 
 ## Makefile Commands
 

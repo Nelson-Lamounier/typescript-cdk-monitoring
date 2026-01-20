@@ -528,6 +528,12 @@ export class MonitoringEfsStack extends cdk.Stack {
       }
     );
 
+    // ========================================================================
+    // PRE-BUILT GRAFANA DASHBOARDS
+    // ========================================================================
+    // Load dashboard JSON files and store in SSM for deployment
+    const dashboards = this.createDashboardParameters(props.envName);
+
     return [
       prometheusConfigParam,
       prometheusConfigYamlParam,
@@ -535,7 +541,50 @@ export class MonitoringEfsStack extends cdk.Stack {
       grafanaDatasourceConfigYamlParam,
       grafanaDashboardConfigParam,
       grafanaDashboardConfigYamlParam,
+      ...dashboards,
     ];
+  }
+
+  /**
+   * Create SSM parameters for pre-built Grafana dashboards
+   * 
+   * Dashboards are loaded from config/grafana/dashboards/ and stored in SSM
+   * for deployment to EFS during instance initialization
+   */
+  private createDashboardParameters(envName: string): ssm.StringParameter[] {
+    const fs = require('fs');
+    const path = require('path');
+    
+    const dashboardsDir = path.join(__dirname, '../../../config/grafana/dashboards');
+    const parameters: ssm.StringParameter[] = [];
+
+    const dashboardFiles = [
+      { file: 'node-exporter-full.json', name: 'node-exporter', description: 'Node Exporter Full - System metrics dashboard' },
+      { file: 'prometheus-stats.json', name: 'prometheus-stats', description: 'Prometheus 2.0 Stats - Server metrics dashboard' },
+      { file: 'ecs-container-metrics.json', name: 'ecs-container-metrics', description: 'ECS Container Metrics - Container monitoring dashboard' },
+      { file: 'application-overview.json', name: 'application-overview', description: 'Application Overview - High-level monitoring dashboard' },
+    ];
+
+    dashboardFiles.forEach((dashboard, index) => {
+      const dashboardPath = path.join(dashboardsDir, dashboard.file);
+      
+      if (fs.existsSync(dashboardPath)) {
+        const dashboardContent = fs.readFileSync(dashboardPath, 'utf8');
+        
+        const param = new ssm.StringParameter(this, `GrafanaDashboard${index}`, {
+          parameterName: `/monitoring/${envName}/grafana-dashboard-${dashboard.name}`,
+          stringValue: dashboardContent,
+          description: dashboard.description,
+          tier: ssm.ParameterTier.ADVANCED, // Use ADVANCED tier for larger JSON files
+        });
+        
+        parameters.push(param);
+      } else {
+        console.warn(`Warning: Dashboard file not found: ${dashboardPath}`);
+      }
+    });
+
+    return parameters;
   }
 
   /**

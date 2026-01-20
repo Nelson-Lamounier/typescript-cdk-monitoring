@@ -631,10 +631,20 @@ echo "Replaced HOST_IP_PLACEHOLDER with $PRIVATE_IP in Grafana datasource config
 # Download Grafana dashboard config (YAML)
 aws ssm get-parameter --region ${region} --name "/monitoring/${envName}/grafana-dashboard-config-yaml" --query "Parameter.Value" --output text > ${mountPoint}/config/grafana/provisioning/dashboards/dashboards.yml
 
+# Download pre-built Grafana dashboards from SSM
+echo "Downloading pre-built Grafana dashboards..."
+aws ssm get-parameter --region ${region} --name "/monitoring/${envName}/grafana-dashboard-node-exporter" --query "Parameter.Value" --output text > ${mountPoint}/config/grafana/dashboards/node-exporter-full.json
+aws ssm get-parameter --region ${region} --name "/monitoring/${envName}/grafana-dashboard-prometheus-stats" --query "Parameter.Value" --output text > ${mountPoint}/config/grafana/dashboards/prometheus-stats.json
+aws ssm get-parameter --region ${region} --name "/monitoring/${envName}/grafana-dashboard-ecs-container-metrics" --query "Parameter.Value" --output text > ${mountPoint}/config/grafana/dashboards/ecs-container-metrics.json
+aws ssm get-parameter --region ${region} --name "/monitoring/${envName}/grafana-dashboard-application-overview" --query "Parameter.Value" --output text > ${mountPoint}/config/grafana/dashboards/application-overview.json
+echo "Downloaded 4 pre-built dashboards successfully"
+
 # Set proper ownership for config files
 chown 65534:65534 ${mountPoint}/config/prometheus/prometheus.yml
 chown 472:0 ${mountPoint}/config/grafana/provisioning/datasources/prometheus.yml
 chown 472:0 ${mountPoint}/config/grafana/provisioning/dashboards/dashboards.yml
+chown -R 472:0 ${mountPoint}/config/grafana/dashboards/
+chmod -R 644 ${mountPoint}/config/grafana/dashboards/*.json
 
 echo "Verifying setup..."
 ls -lh ${mountPoint}/config/prometheus/
