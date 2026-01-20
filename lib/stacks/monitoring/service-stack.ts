@@ -28,7 +28,7 @@ import {
   GRAFANA_ADMIN_SECRET,
   NODE_EXPORTER,
 } from "../../shared/constants/monitoring-constants";
-import { DEFAULT_PROMETHEUS_PORT } from "../../shared/constants/service-constants";
+import { DEFAULT_PROMETHEUS_PORT, getPrometheusMemory, getGrafanaMemory } from "../../shared/constants/service-constants";
 import { validateEnvName } from "../../shared/utils/validation";
 import { isProductionEnvironment } from "../../shared/utils/environment";
 
@@ -219,11 +219,9 @@ export class MonitoringServiceStack extends cdk.Stack {
       enableCircuitBreaker,
       logRetention,
       hostPort: DEFAULT_PROMETHEUS_PORT, // Static port for Grafana connectivity
-      // Apply memory/CPU overrides if provided
+      // Apply memory/CPU overrides if provided, otherwise use environment-aware defaults
       ...(props.prometheusProps?.cpu && { cpu: props.prometheusProps.cpu }),
-      ...(props.prometheusProps?.memoryMiB && {
-        memoryMiB: props.prometheusProps.memoryMiB,
-      }),
+      memoryMiB: props.prometheusProps?.memoryMiB ?? getPrometheusMemory(props.envName),
       ...(props.prometheusProps?.containerPort && {
         containerPort: props.prometheusProps.containerPort,
       }),
@@ -322,11 +320,9 @@ export class MonitoringServiceStack extends cdk.Stack {
       enableExecuteCommand,
       enableCircuitBreaker,
       logRetention,
-      // Apply memory/CPU overrides if provided
+      // Apply memory/CPU overrides if provided, otherwise use environment-aware defaults
       ...(props.grafanaProps?.cpu && { cpu: props.grafanaProps.cpu }),
-      ...(props.grafanaProps?.memoryMiB && {
-        memoryMiB: props.grafanaProps.memoryMiB,
-      }),
+      memoryMiB: props.grafanaProps?.memoryMiB ?? getGrafanaMemory(props.envName),
       ...(props.grafanaProps?.containerPort && {
         containerPort: props.grafanaProps.containerPort,
       }),

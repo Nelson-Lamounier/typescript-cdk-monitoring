@@ -2,6 +2,8 @@
 /** @format */
 
 // scripts/deployment/monitoring/verify-networking-stack.ts
+import * as fs from "fs";
+import * as path from "path";
 
 import { program } from "commander";
 import {
@@ -17,8 +19,7 @@ import {
   STSClient,
   GetCallerIdentityCommand,
 } from "@aws-sdk/client-sts";
-import * as fs from "fs";
-import * as path from "path";
+
 
 import { Logger } from "../utils/logger.js";
 

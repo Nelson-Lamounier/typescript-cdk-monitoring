@@ -246,11 +246,15 @@ export class MonitoringInfraStack extends cdk.Stack {
 
     validateCapacityOrder(minCapacity, desiredCapacity, maxCapacity);
 
+    // Instance type selection based on environment capacity requirements
+    // Development/Staging: t3.small (2 GiB) - sufficient for reduced memory tasks
+    // Production: t3.medium (4 GiB) - provides buffer for full memory allocation
+    // See docs/CAPACITY_ANALYSIS.md for detailed memory planning
     const instanceType =
       props.instanceType ??
       (isProduction
-        ? ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.SMALL)
-        : ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MICRO));
+        ? ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MEDIUM) // 4 GiB for production
+        : ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.SMALL)); // 2 GiB for dev/staging
 
     // ========================================================================
     // PRODUCTION WARNINGS

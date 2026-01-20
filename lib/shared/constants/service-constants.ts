@@ -32,3 +32,41 @@ export const DEFAULT_PROMETHEUS_SCRAPE_INTERVAL = "30s";
 export const DEFAULT_PROMETHEUS_EVAL_INTERVAL = "30s";
 export const DEFAULT_ALERTMANAGER_IMAGE = "prom/alertmanager:latest";
 export const DEFAULT_ALERTMANAGER_PORT = 9093;
+
+/**
+ * Environment-aware memory allocation for Prometheus
+ * 
+ * Memory requirements:
+ * - Production: 1024 MiB (full capacity for higher data retention and query load)
+ * - Non-production: 512 MiB (cost-optimised for lower traffic and data volume)
+ * 
+ * This allows t3.small instances (2 GiB) to run all tasks in dev/staging,
+ * while production uses t3.medium (4 GiB) for full resource allocation.
+ * 
+ * See docs/CAPACITY_ANALYSIS.md for capacity planning details.
+ * 
+ * @param envName - Environment name (development, staging, production, pipeline)
+ * @returns Memory allocation in MiB
+ */
+export const getPrometheusMemory = (envName: string): number => {
+  return envName === "production" ? 1024 : 512;
+};
+
+/**
+ * Environment-aware memory allocation for Grafana
+ * 
+ * Memory requirements:
+ * - Production: 1024 MiB (full capacity for dashboard rendering and query proxying)
+ * - Non-production: 512 MiB (cost-optimised for lower user load)
+ * 
+ * This allows t3.small instances (2 GiB) to run all tasks in dev/staging,
+ * while production uses t3.medium (4 GiB) for full resource allocation.
+ * 
+ * See docs/CAPACITY_ANALYSIS.md for capacity planning details.
+ * 
+ * @param envName - Environment name (development, staging, production, pipeline)
+ * @returns Memory allocation in MiB
+ */
+export const getGrafanaMemory = (envName: string): number => {
+  return envName === "production" ? 1024 : 512;
+};
