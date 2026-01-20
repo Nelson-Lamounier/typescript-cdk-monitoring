@@ -215,6 +215,50 @@ export class NetworkingStack extends cdk.Stack {
       this.vpc.addGatewayEndpoint("DynamoDbEndpoint", {
         service: ec2.GatewayVpcEndpointAwsService.DYNAMODB,
       });
+
+      // ========================================================================
+      // SSM INTERFACE ENDPOINTS (Required for EC2 SSM Agent connectivity)
+      // ========================================================================
+      // CRITICAL: These endpoints are required for SSM Agent on EC2 instances
+      // to communicate with AWS Systems Manager service, regardless of whether
+      // instances are in public or private subnets.
+      //
+      // Why needed even for public subnets:
+      // - More reliable than Internet Gateway routing
+      // - Works if IGW route is misconfigured
+      // - Lower latency (stays within AWS network)
+      // - Better security (traffic never leaves AWS)
+      //
+      // Cost: ~£7/month per endpoint = £21/month total for all 3
+      // ========================================================================
+
+      // SSM endpoint (required for Systems Manager agent registration)
+      // Allows EC2 instances to register with Systems Manager
+      this.vpc.addInterfaceEndpoint("SsmEndpoint", {
+        service: ec2.InterfaceVpcEndpointAwsService.SSM,
+        privateDnsEnabled: true,
+      });
+
+      // SSM Messages endpoint (required for Session Manager)
+      // Enables AWS Session Manager for secure shell access
+      this.vpc.addInterfaceEndpoint("SsmMessagesEndpoint", {
+        service: ec2.InterfaceVpcEndpointAwsService.SSM_MESSAGES,
+        privateDnsEnabled: true,
+      });
+
+      // EC2 Messages endpoint (required for Run Command and State Manager)
+      // Enables SSM Run Command and SSM State Manager associations
+      this.vpc.addInterfaceEndpoint("Ec2MessagesEndpoint", {
+        service: ec2.InterfaceVpcEndpointAwsService.EC2_MESSAGES,
+        privateDnsEnabled: true,
+      });
+
+      cdk.Annotations.of(this).addInfo(
+        "Created SSM VPC endpoints for reliable Systems Manager connectivity. " +
+          "Cost: ~£21/month for 3 interface endpoints. " +
+          "These endpoints work for both public and private subnets and ensure " +
+          "EC2 instances can communicate with Systems Manager service."
+      );
     }
 
     // ========================================================================
