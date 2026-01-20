@@ -43,6 +43,8 @@ export const TEST_CONSTANTS = {
   RESOURCE_COUNTS: {
     VPC: 1,
     GATEWAY_ENDPOINTS: 2,
+    INTERFACE_ENDPOINTS: 3, // SSM, SSM Messages, EC2 Messages
+    TOTAL_VPC_ENDPOINTS: 5, // 2 gateway + 3 interface
     SSM_PARAMETERS_DISABLED: 0,
     NAT_GATEWAYS_NONE: 0,
     NAT_GATEWAYS_HA: 2,

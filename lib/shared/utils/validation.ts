@@ -1266,8 +1266,8 @@ export function validateDeploymentPercentages(
   minHealthy: number,
   maxHealthy: number
 ): void {
-  if (minHealthy <= 0 || minHealthy > 100) {
-    throw new Error("minHealthyPercent must be between 1 and 100.");
+  if (minHealthy < 0 || minHealthy > 100) {
+    throw new Error("minHealthyPercent must be between 0 and 100.");
   }
   if (maxHealthy < minHealthy || maxHealthy > 200) {
     throw new Error(

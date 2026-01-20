@@ -38,7 +38,7 @@ describe("NetworkingStack - Advanced Features", () => {
 
       const endpoints = template.findResources("AWS::EC2::VPCEndpoint");
       expect(Object.keys(endpoints).length).toBe(
-        TEST_CONSTANTS.RESOURCE_COUNTS.GATEWAY_ENDPOINTS
+        TEST_CONSTANTS.RESOURCE_COUNTS.TOTAL_VPC_ENDPOINTS
       );
     });
   });

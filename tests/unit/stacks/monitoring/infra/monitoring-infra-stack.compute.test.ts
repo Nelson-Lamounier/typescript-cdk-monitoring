@@ -172,7 +172,7 @@ describe("MonitoringInfraStack - Compute Configuration", () => {
       expect(() => {
         devInstanceTemplate.hasResourceProperties("AWS::EC2::LaunchTemplate", {
           LaunchTemplateData: {
-            InstanceType: "t3.micro",
+            InstanceType: "t3.small",
           },
         });
       }).not.toThrow();
