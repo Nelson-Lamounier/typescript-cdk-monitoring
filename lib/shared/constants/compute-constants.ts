@@ -65,7 +65,10 @@ export const DEFAULT_SSM_AGENT_CHECK_MAX_RETRIES = 36;
 export const DEFAULT_SSM_AGENT_CHECK_DELAY_SECONDS = 10;
 export const DEFAULT_SSM_LOG_RETENTION_DEV = logs.RetentionDays.TWO_WEEKS;
 export const DEFAULT_SSM_LOG_RETENTION_PROD = logs.RetentionDays.ONE_MONTH;
-export const DEFAULT_SSM_APPLY_ONLY_AT_CRON_INTERVAL = true;
+// applyOnlyAtCronInterval is NOT supported with rate() schedules (only cron() schedules)
+// AWS SSM returns: "ApplyOnlyAtCronInterval is not supported for Rate Schedule associations"
+// Setting to false ensures associations run immediately on new instances AND at scheduled intervals
+export const DEFAULT_SSM_APPLY_ONLY_AT_CRON_INTERVAL = false;
 
 export function resolveSsmSchedule(envName: string): string {
   return PRODUCTION_ENV_NAMES.includes(envName)
