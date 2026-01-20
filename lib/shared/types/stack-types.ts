@@ -80,6 +80,10 @@ export interface MonitoringInfraStackProps extends BaseStackProps {
    * This is the SSM Association execution that runs the automation document
    */
   efsInitializationComplete: ssm.CfnAssociation;
+  /**
+   * S3 bucket containing Grafana dashboard JSON files
+   */
+  dashboardBucket: s3.IBucket;
   allowedIpRanges?: string[];
   enableHttps?: boolean;
   certificateArn?: string;

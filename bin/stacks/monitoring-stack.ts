@@ -85,6 +85,9 @@ export function createMonitoringStacks(
     efsInitializationComplete: efsStack.efsInitializationExecution,
     efsStackName: efsStack.stackName,
 
+    // S3 Configuration (from EFS stack - dashboard storage)
+    dashboardBucket: efsStack.dashboardBucket,
+
     // EC2 Configuration
     minCapacity: envConfig.isProduction ? 2 : 1,
     maxCapacity: envConfig.isProduction ? 3 : 1,

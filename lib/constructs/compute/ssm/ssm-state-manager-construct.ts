@@ -631,13 +631,21 @@ echo "Replaced HOST_IP_PLACEHOLDER with $PRIVATE_IP in Grafana datasource config
 # Download Grafana dashboard config (YAML)
 aws ssm get-parameter --region ${region} --name "/monitoring/${envName}/grafana-dashboard-config-yaml" --query "Parameter.Value" --output text > ${mountPoint}/config/grafana/provisioning/dashboards/dashboards.yml
 
-# Download pre-built Grafana dashboards from SSM
-echo "Downloading pre-built Grafana dashboards..."
-aws ssm get-parameter --region ${region} --name "/monitoring/${envName}/grafana-dashboard-node-exporter" --query "Parameter.Value" --output text > ${mountPoint}/config/grafana/dashboards/node-exporter-full.json
-aws ssm get-parameter --region ${region} --name "/monitoring/${envName}/grafana-dashboard-prometheus-stats" --query "Parameter.Value" --output text > ${mountPoint}/config/grafana/dashboards/prometheus-stats.json
-aws ssm get-parameter --region ${region} --name "/monitoring/${envName}/grafana-dashboard-ecs-container-metrics" --query "Parameter.Value" --output text > ${mountPoint}/config/grafana/dashboards/ecs-container-metrics.json
-aws ssm get-parameter --region ${region} --name "/monitoring/${envName}/grafana-dashboard-application-overview" --query "Parameter.Value" --output text > ${mountPoint}/config/grafana/dashboards/application-overview.json
-echo "Downloaded 4 pre-built dashboards successfully"
+# Download pre-built Grafana dashboards from S3
+echo "Downloading pre-built Grafana dashboards from S3..."
+DASHBOARD_BUCKET=$(aws ssm get-parameter --region ${region} --name "/monitoring/${envName}/dashboard-bucket-name" --query "Parameter.Value" --output text)
+
+if [ -z "$DASHBOARD_BUCKET" ]; then
+  echo "ERROR: Dashboard bucket name not found in SSM"
+  exit 1
+fi
+
+# Download all dashboards from S3
+aws s3 sync s3://${DASHBOARD_BUCKET}/dashboards/ ${mountPoint}/config/grafana/dashboards/ --region ${region}
+
+# Count downloaded dashboards
+DASHBOARD_COUNT=$(find ${mountPoint}/config/grafana/dashboards -name "*.json" | wc -l)
+echo "Downloaded ${DASHBOARD_COUNT} pre-built dashboards successfully"
 
 # Set proper ownership for config files
 chown 65534:65534 ${mountPoint}/config/prometheus/prometheus.yml

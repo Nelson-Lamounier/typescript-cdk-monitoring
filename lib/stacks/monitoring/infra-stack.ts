@@ -391,6 +391,9 @@ export class MonitoringInfraStack extends cdk.Stack {
       })
     );
 
+    // Add S3 read permissions for Grafana dashboards
+    props.dashboardBucket.grantRead(ltConstruct.role);
+
     // Add SSM Parameter Store write permissions for bootstrap metadata
     // Allows instances to store bootstrap information for auditing and troubleshooting
     if (props.enableMetadataTracking !== false) {
