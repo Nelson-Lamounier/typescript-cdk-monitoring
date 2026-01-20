@@ -27,7 +27,7 @@ import {
   DescribeAutomationExecutionsCommand,
 } from "@aws-sdk/client-ssm";
 
-import { Logger } from "../utils/logger.js";
+import { Logger } from "../utils/logger";
 
 interface VerifyEfsStackConfig {
   profile?: string;

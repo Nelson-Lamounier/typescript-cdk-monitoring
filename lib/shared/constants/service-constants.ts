@@ -20,8 +20,14 @@ export const DEFAULT_GRAFANA_DATASOURCE_NAME = "cloudwatch";
 export const DEFAULT_PROMETHEUS_IMAGE = "prom/prometheus:latest";
 export const DEFAULT_PROMETHEUS_SERVICE_NAME_SUFFIX = "prometheus";
 export const DEFAULT_PROMETHEUS_DESIRED_COUNT = 1;
-export const DEFAULT_PROMETHEUS_MIN_HEALTHY_PERCENT = 50;
-export const DEFAULT_PROMETHEUS_MAX_HEALTHY_PERCENT = 200;
+// minHealthyPercent: 0 allows complete task replacement (stop old, start new)
+// This is necessary when using static hostPort (9090) with single instance
+// With 50%, ECS would need to keep 1 task running = can't stop to release port
+export const DEFAULT_PROMETHEUS_MIN_HEALTHY_PERCENT = 0;
+// maxHealthyPercent: 100 prevents running 2 tasks simultaneously
+// Critical for single-instance deployments with static hostPort
+// With 200%, ECS would try to start new task before stopping old = port conflict
+export const DEFAULT_PROMETHEUS_MAX_HEALTHY_PERCENT = 100;
 export const DEFAULT_PROMETHEUS_HEALTH_GRACE_SECONDS = 180;
 export const DEFAULT_PROMETHEUS_PORT = 9090;
 export const DEFAULT_PROMETHEUS_CPU_MIB = 512;

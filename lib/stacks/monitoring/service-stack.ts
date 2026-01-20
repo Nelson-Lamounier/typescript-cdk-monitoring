@@ -504,7 +504,7 @@ export class MonitoringServiceStack extends cdk.Stack {
           : `${props.envName}-prometheus`,
         healthCheck: {
           path: prometheusHealthCheckPath, // Includes route prefix: /prometheus/-/healthy
-          port: "traffic-port", // CRITICAL: Use dynamic port for bridge networking
+          port: String(MONITORING_PORTS.PROMETHEUS), // Use static port 9090 (matches hostPort)
           healthyHttpCodes: MONITORING_HEALTH_CHECK.HEALTHY_HTTP_CODES,
           interval: cdk.Duration.seconds(
             MONITORING_HEALTH_CHECK.INTERVAL_SECONDS

@@ -21,7 +21,7 @@ import {
 } from "@aws-sdk/client-sts";
 
 
-import { Logger } from "../utils/logger.js";
+import { Logger } from "../utils/logger";
 
 interface VerifyNetworkingStackConfig {
   profile?: string;

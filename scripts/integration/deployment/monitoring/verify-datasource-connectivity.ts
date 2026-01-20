@@ -52,7 +52,7 @@ import {
 } from "@aws-sdk/client-cloudwatch-logs";
 import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
 
-import { Logger } from "../utils/logger.js";
+import { Logger } from "../utils/logger";
 
 // ============================================================================
 // TYPES
