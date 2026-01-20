@@ -58,6 +58,7 @@ interface VerifyInfraStackConfig {
   region: string;
   environment: string;
   verbose?: boolean;
+  nonBlocking?: boolean; // Allow ServiceStack deployment even if health checks fail
 }
 
 interface StackOutputs {
@@ -2745,6 +2746,11 @@ program
   )
   .option("-p, --profile <profile>", "AWS CLI profile")
   .option("-v, --verbose", "Enable verbose output", false)
+  .option(
+    "--non-blocking",
+    "Exit with success even if health checks fail (allows ServiceStack deployment for troubleshooting)",
+    false
+  )
   .parse();
 
 const options = program.opts();
@@ -2761,6 +2767,7 @@ const config: VerifyInfraStackConfig = {
   region: options.region,
   profile: options.profile,
   verbose: options.verbose || false,
+  nonBlocking: options.nonBlocking || false,
 };
 
 verifyInfraStack(config)
@@ -2835,8 +2842,40 @@ verifyInfraStack(config)
       console.log("");
       Logger.info("For detailed troubleshooting guidance, see:");
       Logger.info("  - docs/TROUBLESHOOTING.md");
-      Logger.info("  - bin/README.md (deployment architecture)");
+      Logger.info("  - docs/TROUBLESHOOTING_SSM_CONNECTIVITY.md");
+      Logger.info("  - docs/SSM_AGENT_ARCHITECTURE.md");
       console.log("");
+
+      // Non-blocking mode: Allow ServiceStack deployment for troubleshooting
+      if (config.nonBlocking) {
+        Logger.warning("=".repeat(80));
+        Logger.warning("NON-BLOCKING MODE ENABLED");
+        Logger.warning("=".repeat(80));
+        console.log("");
+        Logger.info("Health checks failed, but exiting with success to allow ServiceStack deployment.");
+        Logger.info("This enables better troubleshooting by deploying services despite infrastructure issues.");
+        console.log("");
+        Logger.info("Why this helps:");
+        Logger.info("  • Target groups will be created (currently missing)");
+        Logger.info("  • ECS services will be defined");
+        Logger.info("  • Container definitions will be available");
+        Logger.info("  • ALB health check configuration will be visible");
+        Logger.info("  • Service-level logs will be generated");
+        console.log("");
+        Logger.warning("⚠️  Important: Service deployment may fail or containers may not start");
+        Logger.warning("⚠️  This is expected - use the deployment logs to diagnose the root cause");
+        console.log("");
+        Logger.info("After ServiceStack deployment, check:");
+        Logger.info("  1. ECS service events for task placement failures");
+        Logger.info("  2. ECS task logs for container startup issues");
+        Logger.info("  3. ALB target health for registration issues");
+        Logger.info("  4. CloudWatch logs for application errors");
+        console.log("");
+        Logger.info("To require passing health checks, run without --non-blocking flag");
+        console.log("");
+        process.exit(0); // Exit successfully to allow next stage
+      }
+
       process.exit(1);
     }
   })
