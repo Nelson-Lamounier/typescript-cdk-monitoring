@@ -490,13 +490,71 @@ echo "Environment: ${envName}"
 echo "Region: ${region}"
 echo ""
 
+# ==========================================================================
+# PROMETHEUS EBS VOLUME SETUP
+# ==========================================================================
+# CRITICAL: Prometheus TSDB requires local block storage (EBS), NOT NFS/EFS
+# NFS/EFS is only used for configuration files (read-only is fine)
+# Prometheus data must be on EBS for proper fsync guarantees
+
+PROMETHEUS_DATA_VOLUME="/dev/xvdf"
+PROMETHEUS_DATA_MOUNT="/mnt/prometheus-data"
+
+echo "Setting up Prometheus EBS data volume..."
+
+if [ -b "$PROMETHEUS_DATA_VOLUME" ]; then
+  echo "Found Prometheus data volume at $PROMETHEUS_DATA_VOLUME"
+  
+  # Check if volume is already formatted
+  if ! blkid "$PROMETHEUS_DATA_VOLUME" > /dev/null 2>&1; then
+    echo "Formatting Prometheus data volume with ext4..."
+    mkfs.ext4 -F "$PROMETHEUS_DATA_VOLUME"
+    echo "Prometheus data volume formatted"
+  else
+    echo "Prometheus data volume already formatted"
+  fi
+  
+  # Create mount point and mount volume
+  mkdir -p "$PROMETHEUS_DATA_MOUNT"
+  
+  # Check if already mounted
+  if ! mountpoint -q "$PROMETHEUS_DATA_MOUNT"; then
+    mount "$PROMETHEUS_DATA_VOLUME" "$PROMETHEUS_DATA_MOUNT"
+    echo "Prometheus data volume mounted at $PROMETHEUS_DATA_MOUNT"
+  else
+    echo "Prometheus data volume already mounted at $PROMETHEUS_DATA_MOUNT"
+  fi
+  
+  # Add to fstab for persistence across reboots
+  if ! grep -q "$PROMETHEUS_DATA_VOLUME" /etc/fstab; then
+    echo "$PROMETHEUS_DATA_VOLUME $PROMETHEUS_DATA_MOUNT ext4 defaults,nofail 0 2" >> /etc/fstab
+    echo "Added Prometheus data volume to fstab"
+  fi
+  
+  # Set ownership for Prometheus (UID 65534 = nobody)
+  chown -R 65534:65534 "$PROMETHEUS_DATA_MOUNT"
+  chmod -R 755 "$PROMETHEUS_DATA_MOUNT"
+  
+  echo "Prometheus EBS data volume setup complete"
+else
+  echo "WARNING: Prometheus data volume $PROMETHEUS_DATA_VOLUME not found"
+  echo "Prometheus TSDB will NOT work correctly on EFS!"
+  echo "Ensure the EC2 instance has an EBS volume attached at $PROMETHEUS_DATA_VOLUME"
+fi
+
+echo ""
+
+# ==========================================================================
+# EFS SETUP (for configuration files only)
+# ==========================================================================
+
 # Wait for EFS to be mounted (max 60 seconds)
 echo "Waiting for EFS to be mounted..."
 MAX_RETRIES=12
 RETRY_COUNT=0
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
   if mountpoint -q ${mountPoint}; then
-    echo "✅ EFS is mounted at ${mountPoint}"
+    echo "EFS is mounted at ${mountPoint}"
     break
   fi
   
@@ -510,10 +568,10 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
   sleep 5
 done
 
-echo "Setting up EFS directory structure..."
+echo "Setting up EFS directory structure for configuration files..."
 
-# Create directory structure
-mkdir -p ${mountPoint}/prometheus-data
+# Create directory structure for config and Grafana data (EFS is fine for Grafana)
+# NOTE: Prometheus data is on EBS, NOT EFS
 mkdir -p ${mountPoint}/grafana-data/plugins
 mkdir -p ${mountPoint}/grafana-data/logs
 mkdir -p ${mountPoint}/grafana-data/csv
@@ -526,9 +584,10 @@ mkdir -p ${mountPoint}/config/alertmanager
 
 echo "Setting ownership and permissions..."
 
-# Set ownership for Prometheus (UID 65534 = nobody)
-chown -R 65534:65534 ${mountPoint}/prometheus-data ${mountPoint}/config/prometheus
-chmod -R 755 ${mountPoint}/prometheus-data ${mountPoint}/config/prometheus
+# Set ownership for Prometheus config (UID 65534 = nobody)
+# NOTE: Prometheus DATA is on EBS, not EFS - ownership set during EBS setup above
+chown -R 65534:65534 ${mountPoint}/config/prometheus
+chmod -R 755 ${mountPoint}/config/prometheus
 
 # Set ownership for Grafana (UID 472, GID 0 = root group)
 chown -R 472:0 ${mountPoint}/grafana-data ${mountPoint}/config/grafana

@@ -322,6 +322,11 @@ export class MonitoringInfraStack extends cdk.Stack {
     // ========================================================================
     // 3. LAUNCH TEMPLATE
     // ========================================================================
+    // CRITICAL: Prometheus TSDB requires local block storage (EBS), NOT NFS/EFS
+    // EFS is only used for configuration files (read-only is fine)
+    // Prometheus data is stored on a dedicated EBS volume (/dev/xvdf -> /mnt/prometheus-data)
+    const prometheusDataVolumeSizeGB = props.prometheusDataVolumeSizeGB ?? 20; // Default 20GB for dev
+
     const ltConstruct = new LaunchTemplateConstruct(this, "LaunchTemplate", {
       vpc: props.vpc,
       envName: props.envName,
@@ -337,6 +342,17 @@ export class MonitoringInfraStack extends cdk.Stack {
             volumeType: ec2.EbsDeviceVolumeType.GP3,
             encrypted: true,
             deleteOnTermination: true,
+          }),
+        },
+        // Dedicated EBS volume for Prometheus TSDB data
+        // Prometheus requires local filesystem with fsync guarantees (NOT NFS/EFS)
+        // This volume is formatted as ext4 and mounted to /mnt/prometheus-data
+        {
+          deviceName: "/dev/xvdf",
+          volume: ec2.BlockDeviceVolume.ebs(prometheusDataVolumeSizeGB, {
+            volumeType: ec2.EbsDeviceVolumeType.GP3,
+            encrypted: true,
+            deleteOnTermination: !isProduction, // Retain in production
           }),
         },
       ],

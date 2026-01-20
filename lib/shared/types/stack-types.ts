@@ -157,6 +157,26 @@ export interface MonitoringInfraStackProps extends BaseStackProps {
   bootstrapVersion?: string;
 
   // ========================================================================
+  // PROMETHEUS STORAGE CONFIGURATION
+  // ========================================================================
+
+  /**
+   * Size of the dedicated EBS volume for Prometheus TSDB data in GB
+   *
+   * IMPORTANT: Prometheus requires local block storage (EBS), NOT NFS/EFS.
+   * This volume is formatted as ext4 and mounted to /mnt/prometheus-data.
+   * EFS is used only for configuration files.
+   *
+   * Sizing guidelines:
+   * - Development: 20 GB (small metrics dataset)
+   * - Staging: 50 GB (medium metrics, 30-day retention)
+   * - Production: 100+ GB (large metrics, longer retention)
+   *
+   * @default 20 (for development)
+   */
+  prometheusDataVolumeSizeGB?: number;
+
+  // ========================================================================
   // SSM STATE MANAGER CONFIGURATION
   // ========================================================================
 

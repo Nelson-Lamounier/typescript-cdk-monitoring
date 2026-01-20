@@ -80,9 +80,23 @@ export const MONITORING_CAPACITY_DEFAULTS = {
  * Monitoring Service Constants
  */
 
+/**
+ * Mount paths for monitoring services
+ *
+ * CRITICAL: Prometheus TSDB requires local block storage (EBS), NOT NFS/EFS.
+ * EFS does not provide proper fsync guarantees and will cause data corruption.
+ * See: https://prometheus.io/docs/prometheus/latest/storage/
+ *
+ * Storage strategy:
+ * - Prometheus DATA: EBS volume (/mnt/prometheus-data) - REQUIRED for TSDB
+ * - Prometheus CONFIG: EFS (/mnt/efs/config/prometheus) - Read-only config is fine on EFS
+ * - Grafana: EFS is acceptable (SQLite database, not as sensitive as Prometheus TSDB)
+ */
 export const MONITORING_MOUNT_PATHS = {
-  PROMETHEUS_DATA: "/mnt/efs/prometheus-data",
-  PROMETHEUS_CONFIG: "/mnt/efs/config/prometheus",
+  // CRITICAL: Prometheus TSDB data MUST be on EBS (local block storage)
+  // NFS/EFS will cause data corruption. See Prometheus storage documentation.
+  PROMETHEUS_DATA: "/mnt/prometheus-data",  // EBS volume (NOT EFS!)
+  PROMETHEUS_CONFIG: "/mnt/efs/config/prometheus",  // EFS is fine for read-only config
   GRAFANA_DATA: "/mnt/efs/grafana-data",
   GRAFANA_PROVISIONING: "/mnt/efs/config/grafana/provisioning",
   GRAFANA_DASHBOARDS: "/mnt/efs/grafana-dashboards",
@@ -121,12 +135,21 @@ export const BRIDGE_NETWORK_DYNAMIC_PORT_RANGE = {
 
 /**
  * Health check settings
+ * 
+ * Optimised for faster failure detection:
+ * - Interval: 15s (reduced from 60s for quicker detection)
+ * - Timeout: 10s (reduced from 30s - health checks should respond quickly)
+ * - Unhealthy threshold: 2 (reduced from 3 - faster marking of unhealthy targets)
+ * - Healthy threshold: 2 (unchanged - ensures stability before routing traffic)
+ * 
+ * Total time to detect failure: 15s * 2 = 30 seconds
+ * Total time to recover: 15s * 2 = 30 seconds
  */
 export const MONITORING_HEALTH_CHECK = {
-  INTERVAL_SECONDS: 60,
-  TIMEOUT_SECONDS: 30,
+  INTERVAL_SECONDS: 15,
+  TIMEOUT_SECONDS: 10,
   HEALTHY_THRESHOLD: 2,
-  UNHEALTHY_THRESHOLD: 3,
+  UNHEALTHY_THRESHOLD: 2,
   HEALTHY_HTTP_CODES: "200,301,302",
   PATHS: {
     PROMETHEUS: "/-/healthy",
