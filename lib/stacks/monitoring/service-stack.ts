@@ -486,9 +486,19 @@ export class MonitoringServiceStack extends cdk.Stack {
     // ========================================================================
     // PROMETHEUS TARGET GROUP
     // ========================================================================
-    // CRITICAL: Prometheus health check path must include route prefix
-    // because Prometheus is configured with --web.external-url=/prometheus
-    // All endpoints, including health checks, require the /prometheus prefix
+    // CRITICAL: Prometheus health check path must include the route prefix
+    // ALB forwards the FULL path to the target (does NOT strip the prefix)
+    // 
+    // Example flow:
+    // 1. ALB receives: http://alb/prometheus/-/healthy
+    // 2. ALB listener rule matches: /prometheus/*
+    // 3. ALB forwards to target: /prometheus/-/healthy (full path preserved)
+    // 4. Prometheus receives: /prometheus/-/healthy
+    // 5. Prometheus (with --web.route-prefix=/prometheus) responds: 200 OK
+    // 
+    // If we used /-/healthy as the health check path, the container would
+    // receive /-/healthy, but Prometheus only serves /-/healthy under the
+    // /prometheus prefix, so it would return 404.
     const prometheusHealthCheckPath = `${prometheusRoutePrefix}${MONITORING_HEALTH_CHECK.PATHS.PROMETHEUS}`;
 
     this.prometheusTargetGroup = new elbv2.ApplicationTargetGroup(
@@ -503,7 +513,7 @@ export class MonitoringServiceStack extends cdk.Stack {
           ? `${props.envName}-${props.projectName}-prom`
           : `${props.envName}-prometheus`,
         healthCheck: {
-          path: prometheusHealthCheckPath, // Includes route prefix: /prometheus/-/healthy
+          path: prometheusHealthCheckPath, // /prometheus/-/healthy (includes route prefix)
           port: String(MONITORING_PORTS.PROMETHEUS), // Use static port 9090 (matches hostPort)
           healthyHttpCodes: MONITORING_HEALTH_CHECK.HEALTHY_HTTP_CODES,
           interval: cdk.Duration.seconds(
