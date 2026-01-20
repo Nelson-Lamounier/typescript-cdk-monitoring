@@ -338,6 +338,19 @@ jobs:
             ENVIRONMENT=${{ env.ENVIRONMENT }} \
             AWS_REGION=${{ env.AWS_REGION }}
 
+      - name: Verify Prometheus Health Check
+        run: |
+          echo "Verifying Prometheus health check configuration..."
+          npx ts-node scripts/integration/deployment/monitoring/verify-prometheus-health.ts \
+            --environment ${{ env.ENVIRONMENT }} \
+            --region ${{ env.AWS_REGION }} \
+            --max-retries 3 \
+            --retry-interval 30 \
+            --verbose
+        # Non-blocking by default - pipeline continues even if health checks fail
+        # This allows troubleshooting while still completing deployment
+        # Use --blocking flag to fail pipeline on health check failures
+
       - name: Verify Grafana-Prometheus Connectivity
         run: |
           echo "Verifying Grafana-Prometheus connectivity..."
@@ -368,22 +381,37 @@ jobs:
           ALB_DNS="${{ steps.endpoints.outputs.alb_dns }}"
           
           echo "Running smoke tests against endpoints..."
+          echo "ALB DNS: ${ALB_DNS}"
+          echo ""
           
           # Test Grafana health endpoint
           echo "Testing Grafana health..."
-          if curl -f -s --max-time 30 "http://${ALB_DNS}/grafana/api/health" | grep -q "ok"; then
-            echo "✓ Grafana is healthy"
+          GRAFANA_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "http://${ALB_DNS}/grafana/api/health" || echo "000")
+          if [ "$GRAFANA_RESPONSE" = "200" ]; then
+            echo "Grafana is healthy (HTTP $GRAFANA_RESPONSE)"
           else
-            echo "WARNING: Grafana health check failed"
+            echo "WARNING: Grafana health check returned HTTP $GRAFANA_RESPONSE"
           fi
           
-          # Test Prometheus metrics endpoint
-          echo "Testing Prometheus..."
-          if curl -f -s --max-time 30 "http://${ALB_DNS}/prometheus/-/healthy" | grep -q "Prometheus"; then
-            echo "✓ Prometheus is healthy"
+          # Test Prometheus health endpoint
+          # Note: ALB forwards full path, Prometheus serves at /prometheus/-/healthy
+          echo "Testing Prometheus health..."
+          PROMETHEUS_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "http://${ALB_DNS}/prometheus/-/healthy" || echo "000")
+          if [ "$PROMETHEUS_RESPONSE" = "200" ]; then
+            echo "Prometheus is healthy (HTTP $PROMETHEUS_RESPONSE)"
           else
-            echo "WARNING: Prometheus health check failed"
+            echo "WARNING: Prometheus health check returned HTTP $PROMETHEUS_RESPONSE"
+            echo "This may indicate:"
+            echo "  1. Prometheus container is still starting"
+            echo "  2. EFS config file is missing"
+            echo "  3. Target group health check misconfiguration"
+            echo ""
+            echo "Check CloudWatch Logs for details:"
+            echo "  aws logs tail /ecs/${{ env.ENVIRONMENT }}-prometheus --follow"
           fi
+          
+          echo ""
+          echo "Smoke tests completed."
 
   # ===========================================================================
   # Deployment Summary
