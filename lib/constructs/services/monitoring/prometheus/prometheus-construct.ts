@@ -21,6 +21,7 @@ import {
   DEFAULT_PROMETHEUS_PORT,
   DEFAULT_PROMETHEUS_SERVICE_NAME_SUFFIX,
 } from "../../../../shared/constants/service-constants";
+import { MONITORING_ROUTES } from "../../../../shared/constants/monitoring-constants";
 import { PrometheusServiceConstructProps } from "../../../../shared/types/service-types";
 import {
   validateClusterProvided,
@@ -128,6 +129,13 @@ export class PrometheusConstruct extends Construct {
     const containerPort = props.containerPort ?? DEFAULT_PROMETHEUS_PORT;
     const hostPort = props.hostPort ?? containerPort; // Use static port for Grafana connectivity
 
+    // Build health check path based on external URL configuration
+    // When using --web.route-prefix, Prometheus serves health endpoints under that prefix
+    // e.g., with --web.route-prefix=/prometheus, health is at /prometheus/-/healthy
+    const healthCheckPath = props.externalUrl
+      ? `${MONITORING_ROUTES.PROMETHEUS}/-/healthy`
+      : "/-/healthy";
+
     this.taskDefConstruct = new EcsTaskDefinitionConstruct(
       this,
       "TaskDefinition",
@@ -155,6 +163,19 @@ export class PrometheusConstruct extends Construct {
               ENVIRONMENT: props.envName,
             },
             portProtocol: ecs.Protocol.TCP,
+            // Container-level health check for ECS to verify Prometheus is ready
+            // This ensures tasks are marked healthy only when Prometheus is responding
+            // Uses longer startPeriod to allow time for config file loading and startup
+            healthCheck: {
+              command: [
+                "CMD-SHELL",
+                `wget --no-verbose --tries=1 --spider http://localhost:${containerPort}${healthCheckPath} || exit 1`,
+              ],
+              intervalSeconds: 30,
+              timeoutSeconds: 10,
+              retries: 3,
+              startPeriodSeconds: 120, // Allow 2 minutes for Prometheus to start
+            },
           },
         ],
       }
