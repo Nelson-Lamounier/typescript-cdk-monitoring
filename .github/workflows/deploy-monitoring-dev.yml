@@ -1,5 +1,5 @@
 # @format
-# @description Deploy Monitoring to Development testing unit tests
+# @description Deploy Monitoring to Development
 
 name: Deploy Monitoring to Development
 
