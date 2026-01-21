@@ -1,0 +1,225 @@
+# @format
+# @description Deploy Grafana Dashboards Only (No Stack Redeployment)
+#
+# This workflow deploys dashboard JSON files to S3 without redeploying
+# the full CDK stack. Dashboards are automatically synced to Grafana
+# via SSM State Manager (every 5 minutes) or can be triggered manually.
+#
+# Usage:
+# 1. Add/modify dashboard JSON files in config/grafana/dashboards/
+# 2. Push to develop/main branch OR trigger manually
+# 3. Dashboards appear in Grafana within 5 minutes (or trigger sync manually)
+#
+# Manual sync trigger (after S3 upload):
+#   aws ssm start-associations-once --association-ids <dashboard-sync-association-id>
+
+name: Deploy Grafana Dashboards
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - "config/grafana/dashboards/**"
+      - ".github/workflows/deploy-dashboards.yml"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+        default: development
+      trigger_sync:
+        description: "Trigger immediate SSM sync (otherwise wait for 5-min schedule)"
+        type: boolean
+        default: true
+
+env:
+  NODE_VERSION: "22"
+  AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-1' }}
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-dashboards-${{ github.event.inputs.environment || 'development' }}
+  cancel-in-progress: false
+
+jobs:
+  # ===========================================================================
+  # Deploy Dashboards to S3
+  # ===========================================================================
+  deploy-dashboards:
+    name: Deploy Dashboards
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: ${{ github.event.inputs.environment || 'development' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine Environment
+        id: env
+        run: |
+          # Use input if provided, otherwise infer from branch
+          if [ -n "${{ github.event.inputs.environment }}" ]; then
+            ENV="${{ github.event.inputs.environment }}"
+          elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            ENV="production"
+          else
+            ENV="development"
+          fi
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+          echo "Deploying dashboards to: $ENV"
+
+      - name: Get AWS Account ID
+        id: account
+        run: |
+          case "${{ steps.env.outputs.environment }}" in
+            production)
+              ACCOUNT_ID="${{ vars.AWS_ACCOUNT_ID_PROD }}"
+              ;;
+            staging)
+              ACCOUNT_ID="${{ vars.AWS_ACCOUNT_ID_STAGING }}"
+              ;;
+            *)
+              ACCOUNT_ID="${{ vars.AWS_ACCOUNT_ID_DEV }}"
+              ;;
+          esac
+          
+          if [ -z "$ACCOUNT_ID" ]; then
+            echo "ERROR: AWS Account ID not configured for environment"
+            exit 1
+          fi
+          
+          echo "account_id=$ACCOUNT_ID" >> $GITHUB_OUTPUT
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ steps.account.outputs.account_id }}:role/GitHubActionsDeployRole
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: deploy-dashboards
+
+      - name: Get Dashboard Bucket Name
+        id: bucket
+        run: |
+          ENV="${{ steps.env.outputs.environment }}"
+          
+          # Get bucket name from SSM
+          BUCKET=$(aws ssm get-parameter \
+            --name "/monitoring/${ENV}/s3/dashboard-bucket-name" \
+            --query "Parameter.Value" \
+            --output text 2>/dev/null || true)
+          
+          if [ -z "$BUCKET" ]; then
+            echo "ERROR: Dashboard bucket not found in SSM"
+            echo "Ensure MonitoringS3Stack has been deployed for ${ENV}"
+            exit 1
+          fi
+          
+          echo "bucket_name=$BUCKET" >> $GITHUB_OUTPUT
+          echo "Dashboard bucket: $BUCKET"
+
+      - name: List Dashboards
+        run: |
+          echo "Dashboards to deploy:"
+          ls -la config/grafana/dashboards/
+          echo ""
+          echo "Dashboard count: $(find config/grafana/dashboards -name '*.json' | wc -l)"
+
+      - name: Validate Dashboard JSON
+        run: |
+          echo "Validating dashboard JSON files..."
+          ERRORS=0
+          for file in config/grafana/dashboards/*.json; do
+            if [ -f "$file" ]; then
+              if ! jq empty "$file" 2>/dev/null; then
+                echo "ERROR: Invalid JSON in $file"
+                ERRORS=$((ERRORS + 1))
+              else
+                echo "  Valid: $(basename $file)"
+              fi
+            fi
+          done
+          
+          if [ $ERRORS -gt 0 ]; then
+            echo ""
+            echo "ERROR: $ERRORS dashboard(s) have invalid JSON"
+            exit 1
+          fi
+          
+          echo ""
+          echo "All dashboards validated successfully"
+
+      - name: Deploy Dashboards to S3
+        run: |
+          BUCKET="${{ steps.bucket.outputs.bucket_name }}"
+          
+          echo "Syncing dashboards to s3://${BUCKET}/dashboards/..."
+          aws s3 sync config/grafana/dashboards/ s3://${BUCKET}/dashboards/ \
+            --delete \
+            --exclude "*" \
+            --include "*.json"
+          
+          echo ""
+          echo "Listing deployed dashboards:"
+          aws s3 ls s3://${BUCKET}/dashboards/
+
+      - name: Trigger SSM Dashboard Sync
+        if: ${{ github.event.inputs.trigger_sync == 'true' || github.event.inputs.trigger_sync == '' }}
+        run: |
+          ENV="${{ steps.env.outputs.environment }}"
+          
+          echo "Finding dashboard sync SSM association..."
+          
+          # Find the dashboard sync association
+          ASSOCIATION_ID=$(aws ssm list-associations \
+            --association-filter-list "key=AssociationName,value=${ENV}-MonitoringInfra-${ENV}-dashboard-sync" \
+            --query "Associations[0].AssociationId" \
+            --output text 2>/dev/null || true)
+          
+          # Try alternative naming patterns
+          if [ -z "$ASSOCIATION_ID" ] || [ "$ASSOCIATION_ID" == "None" ]; then
+            ASSOCIATION_ID=$(aws ssm list-associations \
+              --query "Associations[?contains(Name, 'dashboard-sync')].AssociationId | [0]" \
+              --output text 2>/dev/null || true)
+          fi
+          
+          if [ -z "$ASSOCIATION_ID" ] || [ "$ASSOCIATION_ID" == "None" ]; then
+            echo "WARNING: Dashboard sync association not found"
+            echo "Dashboards will sync automatically within 5 minutes"
+            echo ""
+            echo "To trigger manually, find the association ID in SSM console and run:"
+            echo "  aws ssm start-associations-once --association-ids <association-id>"
+          else
+            echo "Triggering immediate dashboard sync (Association: $ASSOCIATION_ID)..."
+            aws ssm start-associations-once --association-ids "$ASSOCIATION_ID"
+            echo "Dashboard sync triggered successfully"
+          fi
+
+      - name: Summary
+        run: |
+          ENV="${{ steps.env.outputs.environment }}"
+          BUCKET="${{ steps.bucket.outputs.bucket_name }}"
+          
+          echo ""
+          echo "============================================"
+          echo "Dashboard Deployment Complete"
+          echo "============================================"
+          echo "Environment: $ENV"
+          echo "S3 Bucket: $BUCKET"
+          echo "Dashboards: $(find config/grafana/dashboards -name '*.json' | wc -l)"
+          echo ""
+          echo "Next Steps:"
+          echo "1. Dashboards will sync to Grafana automatically (within 5 minutes)"
+          echo "2. Or SSM sync was triggered immediately (if enabled)"
+          echo "3. Access Grafana to verify dashboards are visible"
+          echo ""
+          echo "Grafana URL: Check ALB DNS in AWS Console or deployment outputs"

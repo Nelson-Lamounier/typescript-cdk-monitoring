@@ -75,6 +75,7 @@ export class SsmStateManagerConstruct extends Construct {
   public readonly cloudWatchAgentConfigAssociation: ssm.CfnAssociation;
   public readonly efsMountAssociation?: ssm.CfnAssociation;
   public readonly efsInitAssociation?: ssm.CfnAssociation;
+  public readonly dashboardSyncAssociation?: ssm.CfnAssociation;
 
   // ========================================================================
   // PRIVATE PROPERTIES
@@ -159,6 +160,17 @@ export class SsmStateManagerConstruct extends Construct {
 
       // Ensure init waits for mount
       this.efsInitAssociation.addDependency(this.efsMountAssociation);
+
+      // Create dashboard sync association for periodic S3-to-EFS sync
+      // This allows adding dashboards without redeploying the stack
+      this.dashboardSyncAssociation = this.createDashboardSyncAssociation(
+        props.envName,
+        props.efsMountPoint,
+        associationTargets
+      );
+
+      // Ensure dashboard sync waits for EFS init
+      this.dashboardSyncAssociation.addDependency(this.efsInitAssociation);
     }
 
     // Create ECS agent configuration association
@@ -676,6 +688,114 @@ echo "✅ EFS initialization completed successfully"
       } as Record<string, string[]>,
       // Run once on boot (no schedule - initialization persists)
       // applyOnlyAtCronInterval is not set, so it runs once when instances join
+    });
+  }
+
+  // ========================================================================
+  // DASHBOARD SYNC ASSOCIATION CREATION
+  // ========================================================================
+
+  /**
+   * Create SSM association for periodic Grafana dashboard sync from S3
+   *
+   * This association runs on a schedule to sync dashboards from S3 to EFS,
+   * allowing dashboard updates without redeploying the full CDK stack.
+   *
+   * Benefits:
+   * - Add/update dashboards by uploading to S3 (via CLI, console, or CI/CD)
+   * - Automatic sync every 5 minutes (configurable)
+   * - No stack redeployment required
+   * - Manual trigger available via SSM Run Command
+   *
+   * Dashboard deployment workflow:
+   * 1. Upload dashboard JSON to S3: aws s3 cp dashboard.json s3://bucket/dashboards/
+   * 2. Wait for automatic sync (max 5 minutes) OR trigger manually
+   * 3. Dashboard appears in Grafana automatically
+   *
+   * Manual trigger:
+   *   aws ssm start-associations-once --association-ids <association-id>
+   *
+   * @param envName - Environment name (e.g., 'development', 'production')
+   * @param mountPoint - EFS mount point (e.g., '/mnt/efs')
+   * @param targets - SSM association targets (EC2 instances)
+   * @returns SSM Association for dashboard sync
+   */
+  private createDashboardSyncAssociation(
+    envName: string,
+    mountPoint: string,
+    targets: ssm.CfnAssociation.TargetProperty[]
+  ): ssm.CfnAssociation {
+    const region = this.stack.region;
+
+    // Dashboard sync script - lightweight, runs frequently
+    const dashboardSyncScript = `#!/bin/bash
+set -e
+
+echo "========================================="
+echo "Grafana Dashboard Sync"
+echo "========================================="
+echo "Environment: ${envName}"
+echo "Timestamp: $(date -Iseconds)"
+echo ""
+
+# Verify EFS is mounted
+if ! mountpoint -q ${mountPoint}; then
+  echo "ERROR: EFS not mounted at ${mountPoint}"
+  exit 1
+fi
+
+# Ensure dashboard directory exists
+mkdir -p ${mountPoint}/grafana-dashboards
+
+# Get dashboard bucket name from SSM
+DASHBOARD_BUCKET=$(aws ssm get-parameter --region ${region} --name "/monitoring/${envName}/s3/dashboard-bucket-name" --query "Parameter.Value" --output text 2>/dev/null || true)
+
+if [ -z "$DASHBOARD_BUCKET" ]; then
+  echo "WARNING: Dashboard bucket not found in SSM at /monitoring/${envName}/s3/dashboard-bucket-name"
+  echo "Ensure MonitoringS3Stack has been deployed"
+  exit 0
+fi
+
+echo "Syncing dashboards from s3://\${DASHBOARD_BUCKET}/dashboards/..."
+
+# Sync dashboards from S3 (only downloads new/modified files)
+aws s3 sync s3://\${DASHBOARD_BUCKET}/dashboards/ ${mountPoint}/grafana-dashboards/ --region ${region} --delete
+
+# Count dashboards
+DASHBOARD_COUNT=\$(find ${mountPoint}/grafana-dashboards -name "*.json" 2>/dev/null | wc -l)
+echo "Total dashboards: \${DASHBOARD_COUNT}"
+
+# Set proper ownership for Grafana (UID 472, GID 0)
+chown -R 472:0 ${mountPoint}/grafana-dashboards/
+chmod -R 644 ${mountPoint}/grafana-dashboards/*.json 2>/dev/null || true
+
+# List dashboards for verification
+echo ""
+echo "Dashboard files:"
+ls -la ${mountPoint}/grafana-dashboards/*.json 2>/dev/null || echo "  (no dashboards found)"
+
+echo ""
+echo "Dashboard sync completed successfully"
+`;
+
+    return new ssm.CfnAssociation(this, "DashboardSyncAssociation", {
+      name: "AWS-RunShellScript",
+      associationName: `${this.stack.stackName}-${envName}-dashboard-sync`,
+      targets,
+      parameters: {
+        commands: [dashboardSyncScript],
+      } as Record<string, string[]>,
+      // Run every 5 minutes to pick up new dashboards quickly
+      scheduleExpression: "rate(5 minutes)",
+      // Only run at scheduled intervals, not immediately on association creation
+      // (Initial sync is handled by EFS init association)
+      applyOnlyAtCronInterval: true,
+      // Allow failures without blocking other associations
+      maxConcurrency: DEFAULT_SSM_MAX_CONCURRENCY,
+      maxErrors: DEFAULT_SSM_MAX_ERRORS,
+      complianceSeverity: this.isProduction
+        ? DEFAULT_SSM_COMPLIANCE_SEVERITY_PROD
+        : DEFAULT_SSM_COMPLIANCE_SEVERITY,
     });
   }
 
