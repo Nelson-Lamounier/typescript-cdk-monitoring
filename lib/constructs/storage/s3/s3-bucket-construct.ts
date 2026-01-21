@@ -325,8 +325,16 @@ export class S3BucketConstruct extends Construct {
    * - Start/end with letter or number
    * - No consecutive periods
    * - No IP address format
+   * 
+   * Note: Skips validation for CDK tokens which are resolved during synthesis
    */
   private validateBucketName(bucketName: string): void {
+    // Skip validation if bucket name contains CDK tokens
+    // Tokens are resolved during synthesis and will be validated by CloudFormation
+    if (cdk.Token.isUnresolved(bucketName)) {
+      return;
+    }
+
     if (!bucketName || bucketName.length < 3 || bucketName.length > 63) {
       throw new Error(
         `Invalid bucket name: ${bucketName}\n\n` +

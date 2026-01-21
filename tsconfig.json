@@ -44,6 +44,7 @@
     "**/*.d.ts",
     "scripts/integration/deployment/monitoring/verify-efs-mount-depregated.ts",
     "scripts/integration/deployment/monitoring/verify-efs-mount.ts",
-    "scripts/integration/deployment/monitoring/verify-infra-stack.ts"
+    "scripts/integration/deployment/monitoring/verify-infra-stack.ts",
+    "scripts/integration/deprecated/**/*.ts"
   ]
 }
