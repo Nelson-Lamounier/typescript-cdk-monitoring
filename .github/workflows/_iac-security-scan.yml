@@ -36,10 +36,10 @@ on:
         type: string
         default: "LOW,MEDIUM"
       output-format:
-        description: "Output format for Checkov results"
+        description: "Output formats for Checkov results (space-separated: cli sarif json)"
         required: false
         type: string
-        default: "cli,sarif,json"
+        default: "cli sarif json"
     outputs:
       scan-passed:
         description: "Whether the security scan passed"
@@ -126,12 +126,18 @@ jobs:
           # Create output directory
           mkdir -p security-reports
           
+          # Build output arguments (multiple -o flags)
+          OUTPUT_ARGS=""
+          for format in ${{ inputs.output-format }}; do
+            OUTPUT_ARGS="$OUTPUT_ARGS -o $format"
+          done
+          
           # Run Checkov
           set +e
           checkov \
             --directory ${{ inputs.cdk-output-path }} \
             --framework ${{ inputs.framework }} \
-            --output ${{ inputs.output-format }} \
+            $OUTPUT_ARGS \
             --output-file-path security-reports \
             $SKIP_CHECKS \
             $SOFT_FAIL \
