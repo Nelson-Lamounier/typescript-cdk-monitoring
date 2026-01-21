@@ -65,9 +65,11 @@ export function createConnectivityTestStacks(
     vpc: networkingStack.vpc,
   });
 
-  // Create mock S3 bucket for dashboard storage
+  // Create a temporary stack to hold the mock S3 bucket
+  // This is necessary because constructs cannot be created directly under App
+  const tempStack = new cdk.Stack(app, "TempStack", { env });
   const dashboardBucket = s3.Bucket.fromBucketName(
-    app,
+    tempStack,
     "TestDashboardBucket",
     `monitoring-dashboards-${config.environment}-${config.region}`
   );
@@ -510,9 +512,15 @@ class TestStackCache {
    */
   getDevelopmentStacks(): ConnectivityTestStacks {
     if (!this.developmentStacks) {
-      this.developmentStacks = createSecurityTestStacks(
-        ENVIRONMENT_CONFIG.DEVELOPMENT
-      );
+      try {
+        this.developmentStacks = createSecurityTestStacks(
+          ENVIRONMENT_CONFIG.DEVELOPMENT
+        );
+      } catch (error) {
+        // Clear cache on error to allow retry
+        this.developmentStacks = undefined;
+        throw error;
+      }
     }
     return this.developmentStacks;
   }
@@ -524,9 +532,15 @@ class TestStackCache {
    */
   getProductionStacks(): ConnectivityTestStacks {
     if (!this.productionStacks) {
-      this.productionStacks = createSecurityTestStacks(
-        ENVIRONMENT_CONFIG.PRODUCTION
-      );
+      try {
+        this.productionStacks = createSecurityTestStacks(
+          ENVIRONMENT_CONFIG.PRODUCTION
+        );
+      } catch (error) {
+        // Clear cache on error to allow retry
+        this.productionStacks = undefined;
+        throw error;
+      }
     }
     return this.productionStacks;
   }
@@ -537,6 +551,15 @@ class TestStackCache {
   clear(): void {
     this.developmentStacks = undefined;
     this.productionStacks = undefined;
+  }
+
+  /**
+   * Force clear the singleton instance (useful for test resets)
+   */
+  static resetInstance(): void {
+    if (TestStackCache.instance) {
+      TestStackCache.instance.clear();
+    }
   }
 }
 

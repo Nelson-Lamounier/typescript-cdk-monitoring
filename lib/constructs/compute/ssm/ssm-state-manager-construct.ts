@@ -79,7 +79,7 @@ export class SsmStateManagerConstruct extends Construct {
   // ========================================================================
   // PRIVATE PROPERTIES
   // ========================================================================
-  private readonly stack = cdk.Stack.of(this);
+  private readonly stack: cdk.Stack;
   private readonly props: SsmStateManagerConstructProps;
   private readonly isProduction: boolean;
   private readonly baseLogPrefix: string;
@@ -94,6 +94,9 @@ export class SsmStateManagerConstruct extends Construct {
   ) {
     super(scope, id);
 
+    // Initialize stack reference after super()
+    this.stack = cdk.Stack.of(this);
+    
     this.props = props;
     const { envName, projectName, clusterName, instanceRole } = props;
 

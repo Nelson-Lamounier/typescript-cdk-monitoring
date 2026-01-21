@@ -98,7 +98,7 @@ export class EfsInitializationDocumentConstruct extends Construct {
    */
   public readonly documentName: string;
 
-  private readonly stack = cdk.Stack.of(this);
+  private readonly stack: cdk.Stack;
   private readonly props: EfsInitializationDocumentProps;
 
   constructor(
@@ -108,6 +108,9 @@ export class EfsInitializationDocumentConstruct extends Construct {
   ) {
     super(scope, id);
 
+    // Initialize stack reference after super()
+    this.stack = cdk.Stack.of(this);
+    
     this.props = props;
     const region = props.region ?? this.stack.region;
 

@@ -76,6 +76,8 @@ export class InfraTestFixtures {
   private static instances = new Map<cdk.App, InfraTestFixtures>();
   private vpc: ec2.IVpc | null = null;
   private efsResources: EfsResources | null = null;
+  private tempStack: cdk.Stack | null = null;
+  private dashboardBucket: s3.IBucket | null = null;
 
   private constructor(private readonly app: cdk.App) {}
 
@@ -169,12 +171,22 @@ export class InfraTestFixtures {
     const vpc = this.getVpc();
     const efsResources = this.getEfsResources();
 
-    // Create mock S3 bucket for dashboard storage
-    const dashboardBucket = s3.Bucket.fromBucketName(
-      this.app,
-      "MockDashboardBucket",
-      `monitoring-dashboards-${TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT}-${TEST_CONFIG.region}`
-    );
+    // Create or reuse temporary stack for mock S3 bucket
+    // Constructs cannot be created directly under App
+    if (!this.tempStack) {
+      this.tempStack = new cdk.Stack(this.app, "TempBucketStack", {
+        env: createTestEnv(),
+      });
+    }
+    
+    // Create or reuse mock S3 bucket for dashboard storage
+    if (!this.dashboardBucket) {
+      this.dashboardBucket = s3.Bucket.fromBucketName(
+        this.tempStack,
+        "MockDashboardBucket",
+        `monitoring-dashboards-${TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT}-${TEST_CONFIG.region}`
+      );
+    }
 
     return {
       env: createTestEnv(),
@@ -186,13 +198,15 @@ export class InfraTestFixtures {
       efsAvailabilityZone: efsResources.availabilityZone,
       efsSecurityGroup: efsResources.securityGroup,
       efsInitializationComplete: efsResources.initializationComplete,
-      dashboardBucket,
+      dashboardBucket: this.dashboardBucket,
     };
   }
 
   clear(): void {
     this.vpc = null;
     this.efsResources = null;
+    this.tempStack = null;
+    this.dashboardBucket = null;
   }
 
   static clearAll(): void {
