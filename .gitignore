@@ -72,3 +72,7 @@ prompts/*
 iam/*
 
 scripts/helper/*
+scripts/integration/deployment/docs-integration-scripts/*
+scripts/integration/deprecated/*
+
+lib/stacks/docs/*
