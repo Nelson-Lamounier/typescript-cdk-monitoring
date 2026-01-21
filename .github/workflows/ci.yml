@@ -420,6 +420,21 @@ jobs:
           if-no-files-found: ignore
 
   # ============================================================================
+  # IaC Security Scan (Checkov - Non-blocking for CI)
+  # ============================================================================
+  iac-security-scan:
+    name: IaC Security Scan
+    needs: [setup, validate-cdk]
+    uses: ./.github/workflows/_iac-security-scan.yml
+    with:
+      environment: "development"
+      enforce-blocking: false
+      cdk-output-path: "cdk.out"
+      # Skip checks that are intentionally configured differently for development
+      skip-checks: ""
+      soft-fail-on: "LOW,MEDIUM"
+
+  # ============================================================================
   # Coverage Aggregation & Publishing (Runs After All Tests)
   # ============================================================================
   coverage-summary:
@@ -643,6 +658,7 @@ jobs:
         test-snapshots,
         build,
         validate-cdk,
+        iac-security-scan,
       ]
     runs-on: ubuntu-latest
     if: always()
@@ -668,6 +684,9 @@ jobs:
           echo "### Build & Validation" >> $GITHUB_STEP_SUMMARY
           echo "- Build: ${{ needs.build.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- CDK Validation: ${{ needs.validate-cdk.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Security" >> $GITHUB_STEP_SUMMARY
+          echo "- IaC Security Scan: ${{ needs.iac-security-scan.result }}" >> $GITHUB_STEP_SUMMARY
 
           CRITICAL_FAILED=false
           if [[ "${{ needs.build.result }}" == "failure" ]]; then

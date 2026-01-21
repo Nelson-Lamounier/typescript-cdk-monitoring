@@ -227,6 +227,28 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
+      - name: Upload CDK Synthesis for Security Scan
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdk-synthesis
+          path: staging-artifact/
+          retention-days: 7
+          if-no-files-found: error
+
+  # ===========================================================================
+  # IaC Security Scan (Blocking for Production)
+  # ===========================================================================
+  iac-security-scan:
+    name: IaC Security Scan
+    needs: preflight
+    uses: ./.github/workflows/_iac-security-scan.yml
+    with:
+      environment: "production"
+      enforce-blocking: true
+      cdk-output-path: "cdk.out"
+      skip-checks: ""
+      soft-fail-on: ""
+
   # ===========================================================================
   # Production Synthesis (Conditional)
   # ===========================================================================
@@ -292,8 +314,8 @@ jobs:
   # ===========================================================================
   deploy-networking:
     name: Deploy Networking
-    needs: [preflight, synthesize-production]
-    if: always() && needs.preflight.result == 'success' && (needs.synthesize-production.result == 'success' || needs.synthesize-production.result == 'skipped')
+    needs: [preflight, iac-security-scan, synthesize-production]
+    if: always() && needs.preflight.result == 'success' && needs.iac-security-scan.outputs.scan-passed == 'true' && (needs.synthesize-production.result == 'success' || needs.synthesize-production.result == 'skipped')
     uses: ./.github/workflows/_deploy-stack.yml
     with:
       stack-name: "production-Networking"
@@ -614,6 +636,7 @@ jobs:
     needs:
       [
         preflight,
+        iac-security-scan,
         deploy-networking,
         verify-networking,
         deploy-efs,
@@ -676,6 +699,7 @@ jobs:
     needs:
       [
         preflight,
+        iac-security-scan,
         deploy-networking,
         verify-networking,
         deploy-efs,
@@ -768,6 +792,12 @@ jobs:
           | Staging Commit | ${STAGING_COMMIT} |
           | Staging Run ID | ${{ needs.preflight.outputs.staging-run-id }} |
           | Current Commit | ${{ github.sha }} |
+
+          ### Security Scan
+
+          | Check | Result |
+          |-------|--------|
+          | IaC Security Scan | ${{ needs.iac-security-scan.result }} |
 
           ### Deployment Status
 
