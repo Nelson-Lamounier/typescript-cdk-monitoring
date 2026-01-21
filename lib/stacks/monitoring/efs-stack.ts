@@ -454,12 +454,16 @@ export class MonitoringEfsStack extends cdk.Stack {
     // ========================================================================
     // Note: HOST_IP_PLACEHOLDER is replaced at runtime with EC2 instance's private IP
     // This is required because Grafana (bridge mode) cannot access Prometheus (host mode) via localhost
+    //
+    // CRITICAL: UIDs must match dashboard datasource references
+    // All dashboards reference uid: "prometheus" and uid: "cloudwatch" (lowercase)
     const grafanaDatasourceConfig = {
       apiVersion: 1,
       datasources: [
         {
           name: "Prometheus",
           type: "prometheus",
+          uid: "prometheus",
           access: "proxy",
           url: `http://${GRAFANA_HOST_IP_PLACEHOLDER}:9090/prometheus`,
           isDefault: true,
@@ -467,6 +471,7 @@ export class MonitoringEfsStack extends cdk.Stack {
         {
           name: "CloudWatch",
           type: "cloudwatch",
+          uid: "cloudwatch",
           access: "proxy",
           jsonData: {
             authType: "default",
