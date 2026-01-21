@@ -78,34 +78,37 @@ jobs:
           echo "environment=$ENV" >> $GITHUB_OUTPUT
           echo "Deploying dashboards to: $ENV"
 
-      - name: Get AWS Account ID
-        id: account
+      - name: Get AWS OIDC Role
+        id: oidc
         run: |
           case "${{ steps.env.outputs.environment }}" in
             production)
-              ACCOUNT_ID="${{ vars.AWS_ACCOUNT_ID_PROD }}"
+              OIDC_ROLE="${{ secrets.AWS_OIDC_ROLE_PROD }}"
               ;;
             staging)
-              ACCOUNT_ID="${{ vars.AWS_ACCOUNT_ID_STAGING }}"
+              OIDC_ROLE="${{ secrets.AWS_OIDC_ROLE_STAGING }}"
               ;;
             *)
-              ACCOUNT_ID="${{ vars.AWS_ACCOUNT_ID_DEV }}"
+              OIDC_ROLE="${{ secrets.AWS_OIDC_ROLE_DEV }}"
               ;;
           esac
           
-          if [ -z "$ACCOUNT_ID" ]; then
-            echo "ERROR: AWS Account ID not configured for environment"
+          if [ -z "$OIDC_ROLE" ]; then
+            echo "ERROR: AWS OIDC role not configured for environment"
+            echo "Configure AWS_OIDC_ROLE_DEV/STAGING/PROD in repository secrets"
             exit 1
           fi
           
-          echo "account_id=$ACCOUNT_ID" >> $GITHUB_OUTPUT
+          echo "oidc_role=$OIDC_ROLE" >> $GITHUB_OUTPUT
+          echo "Using OIDC role for authentication"
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ steps.account.outputs.account_id }}:role/GitHubActionsDeployRole
+          role-to-assume: ${{ steps.oidc.outputs.oidc_role }}
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: deploy-dashboards
+          audience: sts.amazonaws.com
 
       - name: Get Dashboard Bucket Name
         id: bucket

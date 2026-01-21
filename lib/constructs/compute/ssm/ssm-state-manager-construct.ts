@@ -787,9 +787,9 @@ echo "Dashboard sync completed successfully"
       } as Record<string, string[]>,
       // Run every 5 minutes to pick up new dashboards quickly
       scheduleExpression: "rate(5 minutes)",
-      // Only run at scheduled intervals, not immediately on association creation
-      // (Initial sync is handled by EFS init association)
-      applyOnlyAtCronInterval: true,
+      // Note: applyOnlyAtCronInterval is NOT supported with rate schedules
+      // (only works with cron expressions). With rate schedules, the association
+      // runs on the schedule by default.
       // Allow failures without blocking other associations
       maxConcurrency: DEFAULT_SSM_MAX_CONCURRENCY,
       maxErrors: DEFAULT_SSM_MAX_ERRORS,
