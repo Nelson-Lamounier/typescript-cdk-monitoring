@@ -721,7 +721,7 @@ describe("MonitoringServiceStack", () => {
             Port: MONITORING_PORTS.PROMETHEUS,
             Protocol: "HTTP",
             TargetType: "instance",
-            HealthCheckPath: Match.stringLikeRegexp(".*prometheus.*healthy.*"),
+            HealthCheckPath: `${MONITORING_ROUTES.PROMETHEUS}${MONITORING_HEALTH_CHECK.PATHS.PROMETHEUS}`, // /prometheus/-/healthy
           }
         );
       }).not.toThrow();

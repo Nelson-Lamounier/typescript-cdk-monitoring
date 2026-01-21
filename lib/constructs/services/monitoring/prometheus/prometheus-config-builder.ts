@@ -53,8 +53,10 @@ export function buildPrometheusConfig(
     command.push(`--web.external-url=${props.externalUrl}`);
     
     // Extract route prefix from external URL (e.g., /prometheus from http://alb/prometheus)
-    // The route prefix is needed to make Prometheus serve all endpoints under the prefix
-    // including health checks (/-/healthy becomes /prometheus/-/healthy on the container)
+    // The route prefix configures Prometheus to serve all endpoints under this prefix.
+    // ALB forwards the FULL path including the prefix to the container.
+    // Container receives: /prometheus/-/healthy, /prometheus/-/ready, /prometheus/api/*, etc.
+    // Prometheus serves these at the specified route prefix.
     const urlMatch = props.externalUrl.match(/https?:\/\/[^/]+(\/[^?#]*)?/);
     if (urlMatch && urlMatch[1]) {
       const routePrefix = urlMatch[1];

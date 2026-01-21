@@ -47,9 +47,11 @@ export const environments: Record<string, EnvironmentConfig> = {
   staging: {
     account: process.env.AWS_ACCOUNT_ID_STAGING, // Auto-detect if not set
     region: process.env.AWS_REGION || "eu-west-1",
-    vpcCidr: "10.2.0.0/16", // ADD
-    natGateways: 0, // ADD
-    isProduction: false, // ADD
+    vpcCidr: "10.2.0.0/16",
+    // SECURITY: Set to 1 if using private subnets for compute resources
+    // Cost: ~£30/month per NAT Gateway
+    natGateways: 0,
+    isProduction: false,
     envName: "staging",
     pipelineAccount: process.env.AWS_PIPELINE_ACCOUNT_ID,
     enableMonitoring: false, // Using centralised monitoring in pipeline account
@@ -61,9 +63,12 @@ export const environments: Record<string, EnvironmentConfig> = {
   production: {
     account: process.env.AWS_ACCOUNT_ID_PROD, // Auto-detect if not set
     region: process.env.AWS_REGION || "eu-west-1",
-    vpcCidr: "10.2.0.0/16", // ADD
-    natGateways: 0, // ADD
-    isProduction: true, // ADD
+    vpcCidr: "10.3.0.0/16", // Unique CIDR to avoid conflicts
+    // SECURITY RECOMMENDATION: Set to 1 minimum for private subnet usage
+    // For high availability across AZs, set to 2
+    // Cost: ~£30/month per NAT Gateway
+    natGateways: 1, // Enables private subnet usage for EC2 instances
+    isProduction: true,
     envName: "production",
     pipelineAccount: process.env.AWS_PIPELINE_ACCOUNT_ID,
     enableMonitoring: false, // Using centralised monitoring in pipeline account

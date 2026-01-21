@@ -23,7 +23,10 @@ import {
 import { SuppressionManager } from "../../../cdk-nag";
 import { SecurityGroupConstruct } from "../security/security-group-construct";
 import { COMMON_PORTS } from "../../../shared/constants/networking-constants";
-import { BRIDGE_NETWORK_DYNAMIC_PORT_RANGE } from "../../../shared/constants/monitoring-constants";
+import {
+  BRIDGE_NETWORK_DYNAMIC_PORT_RANGE,
+  MONITORING_PORTS,
+} from "../../../shared/constants/monitoring-constants";
 
 /**
  * Reusable construct for creating an Application Load Balancer with enhanced security and validation
@@ -205,6 +208,14 @@ export class AlbConstruct extends Construct {
             ),
             description:
               "Allow outbound to ECS tasks on dynamic ports for health checks (bridge networking)",
+          },
+          // Prometheus uses static port mapping (hostPort: 9090), not dynamic ports
+          // ALB needs egress to port 9090 for health checks and traffic forwarding
+          {
+            peer: ec2.Peer.ipv4(vpc.vpcCidrBlock),
+            port: ec2.Port.tcp(MONITORING_PORTS.PROMETHEUS),
+            description:
+              "Allow outbound to Prometheus on static port 9090 for health checks",
           },
         ],
       });

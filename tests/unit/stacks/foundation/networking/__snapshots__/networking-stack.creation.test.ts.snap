@@ -650,6 +650,145 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
       },
       "Type": "AWS::EC2::VPCEndpoint",
     },
+    "VpcEc2MessagesEndpoint2E93FCA8": {
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "VpcEc2MessagesEndpointSecurityGroup3786E59A",
+              "GroupId",
+            ],
+          },
+        ],
+        "ServiceName": "com.amazonaws.eu-west-1.ec2messages",
+        "SubnetIds": [
+          {
+            "Ref": "VpcPrivateSubnet1Subnet67A4DBCB",
+          },
+          {
+            "Ref": "VpcPrivateSubnet2SubnetC8EB537D",
+          },
+        ],
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "development-vpc",
+          },
+          {
+            "Key": "Network-Tier",
+            "Value": "Private",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+          {
+            "Key": "Type",
+            "Value": "Private",
+          },
+        ],
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "VpcC3027511",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "VpcEc2MessagesEndpointSecurityGroup3786E59A": {
+      "Properties": {
+        "GroupDescription": "SnapshotStack/Vpc/Vpc/Ec2MessagesEndpoint/SecurityGroup",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic by default",
+            "IpProtocol": "-1",
+          },
+        ],
+        "SecurityGroupIngress": [
+          {
+            "CidrIp": {
+              "Fn::GetAtt": [
+                "VpcC3027511",
+                "CidrBlock",
+              ],
+            },
+            "Description": {
+              "Fn::Join": [
+                "",
+                [
+                  "from ",
+                  {
+                    "Fn::GetAtt": [
+                      "VpcC3027511",
+                      "CidrBlock",
+                    ],
+                  },
+                  ":443",
+                ],
+              ],
+            },
+            "FromPort": 443,
+            "IpProtocol": "tcp",
+            "ToPort": 443,
+          },
+        ],
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "development-vpc",
+          },
+          {
+            "Key": "Network-Tier",
+            "Value": "Private",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+          {
+            "Key": "Type",
+            "Value": "Private",
+          },
+        ],
+        "VpcId": {
+          "Ref": "VpcC3027511",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
     "VpcIGW488B0FEB": {
       "Properties": {
         "Tags": [
@@ -1231,6 +1370,284 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
         },
       },
       "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "VpcSsmEndpoint7F6DDE26": {
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "VpcSsmEndpointSecurityGroupB20D6959",
+              "GroupId",
+            ],
+          },
+        ],
+        "ServiceName": "com.amazonaws.eu-west-1.ssm",
+        "SubnetIds": [
+          {
+            "Ref": "VpcPrivateSubnet1Subnet67A4DBCB",
+          },
+          {
+            "Ref": "VpcPrivateSubnet2SubnetC8EB537D",
+          },
+        ],
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "development-vpc",
+          },
+          {
+            "Key": "Network-Tier",
+            "Value": "Private",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+          {
+            "Key": "Type",
+            "Value": "Private",
+          },
+        ],
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "VpcC3027511",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "VpcSsmEndpointSecurityGroupB20D6959": {
+      "Properties": {
+        "GroupDescription": "SnapshotStack/Vpc/Vpc/SsmEndpoint/SecurityGroup",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic by default",
+            "IpProtocol": "-1",
+          },
+        ],
+        "SecurityGroupIngress": [
+          {
+            "CidrIp": {
+              "Fn::GetAtt": [
+                "VpcC3027511",
+                "CidrBlock",
+              ],
+            },
+            "Description": {
+              "Fn::Join": [
+                "",
+                [
+                  "from ",
+                  {
+                    "Fn::GetAtt": [
+                      "VpcC3027511",
+                      "CidrBlock",
+                    ],
+                  },
+                  ":443",
+                ],
+              ],
+            },
+            "FromPort": 443,
+            "IpProtocol": "tcp",
+            "ToPort": 443,
+          },
+        ],
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "development-vpc",
+          },
+          {
+            "Key": "Network-Tier",
+            "Value": "Private",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+          {
+            "Key": "Type",
+            "Value": "Private",
+          },
+        ],
+        "VpcId": {
+          "Ref": "VpcC3027511",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+    "VpcSsmMessagesEndpoint056A753C": {
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "VpcSsmMessagesEndpointSecurityGroup35FA73E6",
+              "GroupId",
+            ],
+          },
+        ],
+        "ServiceName": "com.amazonaws.eu-west-1.ssmmessages",
+        "SubnetIds": [
+          {
+            "Ref": "VpcPrivateSubnet1Subnet67A4DBCB",
+          },
+          {
+            "Ref": "VpcPrivateSubnet2SubnetC8EB537D",
+          },
+        ],
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "development-vpc",
+          },
+          {
+            "Key": "Network-Tier",
+            "Value": "Private",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+          {
+            "Key": "Type",
+            "Value": "Private",
+          },
+        ],
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "VpcC3027511",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "VpcSsmMessagesEndpointSecurityGroup35FA73E6": {
+      "Properties": {
+        "GroupDescription": "SnapshotStack/Vpc/Vpc/SsmMessagesEndpoint/SecurityGroup",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic by default",
+            "IpProtocol": "-1",
+          },
+        ],
+        "SecurityGroupIngress": [
+          {
+            "CidrIp": {
+              "Fn::GetAtt": [
+                "VpcC3027511",
+                "CidrBlock",
+              ],
+            },
+            "Description": {
+              "Fn::Join": [
+                "",
+                [
+                  "from ",
+                  {
+                    "Fn::GetAtt": [
+                      "VpcC3027511",
+                      "CidrBlock",
+                    ],
+                  },
+                  ":443",
+                ],
+              ],
+            },
+            "FromPort": 443,
+            "IpProtocol": "tcp",
+            "ToPort": 443,
+          },
+        ],
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "development-vpc",
+          },
+          {
+            "Key": "Network-Tier",
+            "Value": "Private",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+          {
+            "Key": "Type",
+            "Value": "Private",
+          },
+        ],
+        "VpcId": {
+          "Ref": "VpcC3027511",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
     },
     "VpcVPCGW42EC8516": {
       "Properties": {

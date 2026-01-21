@@ -927,6 +927,202 @@ async function verifySecurityGroupForHealthChecks(
   };
 }
 
+/**
+ * Verify ALB security group has egress rule for Prometheus port 9090
+ * This is critical for ALB health checks to reach Prometheus containers
+ * using static host port mapping.
+ */
+async function verifyAlbEgressToPrometheus(
+  ec2Client: EC2Client,
+  albSecurityGroupIds: string[],
+  vpcCidr?: string
+): Promise<{
+  hasEgressToPrometheus: boolean;
+  details: string[];
+  criticalIssue: boolean;
+}> {
+  const details: string[] = [];
+  let hasEgressToPrometheus = false;
+  let criticalIssue = false;
+
+  if (albSecurityGroupIds.length === 0) {
+    return { hasEgressToPrometheus: false, details: [], criticalIssue: false };
+  }
+
+  try {
+    const sgResponse = await ec2Client.send(
+      new DescribeSecurityGroupsCommand({
+        GroupIds: albSecurityGroupIds,
+      })
+    );
+
+    for (const sg of sgResponse.SecurityGroups ?? []) {
+      const egressRules = sg.IpPermissionsEgress || [];
+
+      // Check for egress to port 9090 (Prometheus static host port)
+      const prometheusEgressRule = egressRules.find((rule: any) => {
+        if (rule.IpProtocol === "-1") {
+          // All traffic allowed
+          return true;
+        }
+        if (rule.IpProtocol === "tcp") {
+          const fromPort = rule.FromPort ?? 0;
+          const toPort = rule.ToPort ?? 0;
+          return fromPort <= 9090 && toPort >= 9090;
+        }
+        return false;
+      });
+
+      if (prometheusEgressRule) {
+        hasEgressToPrometheus = true;
+        details.push(
+          `✓ ALB security group ${sg.GroupId} allows egress to port 9090`
+        );
+      } else {
+        // Check if dynamic port range is allowed (covers 9090)
+        const dynamicRangeEgress = egressRules.find(
+          (rule: any) =>
+            rule.IpProtocol === "tcp" &&
+            (rule.FromPort ?? 0) <= 32768 &&
+            (rule.ToPort ?? 0) >= 65535
+        );
+
+        if (dynamicRangeEgress) {
+          details.push(
+            `✓ ALB security group ${sg.GroupId} allows egress to dynamic port range (32768-65535)`
+          );
+          // But still need 9090 for Prometheus static port
+        }
+
+        // CRITICAL: Missing egress rule for port 9090
+        criticalIssue = true;
+        details.push(
+          `✗ ALB security group ${sg.GroupId} MISSING egress rule for port 9090`
+        );
+        details.push(
+          `  Prometheus uses static hostPort: 9090, ALB health checks will fail without this rule`
+        );
+        if (vpcCidr) {
+          details.push(`  Required: Allow TCP 9090 egress to ${vpcCidr}`);
+        }
+      }
+    }
+  } catch (error: any) {
+    details.push(`⚠ Could not verify ALB egress rules: ${error.message}`);
+  }
+
+  return {
+    hasEgressToPrometheus,
+    details,
+    criticalIssue,
+  };
+}
+
+/**
+ * Verify EBS volume for Prometheus TSDB data is configured
+ * Prometheus TSDB requires local block storage (EBS), NOT NFS (EFS)
+ */
+async function verifyPrometheusEbsVolume(
+  ssmClient: SSMClient,
+  instanceId: string
+): Promise<{
+  ebsVolumeConfigured: boolean;
+  mountedCorrectly: boolean;
+  fsType: string;
+  details: string[];
+}> {
+  const details: string[] = [];
+  let ebsVolumeConfigured = false;
+  let mountedCorrectly = false;
+  let fsType = "unknown";
+
+  try {
+    const commands = [
+      'echo "=== Prometheus EBS Volume Check ==="',
+      'echo "1. Check if /dev/xvdf exists (dedicated EBS for Prometheus):"',
+      "lsblk | grep xvdf || echo 'No xvdf device found'",
+      'echo ""',
+      'echo "2. Check if /mnt/prometheus-data is mounted:"',
+      "mountpoint -q /mnt/prometheus-data && echo 'MOUNTED' || echo 'NOT_MOUNTED'",
+      'echo ""',
+      'echo "3. Check filesystem type for Prometheus data:"',
+      "df -T /mnt/prometheus-data 2>/dev/null | tail -1 | awk '{print $2}' || echo 'UNKNOWN'",
+      'echo ""',
+      'echo "4. Check directory ownership (should be 65534:65534 for Prometheus):"',
+      "ls -la /mnt/prometheus-data 2>/dev/null | head -2 || echo 'Directory not accessible'",
+    ];
+
+    const sendCommand = new SendCommandCommand({
+      DocumentName: "AWS-RunShellScript",
+      InstanceIds: [instanceId],
+      Parameters: { commands },
+      TimeoutSeconds: 30,
+    });
+
+    const sendResponse = await ssmClient.send(sendCommand);
+    const commandId = sendResponse.Command?.CommandId;
+
+    if (!commandId) {
+      details.push("⚠ Could not send SSM command to verify EBS volume");
+      return { ebsVolumeConfigured, mountedCorrectly, fsType, details };
+    }
+
+    await sleep(5);
+
+    const getCommand = new GetCommandInvocationCommand({
+      CommandId: commandId,
+      InstanceId: instanceId,
+    });
+
+    let getResponse = await ssmClient.send(getCommand);
+
+    if (getResponse.Status === "InProgress") {
+      await sleep(3);
+      getResponse = await ssmClient.send(getCommand);
+    }
+
+    const output = getResponse.StandardOutputContent || "";
+
+    // Parse results
+    if (output.includes("xvdf")) {
+      ebsVolumeConfigured = true;
+      details.push("✓ EBS volume /dev/xvdf detected (dedicated Prometheus volume)");
+    } else {
+      details.push("✗ EBS volume /dev/xvdf NOT detected");
+      details.push("  Prometheus TSDB requires dedicated EBS, not EFS!");
+    }
+
+    if (output.includes("MOUNTED")) {
+      mountedCorrectly = true;
+      details.push("✓ /mnt/prometheus-data is mounted");
+    } else {
+      details.push("✗ /mnt/prometheus-data is NOT mounted");
+    }
+
+    // Check filesystem type
+    if (output.includes("ext4")) {
+      fsType = "ext4";
+      details.push("✓ Filesystem type: ext4 (correct for Prometheus TSDB)");
+    } else if (output.includes("nfs") || output.includes("NFS")) {
+      fsType = "nfs";
+      details.push("✗ CRITICAL: Filesystem type is NFS - Prometheus will fail!");
+      details.push("  Prometheus TSDB requires local block storage with fsync guarantees");
+      details.push("  See: https://prometheus.io/docs/prometheus/latest/storage/");
+    } else {
+      details.push(`⚠ Filesystem type: ${fsType}`);
+    }
+  } catch (error: any) {
+    details.push(`⚠ Could not verify EBS volume: ${error.message}`);
+  }
+
+  return {
+    ebsVolumeConfigured,
+    mountedCorrectly,
+    fsType,
+    details,
+  };
+}
+
 async function checkSsmAgentConnectivity(
   ssmClient: SSMClient,
   instanceIds: string[]
@@ -1668,6 +1864,87 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
 
   console.log("");
 
+  // 6.6. ALB Egress Rule Validation for Prometheus
+  Logger.subsection("6.6. ALB Egress Rule Validation (Prometheus Port 9090)");
+  Logger.info(
+    "Verifying ALB security group allows egress to Prometheus static port 9090..."
+  );
+  Logger.info(
+    "CRITICAL: Prometheus uses hostPort: 9090, ALB must have egress rule for health checks."
+  );
+  console.log("");
+
+  if (state.albArn) {
+    try {
+      const albCommand = new DescribeLoadBalancersCommand({
+        LoadBalancerArns: [state.albArn],
+      });
+      const albResponse = await elbv2Client.send(albCommand);
+      const albSecurityGroupIds =
+        albResponse.LoadBalancers?.[0]?.SecurityGroups ?? [];
+      const vpcId = albResponse.LoadBalancers?.[0]?.VpcId;
+
+      // Get VPC CIDR for detailed guidance
+      let vpcCidr: string | undefined;
+      if (vpcId) {
+        try {
+          const vpcCommand = new DescribeSecurityGroupsCommand({
+            Filters: [{ Name: "vpc-id", Values: [vpcId] }],
+          });
+          const vpcSgResponse = await ec2Client.send(vpcCommand);
+          // Just get VPC CIDR from the first security group's VPC
+          const firstSg = vpcSgResponse.SecurityGroups?.[0];
+          if (firstSg) {
+            // Approximate VPC CIDR from security group info
+            vpcCidr = "10.0.0.0/16"; // Default assumption
+          }
+        } catch {
+          // Ignore - we'll proceed without VPC CIDR
+        }
+      }
+
+      const albEgressCheck = await verifyAlbEgressToPrometheus(
+        ec2Client,
+        albSecurityGroupIds,
+        vpcCidr
+      );
+
+      checks.total++;
+
+      if (albEgressCheck.hasEgressToPrometheus) {
+        Logger.success("ALB security group allows egress to Prometheus port 9090");
+        checks.passed++;
+      } else if (albEgressCheck.criticalIssue) {
+        Logger.error("CRITICAL: ALB security group MISSING egress rule for port 9090");
+        Logger.info("Prometheus uses static hostPort: 9090 for health checks.");
+        Logger.info("ALB cannot perform health checks without egress to this port.");
+        Logger.info("");
+        Logger.info("Fix: Add egress rule to ALB security group:");
+        Logger.info("  - Protocol: TCP");
+        Logger.info("  - Port: 9090");
+        Logger.info("  - Destination: VPC CIDR");
+        checks.failed++;
+        state.readinessIssues++;
+      } else {
+        Logger.warning("Could not determine ALB egress configuration for port 9090");
+        checks.warnings++;
+      }
+
+      albEgressCheck.details.forEach((detail) => {
+        Logger.info(`   ${detail}`);
+      });
+    } catch (error: any) {
+      logPermissionWarning("ELBv2/EC2 ALB egress validation", error);
+      Logger.warning("Could not validate ALB egress rules");
+      checks.warnings++;
+    }
+  } else {
+    Logger.warning("ALB ARN not available - skipping egress validation");
+    checks.warnings++;
+  }
+
+  console.log("");
+
   // 7. SSM Agent Connectivity
   Logger.subsection("7. SSM Agent Connectivity");
   Logger.info(
@@ -2395,6 +2672,81 @@ async function verifyInfraStack(config: VerifyInfraStackConfig): Promise<{
   } else {
     Logger.warning("Auto Scaling Group name not available");
     Logger.info("Skipping actual EFS mount verification");
+  }
+
+  console.log("");
+
+  // 14.5. Prometheus EBS Volume Verification
+  Logger.subsection("14.5. Prometheus EBS Volume Verification");
+  Logger.info(
+    "CRITICAL: Prometheus TSDB requires local block storage (EBS), NOT NFS (EFS)."
+  );
+  Logger.info(
+    "Using EFS for Prometheus data will cause corruption and health check failures."
+  );
+  Logger.info(
+    "Reference: https://prometheus.io/docs/prometheus/latest/storage/"
+  );
+  console.log("");
+
+  if (state.asgName && state.instanceIds.length > 0) {
+    const asg = await getAutoScalingGroup(asgClient, state.asgName);
+    const inServiceInstances =
+      asg?.Instances?.filter(
+        (inst: any) => inst.LifecycleState === "InService"
+      ) || [];
+
+    if (inServiceInstances.length > 0) {
+      const firstInstance = inServiceInstances[0].InstanceId;
+
+      if (firstInstance) {
+        Logger.info(`Testing Prometheus EBS volume on instance: ${firstInstance}`);
+        console.log("");
+
+        const ebsCheck = await verifyPrometheusEbsVolume(ssmClient, firstInstance);
+
+        checks.total++;
+
+        if (ebsCheck.ebsVolumeConfigured && ebsCheck.mountedCorrectly && ebsCheck.fsType === "ext4") {
+          Logger.success("Prometheus EBS volume configured correctly");
+          Logger.success(`  - EBS device /dev/xvdf attached`);
+          Logger.success(`  - Mounted at /mnt/prometheus-data`);
+          Logger.success(`  - Filesystem type: ext4 (local block storage)`);
+          checks.passed++;
+        } else if (ebsCheck.fsType === "nfs") {
+          Logger.error("CRITICAL: Prometheus is using NFS/EFS for data storage!");
+          Logger.error("This WILL cause data corruption and health check failures.");
+          Logger.info("");
+          Logger.info("Required fix:");
+          Logger.info("  1. Add dedicated EBS volume to Launch Template (/dev/xvdf)");
+          Logger.info("  2. Format and mount to /mnt/prometheus-data");
+          Logger.info("  3. Update Prometheus task definition to use EBS mount");
+          Logger.info("  See: docs/PROMETHEUS_HEALTH_CHECK_TROUBLESHOOTING_2026-01-20.md");
+          checks.failed++;
+          state.readinessIssues++;
+        } else if (!ebsCheck.ebsVolumeConfigured) {
+          Logger.warning("EBS volume /dev/xvdf not detected");
+          Logger.info("Prometheus may be using EFS or other storage.");
+          Logger.info("If Prometheus health checks fail with fs_type=NFS_SUPER_MAGIC,");
+          Logger.info("add a dedicated EBS volume for Prometheus TSDB data.");
+          checks.warnings++;
+        } else {
+          Logger.warning("Prometheus EBS volume configuration incomplete");
+          checks.warnings++;
+        }
+
+        ebsCheck.details.forEach((detail) => {
+          Logger.info(`   ${detail}`);
+        });
+      } else {
+        Logger.warning("No running instances found for EBS verification");
+      }
+    } else {
+      Logger.warning("No InService instances found");
+    }
+  } else {
+    Logger.warning("Auto Scaling Group name not available");
+    Logger.info("Skipping Prometheus EBS volume verification");
   }
 
   console.log("");
