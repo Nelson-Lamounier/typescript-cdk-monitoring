@@ -234,16 +234,26 @@ function setupVerificationChecks(
           };
         }
 
+        // Helper function to safely parse subnet IDs (handles string or array)
+        const parseSubnetIds = (value: any): string[] | undefined => {
+          if (!value) return undefined;
+          if (Array.isArray(value)) return value.map((id: any) => String(id).trim());
+          if (typeof value === "string") {
+            return value.split(",").map((id: string) => id.trim()).filter((id) => id.length > 0);
+          }
+          return undefined;
+        };
+
         context.outputs = {
           vpcId: (stackInfo.outputs as any).VpcId || stackInfo.outputs["vpcId"],
-          privateSubnetIds: (
+          privateSubnetIds: parseSubnetIds(
             (stackInfo.outputs as any).PrivateSubnetIds ||
             stackInfo.outputs["privateSubnetIds"]
-          )?.split(",").map((id: string) => id.trim()),
-          publicSubnetIds: (
+          ),
+          publicSubnetIds: parseSubnetIds(
             (stackInfo.outputs as any).PublicSubnetIds ||
             stackInfo.outputs["publicSubnetIds"]
-          )?.split(",").map((id: string) => id.trim()),
+          ),
           securityGroupId:
             (stackInfo.outputs as any).SecurityGroupId ||
             stackInfo.outputs["securityGroupId"],
