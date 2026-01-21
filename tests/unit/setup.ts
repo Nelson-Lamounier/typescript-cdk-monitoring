@@ -14,6 +14,7 @@ import * as path from "path";
 
 import * as cdk from "aws-cdk-lib";
 import * as logs from "aws-cdk-lib/aws-logs";
+import * as s3 from "aws-cdk-lib/aws-s3";
 import { Template } from "aws-cdk-lib/assertions";
 
 import { NetworkingStack } from "../../lib/stacks/foundation/networking-stack";
@@ -134,6 +135,13 @@ export function createIntegrationTestStacks(
     vpc: networkingStack.vpc,
   });
 
+  // Create mock S3 bucket for dashboard storage
+  const dashboardBucket = s3.Bucket.fromBucketName(
+    app,
+    "TestDashboardBucket",
+    `monitoring-dashboards-${finalConfig.environment}-${finalConfig.region}`
+  );
+
   // Layer 3: Infrastructure Stack
   const infraStack = new MonitoringInfraStack(app, "TestInfraStack", {
     env: {
@@ -149,6 +157,7 @@ export function createIntegrationTestStacks(
     efsAvailabilityZone: efsStack.efsAvailabilityZone,
     efsSecurityGroup: efsStack.mountTargetSecurityGroup,
     efsInitializationComplete: efsStack.efsInitializationExecution,
+    dashboardBucket,
     minCapacity: 1,
     desiredCapacity: 1,
     maxCapacity: 2,

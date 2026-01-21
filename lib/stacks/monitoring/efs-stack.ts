@@ -4,8 +4,6 @@ import * as cdk from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as efs from "aws-cdk-lib/aws-efs";
 import * as ssm from "aws-cdk-lib/aws-ssm";
-import * as s3 from "aws-cdk-lib/aws-s3";
-import * as s3deploy from "aws-cdk-lib/aws-s3-deployment";
 import { Construct } from "constructs";
 
 import { SuppressionManager } from "../../cdk-nag";
@@ -55,12 +53,17 @@ import { convertToYaml } from "../../shared/utils/yaml-converter";
  * Dependencies:
  * - NetworkingStack (for VPC)
  *
+ * Note: Dashboard storage has been moved to MonitoringS3Stack.
+ * The dashboard bucket and deployment logic is now in a dedicated S3 stack
+ * for better separation of concerns and independent deployment.
+ *
  * Configuration Strategy:
  * - Prometheus config stored in SSM Parameter Store as JSON
  * - Grafana datasource/dashboard configs stored in SSM as JSON
  * - SSM Automation Document converts JSON to YAML
  * - SSM Automation creates EFS directory structure setup script
  * - Services mount EFS and read configs from SSM at startup
+ * - Dashboard JSON files are downloaded from S3 during initialization
  *
  * Benefits of SSM Automation over Lambda:
  * - No cold starts or Lambda execution delays
@@ -114,11 +117,6 @@ export class MonitoringEfsStack extends cdk.Stack {
    * EFS file system
    */
   public readonly fileSystem: efs.FileSystem;
-  
-  /**
-   * S3 bucket for dashboard storage
-   */
-  public readonly dashboardBucket: s3.Bucket;
 
   /**
    * EFS access point
@@ -290,33 +288,19 @@ export class MonitoringEfsStack extends cdk.Stack {
       );
 
     // ========================================================================
-    // 7. S3 BUCKET FOR GRAFANA DASHBOARDS
-    // ========================================================================
-    // Create S3 bucket for storing large dashboard JSON files
-    // SSM Parameter Store has 8KB limit, dashboards are 30-50KB each
-    this.dashboardBucket = this.createDashboardBucket(props);
-
-    // Deploy dashboard files to S3
-    const dashboardDeployment = this.deployDashboardsToS3(props);
-    
-    // ========================================================================
-    // 8. SSM PARAMETERS - MONITORING CONFIGS
+    // 7. SSM PARAMETERS - MONITORING CONFIGS
     // ========================================================================
     const monitoringConfigParams = this.createMonitoringConfigs(props);
 
-    // Ensure initialization waits for SSM parameters and dashboards to be created
+    // Ensure initialization waits for SSM parameters to be created
     monitoringConfigParams.forEach((param) =>
       this.efsInitializationExecution.addDependency(
         param.node.defaultChild as cdk.CfnResource
       )
     );
-    
-    this.efsInitializationExecution.addDependency(
-      dashboardDeployment.node.defaultChild as cdk.CfnResource
-    );
 
     // ========================================================================
-    // 9. SSM PARAMETERS - EFS DISCOVERY
+    // 8. SSM PARAMETERS - EFS DISCOVERY
     // ========================================================================
     if (props.createSsmParameters !== false) {
       this.ssmParameters = new SsmParametersConstruct(this, "Parameters", {
@@ -557,62 +541,6 @@ export class MonitoringEfsStack extends cdk.Stack {
       grafanaDashboardConfigParam,
       grafanaDashboardConfigYamlParam,
     ];
-  }
-
-  /**
-   * Create S3 bucket for Grafana dashboards
-   * 
-   * Dashboard JSON files are too large for SSM Parameter Store (30-50KB vs 8KB limit)
-   * S3 provides cost-effective storage and fast downloads during initialization
-   */
-  private createDashboardBucket(props: MonitoringEfsStackProps): s3.Bucket {
-    const removalPolicy = props.removalPolicy ?? cdk.RemovalPolicy.RETAIN;
-    const isProduction = isProductionEnvironment(props.envName);
-
-    const bucket = new s3.Bucket(this, "DashboardBucket", {
-      bucketName: `monitoring-dashboards-${props.envName}-${this.account}`,
-      encryption: s3.BucketEncryption.S3_MANAGED, // Cost-effective encryption
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      versioned: false, // Dashboards are immutable per deployment
-      lifecycleRules: [
-        {
-          id: "DeleteOldDashboards",
-          enabled: !isProduction,
-          expiration: cdk.Duration.days(90), // Cleanup old deployments in non-prod
-        },
-      ],
-      removalPolicy,
-      autoDeleteObjects: removalPolicy === cdk.RemovalPolicy.DESTROY,
-    });
-
-    // Store bucket name in SSM for EC2 instances to download dashboards
-    new ssm.StringParameter(this, "DashboardBucketName", {
-      parameterName: `/monitoring/${props.envName}/dashboard-bucket-name`,
-      stringValue: bucket.bucketName,
-      description: "S3 bucket name for Grafana dashboard JSON files",
-      tier: ssm.ParameterTier.STANDARD,
-    });
-
-    return bucket;
-  }
-
-  /**
-   * Deploy dashboard JSON files to S3
-   * 
-   * Uses CDK's BucketDeployment to upload dashboard files from config/grafana/dashboards/
-   * Files are synced during deployment and made available for download during EC2 initialization
-   */
-  private deployDashboardsToS3(props: MonitoringEfsStackProps): s3deploy.BucketDeployment {
-    const path = require('path');
-    const dashboardsDir = path.join(__dirname, '../../../config/grafana/dashboards');
-
-    return new s3deploy.BucketDeployment(this, "DeployDashboards", {
-      sources: [s3deploy.Source.asset(dashboardsDir)],
-      destinationBucket: this.dashboardBucket,
-      destinationKeyPrefix: "dashboards/", // Prefix for organisation
-      prune: true, // Remove old dashboards not in current deployment
-      retainOnDelete: props.removalPolicy === cdk.RemovalPolicy.RETAIN,
-    });
   }
 
   /**

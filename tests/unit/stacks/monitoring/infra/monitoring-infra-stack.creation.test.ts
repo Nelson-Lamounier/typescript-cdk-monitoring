@@ -165,6 +165,13 @@ describe("MonitoringInfraStack - Creation & Validation", () => {
       const fixtures = InfraTestFixtures.getInstance(testApp);
       const efsResources = fixtures.getEfsResources();
 
+      // Create mock S3 bucket
+      const dashboardBucket = s3.Bucket.fromBucketName(
+        testApp,
+        "MockBucket1",
+        "test-bucket"
+      );
+
       expect(() => {
         new MonitoringInfraStack(testApp, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
           env: createTestEnv(),
@@ -176,6 +183,7 @@ describe("MonitoringInfraStack - Creation & Validation", () => {
           efsAvailabilityZone: efsResources.availabilityZone,
           efsSecurityGroup: efsResources.securityGroup,
           efsInitializationComplete: efsResources.initializationComplete,
+          dashboardBucket,
         });
       }).toThrow(/VPC is required/);
     });
@@ -185,6 +193,13 @@ describe("MonitoringInfraStack - Creation & Validation", () => {
       const fixtures = InfraTestFixtures.getInstance(testApp);
       const vpc = fixtures.getVpc();
       const efsResources = fixtures.getEfsResources();
+
+      // Create mock S3 bucket
+      const dashboardBucket = s3.Bucket.fromBucketName(
+        testApp,
+        "MockBucket2",
+        "test-bucket"
+      );
 
       expect(() => {
         new MonitoringInfraStack(testApp, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
@@ -197,6 +212,7 @@ describe("MonitoringInfraStack - Creation & Validation", () => {
           efsAvailabilityZone: efsResources.availabilityZone,
           efsSecurityGroup: efsResources.securityGroup,
           efsInitializationComplete: efsResources.initializationComplete,
+          dashboardBucket,
         });
       }).toThrow(/EFS file system is required/);
     });
@@ -206,6 +222,13 @@ describe("MonitoringInfraStack - Creation & Validation", () => {
       const fixtures = InfraTestFixtures.getInstance(testApp);
       const vpc = fixtures.getVpc();
       const efsResources = fixtures.getEfsResources();
+
+      // Create mock S3 bucket
+      const dashboardBucket = s3.Bucket.fromBucketName(
+        testApp,
+        "MockBucket3",
+        "test-bucket"
+      );
 
       expect(() => {
         new MonitoringInfraStack(testApp, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
@@ -218,6 +241,7 @@ describe("MonitoringInfraStack - Creation & Validation", () => {
           efsAvailabilityZone: efsResources.availabilityZone,
           efsSecurityGroup: null as unknown as ec2.SecurityGroup,
           efsInitializationComplete: efsResources.initializationComplete,
+          dashboardBucket,
         });
       }).toThrow(/EFS security group is required/);
     });
@@ -227,6 +251,13 @@ describe("MonitoringInfraStack - Creation & Validation", () => {
       const fixtures = InfraTestFixtures.getInstance(testApp);
       const vpc = fixtures.getVpc();
       const efsResources = fixtures.getEfsResources();
+
+      // Create mock S3 bucket
+      const dashboardBucket = s3.Bucket.fromBucketName(
+        testApp,
+        "MockBucket4",
+        "test-bucket"
+      );
 
       expect(() => {
         new MonitoringInfraStack(testApp, TEST_CONSTANTS.STACK_IDS.DEFAULT, {
@@ -239,6 +270,7 @@ describe("MonitoringInfraStack - Creation & Validation", () => {
           efsAvailabilityZone: efsResources.availabilityZone,
           efsSecurityGroup: efsResources.securityGroup,
           efsInitializationComplete: null as unknown as ssm.CfnAssociation,
+          dashboardBucket,
         });
       }).toThrow(/EFS initialization complete resource is required/);
     });

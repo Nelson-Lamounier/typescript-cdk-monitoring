@@ -66,6 +66,64 @@ export interface MonitoringEfsStackProps extends BaseStackProps {
 }
 
 /**
+ * Properties for Monitoring S3 Stack (Layer 0)
+ */
+export interface MonitoringS3StackProps extends BaseStackProps {
+  /**
+   * Removal policy for S3 buckets
+   * @default RETAIN for production, DESTROY for non-production
+   */
+  removalPolicy?: cdk.RemovalPolicy;
+
+  /**
+   * Enable versioning for dashboard bucket
+   * @default false
+   */
+  enableVersioning?: boolean;
+
+  /**
+   * Dashboard retention days (non-production only)
+   * @default 90
+   */
+  dashboardRetentionDays?: number;
+
+  /**
+   * Enable access logging
+   * @default false
+   */
+  enableAccessLogs?: boolean;
+
+  /**
+   * Access logs bucket (required if enableAccessLogs is true)
+   */
+  accessLogsBucket?: s3.IBucket;
+
+  /**
+   * Path to dashboard files for deployment
+   * @default ./config/grafana/dashboards
+   */
+  dashboardsPath?: string;
+
+  /**
+   * Create SSM parameters
+   * @default true
+   */
+  createSsmParameters?: boolean;
+
+  /**
+   * Create CloudFormation outputs
+   * @default true
+   */
+  createOutputs?: boolean;
+
+  /**
+   * Enable CloudFormation exports
+   * @default false
+   */
+  enableExports?: boolean;
+}
+
+/**
  * Properties for Monitoring Infrastructure Stack (Layer 1)
  */
 export interface MonitoringInfraStackProps extends BaseStackProps {

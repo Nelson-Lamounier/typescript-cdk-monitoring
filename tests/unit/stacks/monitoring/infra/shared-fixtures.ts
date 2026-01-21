@@ -12,6 +12,7 @@
 import * as cdk from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as efs from "aws-cdk-lib/aws-efs";
+import * as s3 from "aws-cdk-lib/aws-s3";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 
 import { MonitoringInfraStack } from "../../../../../lib/stacks/monitoring/infra-stack";
@@ -19,6 +20,7 @@ import { MonitoringInfraStackProps } from "../../../../../lib/shared/types/stack
 import {
   BASE_TEST_CONSTANTS,
   createTestEnv,
+  TEST_CONFIG,
 } from "../../../utils/stack-test-utils";
 import {
   EFS_TEST_CONSTANTS,
@@ -167,6 +169,13 @@ export class InfraTestFixtures {
     const vpc = this.getVpc();
     const efsResources = this.getEfsResources();
 
+    // Create mock S3 bucket for dashboard storage
+    const dashboardBucket = s3.Bucket.fromBucketName(
+      this.app,
+      "MockDashboardBucket",
+      `monitoring-dashboards-${TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT}-${TEST_CONFIG.region}`
+    );
+
     return {
       env: createTestEnv(),
       envName: TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
@@ -177,6 +186,7 @@ export class InfraTestFixtures {
       efsAvailabilityZone: efsResources.availabilityZone,
       efsSecurityGroup: efsResources.securityGroup,
       efsInitializationComplete: efsResources.initializationComplete,
+      dashboardBucket,
     };
   }
 

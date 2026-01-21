@@ -3,6 +3,7 @@
 import * as cdk from "aws-cdk-lib";
 
 import { NetworkingStack } from "../../lib/stacks/foundation/networking-stack";
+import { MonitoringS3Stack } from "../../lib/stacks/storage/s3-stack";
 import { MonitoringEfsStack } from "../../lib/stacks/monitoring/efs-stack";
 import { MonitoringInfraStack } from "../../lib/stacks/monitoring/infra-stack";
 import { MonitoringServiceStack } from "../../lib/stacks/monitoring/service-stack";
@@ -12,13 +13,14 @@ import { EnvironmentConfig } from "../../config/environments";
  * Create all monitoring stacks for a single environment
  *
  * Architecture:
- * 1. MonitoringEfsStack - Storage layer (EFS file system)
- * 2. MonitoringInfraStack - Compute layer (EC2, ECS cluster, ALB)
- * 3. MonitoringServiceStack - Application layer (Prometheus, Grafana, Node Exporter)
+ * 1. MonitoringS3Stack - S3 storage layer (dashboard bucket)
+ * 2. MonitoringEfsStack - EFS storage layer (persistent data)
+ * 3. MonitoringInfraStack - Compute layer (EC2, ECS cluster, ALB)
+ * 4. MonitoringServiceStack - Application layer (Prometheus, Grafana, Node Exporter)
  *
  * Dependencies:
  * - Requires NetworkingStack (VPC, subnets, security groups)
- * - Each monitoring stack depends on the previous one
+ * - Each monitoring stack depends on the previous ones
  *
  * @param app CDK app
  * @param envName Environment name (e.g., 'development', 'pipeline', 'production')
@@ -33,6 +35,7 @@ export function createMonitoringStacks(
   networkingStack: NetworkingStack,
   stackProps: cdk.StackProps
 ): {
+  s3Stack: MonitoringS3Stack;
   efsStack: MonitoringEfsStack;
   infraStack: MonitoringInfraStack;
   serviceStack: MonitoringServiceStack;
@@ -41,7 +44,24 @@ export function createMonitoringStacks(
   const projectName = "monitoring";
 
   // ============================================================================
-  // 1. MONITORING EFS STACK (Storage Layer)
+  // 1. MONITORING S3 STACK (Dashboard Storage Layer)
+  // ============================================================================
+
+  const s3Stack = new MonitoringS3Stack(app, `${stackNamePrefix}S3`, {
+    ...stackProps,
+    envName,
+    projectName,
+
+    // S3 Configuration
+    removalPolicy: envConfig.isProduction
+      ? cdk.RemovalPolicy.RETAIN
+      : cdk.RemovalPolicy.DESTROY,
+    enableVersioning: envConfig.isProduction,
+    dashboardsPath: "./config/grafana/dashboards",
+  });
+
+  // ============================================================================
+  // 2. MONITORING EFS STACK (Persistent Storage Layer)
   // ============================================================================
 
   const efsStack = new MonitoringEfsStack(app, `${stackNamePrefix}Efs`, {
@@ -66,7 +86,7 @@ export function createMonitoringStacks(
   efsStack.addDependency(networkingStack);
 
   // ============================================================================
-  // 2. MONITORING INFRASTRUCTURE STACK (Compute Layer)
+  // 3. MONITORING INFRASTRUCTURE STACK (Compute Layer)
   // ============================================================================
 
   const infraStack = new MonitoringInfraStack(app, `${stackNamePrefix}Infra`, {
@@ -85,8 +105,8 @@ export function createMonitoringStacks(
     efsInitializationComplete: efsStack.efsInitializationExecution,
     efsStackName: efsStack.stackName,
 
-    // S3 Configuration (from EFS stack - dashboard storage)
-    dashboardBucket: efsStack.dashboardBucket,
+    // S3 Configuration (from S3 stack - dashboard storage)
+    dashboardBucket: s3Stack.dashboardBucket,
 
     // EC2 Configuration
     minCapacity: envConfig.isProduction ? 2 : 1,
@@ -100,10 +120,11 @@ export function createMonitoringStacks(
 
   // Add dependencies
   infraStack.addDependency(networkingStack);
+  infraStack.addDependency(s3Stack);
   infraStack.addDependency(efsStack);
 
   // ============================================================================
-  // 3. MONITORING SERVICE STACK (Application Layer)
+  // 4. MONITORING SERVICE STACK (Application Layer)
   // ============================================================================
 
   const serviceStack = new MonitoringServiceStack(
@@ -137,10 +158,12 @@ export function createMonitoringStacks(
 
   // Add dependencies
   serviceStack.addDependency(networkingStack);
+  serviceStack.addDependency(s3Stack);
   serviceStack.addDependency(efsStack);
   serviceStack.addDependency(infraStack);
 
   return {
+    s3Stack,
     efsStack,
     infraStack,
     serviceStack,

@@ -641,11 +641,11 @@ if [ -z "$DASHBOARD_BUCKET" ]; then
 fi
 
 # Download all dashboards from S3
-aws s3 sync s3://${DASHBOARD_BUCKET}/dashboards/ ${mountPoint}/config/grafana/dashboards/ --region ${region}
+aws s3 sync s3://\${DASHBOARD_BUCKET}/dashboards/ ${mountPoint}/config/grafana/dashboards/ --region ${region}
 
 # Count downloaded dashboards
-DASHBOARD_COUNT=$(find ${mountPoint}/config/grafana/dashboards -name "*.json" | wc -l)
-echo "Downloaded ${DASHBOARD_COUNT} pre-built dashboards successfully"
+DASHBOARD_COUNT=\$(find ${mountPoint}/config/grafana/dashboards -name "*.json" | wc -l)
+echo "Downloaded \${DASHBOARD_COUNT} pre-built dashboards successfully"
 
 # Set proper ownership for config files
 chown 65534:65534 ${mountPoint}/config/prometheus/prometheus.yml
