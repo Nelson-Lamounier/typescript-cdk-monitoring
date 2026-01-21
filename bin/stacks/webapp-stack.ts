@@ -4,6 +4,7 @@ import * as cdk from "aws-cdk-lib";
 
 import { NetworkingStack } from "../../lib/stacks/foundation/networking-stack";
 import { WebappEcrStack } from "../../lib/stacks/webapp/ecr-stack";
+import { WebappDynamoDbStack } from "../../lib/stacks/webapp/dynamodb-stack";
 import { EnvironmentConfig } from "../../config/environments";
 
 /**
@@ -11,14 +12,15 @@ import { EnvironmentConfig } from "../../config/environments";
  *
  * Architecture:
  * 1. WebappEcrStack - Container registry (ECR repository)
+ * 2. WebappDynamoDbStack - Database layer (DynamoDB tables)
  *
  * Future stacks (to be added):
- * 2. WebappInfraStack - Compute layer (EC2, ECS cluster, ALB)
- * 3. WebappServiceStack - Application layer (webapp containers)
+ * 3. WebappInfraStack - Compute layer (EC2, ECS cluster, ALB)
+ * 4. WebappServiceStack - Application layer (webapp containers)
  *
  * Dependencies:
  * - Requires NetworkingStack (VPC, subnets, security groups)
- * - ECR stack is standalone (no dependencies on other webapp stacks yet)
+ * - ECR and DynamoDB stacks are standalone (no dependencies on other webapp stacks)
  *
  * @param app CDK app
  * @param envName Environment name (e.g., 'development', 'staging', 'production')
@@ -36,6 +38,7 @@ export function createWebappStacks(
   projectName: string = "webapp"
 ): {
   ecrStack: WebappEcrStack;
+  dynamoDbStack: WebappDynamoDbStack;
 } {
   const stackNamePrefix = `${envName}-Webapp`;
 
@@ -54,7 +57,26 @@ export function createWebappStacks(
   // Add dependency on networking (for consistency, though ECR doesn't require VPC)
   ecrStack.addDependency(networkingStack);
 
+  // ============================================================================
+  // 2. WEBAPP DYNAMODB STACK (Database Layer)
+  // ============================================================================
+
+  const dynamoDbStack = new WebappDynamoDbStack(
+    app,
+    `${stackNamePrefix}DynamoDb`,
+    {
+      ...stackProps,
+      envName,
+      projectName,
+      envConfig,
+    }
+  );
+
+  // DynamoDB is standalone but add dependency for consistent deployment order
+  dynamoDbStack.addDependency(networkingStack);
+
   return {
     ecrStack,
+    dynamoDbStack,
   };
 }

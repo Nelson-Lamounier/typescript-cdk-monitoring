@@ -447,7 +447,7 @@ export class SuppressionManager {
    * - Monitoring Domain: MonitoringStack, MonitoringEfsStack, MonitoringInfraStack, MonitoringServiceStack
    * - Networking Domain: NetworkingStack, LoadBalancerStack, CertificateStack
    * - Compute Domain: ComputeStack
-   * - Webapp Domain: WebappEcrStack (isolated - separate pipeline)
+   * - Webapp Domain: WebappEcrStack, WebappDynamoDbStack (isolated - separate pipeline)
    * 
    * @param stack - The CDK stack to apply suppressions to
    * @param stackType - The type of stack (determines which suppressions to apply)
@@ -464,7 +464,8 @@ export class SuppressionManager {
       | "NetworkingStack"
       | "LoadBalancerStack"
       | "CertificateStack"
-      | "WebappEcrStack", // Webapp domain - isolated from monitoring
+      | "WebappEcrStack" // Webapp domain - ECR repository
+      | "WebappDynamoDbStack", // Webapp domain - DynamoDB + S3
     envName?: string
   ): void {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -531,11 +532,16 @@ export class SuppressionManager {
 
       // ===== WEBAPP DOMAIN (ISOLATED) =====
       case "WebappEcrStack":
-        // Webapp stacks are isolated from monitoring domain
-        // They only get base CDK suppressions + ECR-specific suppressions
+        // Webapp ECR stack - Container registry for Next.js application
+        // Only gets base CDK suppressions + ECR-specific suppressions
         suppressions.push(...this.getEcrPermissionSuppressions());
-        // Note: WebappEcrStack deploys independently in a separate pipeline
-        // and should not depend on or affect monitoring stack deployments
+        break;
+
+      case "WebappDynamoDbStack":
+        // Webapp DynamoDB + S3 stack - Database and storage for portfolio articles
+        // Gets base CDK suppressions + S3 bucket suppressions
+        // Note: DynamoDB and S3 don't typically require additional suppressions
+        // as they use AWS managed encryption and don't have wildcard IAM policies
         break;
     }
 
