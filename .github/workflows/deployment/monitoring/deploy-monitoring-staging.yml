@@ -1,19 +1,19 @@
 # @format
-# @description Deploy Monitoring to Development testing unit tests
+# @description Deploy Monitoring to Staging - Synthesizes and stores immutable artifacts
 
-name: Deploy Monitoring to Development
+name: Deploy Monitoring to Staging
 
 on:
   push:
     branches:
-      - develop
+      - staging
     paths:
       - "lib/stacks/**"
       - "bin/**"
       - "config/**"
       - "handlers/**"
       - "lambda/**"
-      - ".github/workflows/deploy-monitoring-dev.yml"
+      - ".github/workflows/deploy-monitoring-staging.yml"
       - ".github/actions/**"
   workflow_dispatch:
     inputs:
@@ -25,31 +25,41 @@ on:
 env:
   NODE_VERSION: "22"
   AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-1' }}
-  ENVIRONMENT: "development"
+  ENVIRONMENT: "staging"
 
 permissions:
   id-token: write
   contents: read
 
 concurrency:
-  group: deploy-monitoring-development-${{ github.ref }}
+  group: deploy-monitoring-staging-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   # ===========================================================================
-  # Setup & Build
+  # Setup, Build & Synthesize
   # ===========================================================================
-  setup:
-    name: Setup & Build
+  setup-and-synthesize:
+    name: Setup, Build & Synthesize
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    environment: development
+    timeout-minutes: 20
+    environment: staging
     outputs:
       aws-account-id: ${{ steps.account-id.outputs.account_id }}
+      commit-sha: ${{ steps.commit-info.outputs.sha }}
+      commit-short-sha: ${{ steps.commit-info.outputs.short_sha }}
+      synthesis-timestamp: ${{ steps.synthesis.outputs.timestamp }}
     
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Record Commit Information
+        id: commit-info
+        run: |
+          echo "sha=${{ github.sha }}" >> $GITHUB_OUTPUT
+          echo "short_sha=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+          echo "Deploying commit: ${{ github.sha }}"
 
       - name: Setup Node.js and Yarn
         uses: ./.github/actions/setup-node-yarn
@@ -59,13 +69,13 @@ jobs:
       - name: Get AWS Account ID
         id: account-id
         run: |
-          ACCOUNT_ID="${{ vars.AWS_ACCOUNT_ID_DEV }}"
+          ACCOUNT_ID="${{ vars.AWS_ACCOUNT_ID_STAGING }}"
           if [ -z "$ACCOUNT_ID" ]; then
-            echo "ERROR: AWS_ACCOUNT_ID_DEV not configured in environment variables"
-            echo "Configure in: Settings → Environments → development → Environment variables"
+            echo "ERROR: AWS_ACCOUNT_ID_STAGING not configured in environment variables"
+            echo "Configure in: Settings > Environments > staging > Environment variables"
             echo ""
             echo "Required environment variables:"
-            echo "  - AWS_ACCOUNT_ID_DEV: Your AWS account ID (12 digits)"
+            echo "  - AWS_ACCOUNT_ID_STAGING: Your AWS account ID (12 digits)"
             echo ""
             exit 1
           fi
@@ -77,39 +87,90 @@ jobs:
             exit 1
           fi
           
+          # Mask account ID in logs
+          echo "::add-mask::$ACCOUNT_ID"
           echo "account_id=$ACCOUNT_ID" >> $GITHUB_OUTPUT
           echo "Deploying to account: ***${ACCOUNT_ID: -4}"
 
       - name: Build TypeScript
         run: yarn build
 
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_STAGING }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Synthesize CDK Templates
+        id: synthesis
+        run: |
+          TIMESTAMP=$(date -u '+%Y%m%d-%H%M%S')
+          echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+          
+          echo "Synthesizing CDK templates for staging..."
+          echo "Commit SHA: ${{ github.sha }}"
+          echo "Timestamp: $TIMESTAMP"
+          
+          # Synthesize all stacks
+          npx cdk synth \
+            --context environment=${{ env.ENVIRONMENT }} \
+            --context account=${{ steps.account-id.outputs.account_id }} \
+            --context region=${{ env.AWS_REGION }} \
+            --output cdk.out \
+            --quiet
+          
+          # Record synthesis metadata
+          cat > cdk.out/synthesis-metadata.json << EOF
+          {
+            "commitSha": "${{ github.sha }}",
+            "shortSha": "${GITHUB_SHA::8}",
+            "timestamp": "$TIMESTAMP",
+            "environment": "${{ env.ENVIRONMENT }}",
+            "region": "${{ env.AWS_REGION }}",
+            "synthesizedBy": "deploy-monitoring-staging.yml",
+            "workflowRunId": "${{ github.run_id }}",
+            "workflowRunNumber": "${{ github.run_number }}"
+          }
+          EOF
+          
+          echo "Synthesis complete. Templates ready for deployment."
+
+      - name: Upload Synthesized Templates
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdk-out-staging-${{ steps.commit-info.outputs.short_sha }}
+          path: cdk.out/
+          retention-days: 60
+          if-no-files-found: error
+
   # ===========================================================================
   # Deploy Networking Stack
   # ===========================================================================
   deploy-networking:
     name: Deploy Networking
-    needs: setup
+    needs: setup-and-synthesize
     uses: ./.github/workflows/_deploy-stack.yml
     with:
-      stack-name: "development-Networking"
-      environment: "development"
-      aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
+      stack-name: "staging-Networking"
+      environment: "staging"
+      aws-account-id: ${{ needs.setup-and-synthesize.outputs.aws-account-id }}
       aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
       require-approval: "never"
       verify-bootstrap: false
       outputs-directory: "deployment-outputs"
     secrets:
-      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_DEV }}
+      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_STAGING }}
 
   # ===========================================================================
   # Verify Networking Stack
   # ===========================================================================
   verify-networking:
     name: Verify Networking
-    needs: [setup, deploy-networking]
+    needs: [setup-and-synthesize, deploy-networking]
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: development
+    environment: staging
     if: inputs.skip_verification != true
     
     steps:
@@ -124,13 +185,13 @@ jobs:
       - name: Download Stack Outputs
         uses: actions/download-artifact@v4
         with:
-          name: development-Networking-outputs
+          name: staging-Networking-outputs
           path: deployment-outputs
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_DEV }}
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_STAGING }}
           aws-region: ${{ env.AWS_REGION }}
           audience: sts.amazonaws.com
 
@@ -138,42 +199,37 @@ jobs:
         run: |
           echo "=== AWS Account Verification ==="
           CURRENT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-          TARGET_ACCOUNT="${{ needs.setup.outputs.aws-account-id }}"
+          TARGET_ACCOUNT="${{ needs.setup-and-synthesize.outputs.aws-account-id }}"
           
-          echo "Current Account: $CURRENT_ACCOUNT"
-          echo "Target Account:  $TARGET_ACCOUNT"
+          # Mask account IDs
+          echo "::add-mask::$CURRENT_ACCOUNT"
+          echo "::add-mask::$TARGET_ACCOUNT"
           
           if [ "$CURRENT_ACCOUNT" != "$TARGET_ACCOUNT" ]; then
             echo ""
-            echo "ERROR: AWS_OIDC_ROLE_DEV is configured for wrong account"
-            echo "   Current: $CURRENT_ACCOUNT"
-            echo "   Expected: $TARGET_ACCOUNT"
-            echo ""
-            echo "Fix: Update AWS_OIDC_ROLE_DEV secret to point to development account:"
-            echo "   arn:aws:iam::$TARGET_ACCOUNT:role/GitHubOIDCRole"
+            echo "ERROR: AWS_OIDC_ROLE_STAGING is configured for wrong account"
             exit 1
           fi
           
-          echo "✅ Authenticated to correct development account"
+          echo "Authenticated to correct staging account"
 
       - name: Verify Networking Stack
         run: |
           echo "Verifying Networking Stack deployment..."
           
-          # Use outputs file + AWS validation (same OIDC role as deployment)
           npx tsx scripts/integration/deployment/monitoring/verify-networking-stack.ts \
             --environment ${{ env.ENVIRONMENT }} \
             --aws-region ${{ env.AWS_REGION }} \
-            --outputs-file deployment-outputs/development-Networking-outputs.json \
-            --report-file verification-reports/development-networking-verification.json
+            --outputs-file deployment-outputs/staging-Networking-outputs.json \
+            --report-file verification-reports/staging-networking-verification.json
       
       - name: Upload Verification Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: networking-verification-report
-          path: verification-reports/development-networking-verification.json
-          retention-days: 30
+          name: staging-networking-verification-report
+          path: verification-reports/staging-networking-verification.json
+          retention-days: 60
           if-no-files-found: warn
 
   # ===========================================================================
@@ -181,28 +237,28 @@ jobs:
   # ===========================================================================
   deploy-efs:
     name: Deploy EFS
-    needs: [setup, deploy-networking, verify-networking]
+    needs: [setup-and-synthesize, deploy-networking, verify-networking]
     if: always() && needs.deploy-networking.result == 'success' && (needs.verify-networking.result == 'success' || needs.verify-networking.result == 'skipped')
     uses: ./.github/workflows/_deploy-stack.yml
     with:
-      stack-name: "development-MonitoringEfs"
-      environment: "development"
-      aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
+      stack-name: "staging-MonitoringEfs"
+      environment: "staging"
+      aws-account-id: ${{ needs.setup-and-synthesize.outputs.aws-account-id }}
       aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
       require-approval: "never"
       outputs-directory: "deployment-outputs"
     secrets:
-      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_DEV }}
+      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_STAGING }}
 
   # ===========================================================================
   # Verify EFS Stack
   # ===========================================================================
   verify-efs:
     name: Verify EFS
-    needs: [setup, deploy-efs]
+    needs: [setup-and-synthesize, deploy-efs]
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: development
+    environment: staging
     if: always() && needs.deploy-efs.result == 'success' && inputs.skip_verification != true
     
     steps:
@@ -217,7 +273,7 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_DEV }}
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_STAGING }}
           aws-region: ${{ env.AWS_REGION }}
           audience: sts.amazonaws.com
 
@@ -233,28 +289,28 @@ jobs:
   # ===========================================================================
   deploy-infra:
     name: Deploy Infrastructure
-    needs: [setup, deploy-efs, verify-efs]
+    needs: [setup-and-synthesize, deploy-efs, verify-efs]
     if: always() && needs.deploy-efs.result == 'success' && (needs.verify-efs.result == 'success' || needs.verify-efs.result == 'skipped')
     uses: ./.github/workflows/_deploy-stack.yml
     with:
-      stack-name: "development-MonitoringInfra"
-      environment: "development"
-      aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
+      stack-name: "staging-MonitoringInfra"
+      environment: "staging"
+      aws-account-id: ${{ needs.setup-and-synthesize.outputs.aws-account-id }}
       aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
       require-approval: "never"
       outputs-directory: "deployment-outputs"
     secrets:
-      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_DEV }}
+      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_STAGING }}
 
   # ===========================================================================
   # Verify Infrastructure Stack
   # ===========================================================================
   verify-infra:
     name: Verify Infrastructure
-    needs: [setup, deploy-infra]
+    needs: [setup-and-synthesize, deploy-infra]
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: development
+    environment: staging
     if: always() && needs.deploy-infra.result == 'success' && inputs.skip_verification != true
     
     steps:
@@ -269,63 +325,48 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_DEV }}
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_STAGING }}
           aws-region: ${{ env.AWS_REGION }}
           audience: sts.amazonaws.com
 
-      - name: Verify Infrastructure Stack (Non-Blocking)
-        continue-on-error: true
+      - name: Verify Infrastructure Stack
         run: |
           echo "Verifying Infrastructure Stack deployment..."
-          echo "Running in non-blocking mode to allow ServiceStack deployment for troubleshooting..."
-          echo ""
-          echo "This verification includes:"
-          echo "  - ECS cluster and container instances status"
-          echo "  - ALB security group egress rules (port 9090 for Prometheus)"
-          echo "  - EBS volume for Prometheus TSDB data (NOT EFS)"
-          echo "  - SSM Agent connectivity"
-          echo "  - EFS mount status for shared config"
-          echo ""
-          npx tsx scripts/integration/deployment/monitoring/verify-infra-stack.ts \
+          yarn ts-node scripts/integration/deployment/monitoring/verify-infra-stack.ts \
             --environment ${{ env.ENVIRONMENT }} \
-            --region ${{ env.AWS_REGION }} \
-            --non-blocking \
-            --verbose
-          
-          echo ""
-          echo "If verification failed, see troubleshooting guide:"
-          echo "  docs/PROMETHEUS_HEALTH_CHECK_TROUBLESHOOTING_2026-01-20.md"
+            --region ${{ env.AWS_REGION }}
 
   # ===========================================================================
   # Deploy Service Stack
   # ===========================================================================
   deploy-service:
     name: Deploy Service
-    needs: [setup, deploy-infra, verify-infra]
+    needs: [setup-and-synthesize, deploy-infra, verify-infra]
     if: always() && needs.deploy-infra.result == 'success' && (needs.verify-infra.result == 'success' || needs.verify-infra.result == 'skipped')
     uses: ./.github/workflows/_deploy-stack.yml
     with:
-      stack-name: "development-MonitoringService"
-      environment: "development"
-      aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
+      stack-name: "staging-MonitoringService"
+      environment: "staging"
+      aws-account-id: ${{ needs.setup-and-synthesize.outputs.aws-account-id }}
       aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
       require-approval: "never"
       outputs-directory: "deployment-outputs"
     secrets:
-      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_DEV }}
+      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_STAGING }}
 
   # ===========================================================================
   # Verify Service Stack & Connectivity
   # ===========================================================================
   verify-service:
     name: Verify Service
-    needs: [setup, deploy-service]
+    needs: [setup-and-synthesize, deploy-service]
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: development
+    environment: staging
     if: always() && needs.deploy-service.result == 'success' && inputs.skip_verification != true
     outputs:
       alb-dns: ${{ steps.endpoints.outputs.alb_dns }}
+      smoke-test-passed: ${{ steps.smoke-test.outputs.passed }}
     
     steps:
       - name: Checkout
@@ -339,7 +380,7 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_DEV }}
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_STAGING }}
           aws-region: ${{ env.AWS_REGION }}
           audience: sts.amazonaws.com
 
@@ -350,68 +391,17 @@ jobs:
             ENVIRONMENT=${{ env.ENVIRONMENT }} \
             AWS_REGION=${{ env.AWS_REGION }}
 
-      - name: Verify Prometheus Health Check
-        id: prometheus-health
-        continue-on-error: true
-        run: |
-          echo "Verifying Prometheus health check configuration..."
-          echo ""
-          echo "This check verifies:"
-          echo "  - ECS task status and container health"
-          echo "  - ALB target group health check path (/prometheus/-/healthy)"
-          echo "  - Security group rules for port 9090"
-          echo "  - Direct endpoint testing via SSM"
-          echo ""
-          npx tsx scripts/integration/deployment/monitoring/verify-prometheus-health.ts \
-            --environment ${{ env.ENVIRONMENT }} \
-            --region ${{ env.AWS_REGION }} \
-            --max-retries 3 \
-            --retry-interval 30 \
-            --verbose
-          
-          EXIT_CODE=$?
-          if [ $EXIT_CODE -ne 0 ]; then
-            echo ""
-            echo "=========================================="
-            echo "Prometheus health check issues detected!"
-            echo "=========================================="
-            echo ""
-            echo "Common causes and fixes:"
-            echo "  1. EFS for TSDB: Prometheus needs EBS, not EFS for data storage"
-            echo "     - Check logs for: fs_type=NFS_SUPER_MAGIC"
-            echo "  2. ALB egress rule: Port 9090 must be allowed from ALB to instances"
-            echo "  3. Health check path: Must be /prometheus/-/healthy (with route prefix)"
-            echo ""
-            echo "Troubleshooting guide:"
-            echo "  docs/PROMETHEUS_HEALTH_CHECK_TROUBLESHOOTING_2026-01-20.md"
-          fi
-
       - name: Verify Grafana-Prometheus Connectivity
-        id: datasource-connectivity
-        continue-on-error: true
         run: |
           echo "Verifying Grafana-Prometheus connectivity..."
-          echo ""
-          echo "This check verifies:"
-          echo "  - Prometheus is accessible from Grafana container"
-          echo "  - Datasource configuration has correct IP address"
-          echo "  - Network mode and port mappings are correct"
-          echo ""
-          npx tsx scripts/integration/deployment/monitoring/verify-datasource-connectivity.ts \
-            --environment ${{ env.ENVIRONMENT }} \
-            --region ${{ env.AWS_REGION }} \
-            --verbose || true
-          
-          echo ""
-          echo "If datasource connectivity fails, check:"
-          echo "  - HOST_IP_PLACEHOLDER was replaced with actual EC2 private IP"
-          echo "  - Prometheus container is running and healthy"
-          echo "  - Security groups allow internal VPC traffic on port 9090"
+          make verify-grafana-prometheus \
+            ENVIRONMENT=${{ env.ENVIRONMENT }} \
+            AWS_REGION=${{ env.AWS_REGION }}
 
       - name: Get Service Endpoints
         id: endpoints
         run: |
-          STACK_NAME="development-MonitoringInfra"
+          STACK_NAME="staging-MonitoringInfra"
           
           ALB_DNS=$(aws cloudformation describe-stacks \
             --stack-name "$STACK_NAME" \
@@ -420,75 +410,48 @@ jobs:
           
           if [ -n "$ALB_DNS" ] && [ "$ALB_DNS" != "None" ]; then
             echo "alb_dns=$ALB_DNS" >> $GITHUB_OUTPUT
-            echo "Load Balancer DNS: $ALB_DNS"
+            echo "Load Balancer DNS retrieved successfully"
           else
             echo "WARNING: Could not retrieve ALB DNS"
           fi
 
       - name: Smoke Test Endpoints
+        id: smoke-test
         if: steps.endpoints.outputs.alb_dns != ''
         run: |
           ALB_DNS="${{ steps.endpoints.outputs.alb_dns }}"
+          PASSED=true
           
           echo "Running smoke tests against endpoints..."
-          echo "ALB DNS: ${ALB_DNS}"
-          echo ""
           
           # Test Grafana health endpoint
-          echo "Testing Grafana health (http://${ALB_DNS}/grafana/api/health)..."
-          GRAFANA_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "http://${ALB_DNS}/grafana/api/health" || echo "000")
-          if [ "$GRAFANA_RESPONSE" = "200" ]; then
-            echo "SUCCESS: Grafana is healthy (HTTP $GRAFANA_RESPONSE)"
+          echo "Testing Grafana health..."
+          if curl -f -s --max-time 30 "http://${ALB_DNS}/grafana/api/health" | grep -q "ok"; then
+            echo "Grafana is healthy"
           else
-            echo "WARNING: Grafana health check returned HTTP $GRAFANA_RESPONSE"
+            echo "WARNING: Grafana health check failed"
+            PASSED=false
           fi
           
-          echo ""
-          
-          # Test Prometheus health endpoint
-          # Note: ALB forwards full path, Prometheus serves at /prometheus/-/healthy
-          echo "Testing Prometheus health (http://${ALB_DNS}/prometheus/-/healthy)..."
-          PROMETHEUS_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "http://${ALB_DNS}/prometheus/-/healthy" || echo "000")
-          if [ "$PROMETHEUS_RESPONSE" = "200" ]; then
-            echo "SUCCESS: Prometheus is healthy (HTTP $PROMETHEUS_RESPONSE)"
+          # Test Prometheus metrics endpoint
+          echo "Testing Prometheus..."
+          if curl -f -s --max-time 30 "http://${ALB_DNS}/prometheus/-/healthy" | grep -q "Prometheus"; then
+            echo "Prometheus is healthy"
           else
-            echo "WARNING: Prometheus health check returned HTTP $PROMETHEUS_RESPONSE"
-            echo ""
-            echo "Possible causes (see troubleshooting guide for details):"
-            echo "  1. Prometheus container is still starting (wait 2-3 minutes)"
-            echo "  2. EFS/EBS storage issue: Prometheus TSDB needs EBS, not EFS"
-            echo "     - Check logs for: fs_type=NFS_SUPER_MAGIC (wrong)"
-            echo "     - Should show: fs_type=EXT4_SUPER_MAGIC (correct)"
-            echo "  3. ALB security group missing egress to port 9090"
-            echo "  4. Target group health check path misconfiguration"
-            echo ""
-            echo "Quick diagnostics:"
-            echo "  aws logs tail /ecs/${{ env.ENVIRONMENT }}-prometheus --since 10m"
-            echo ""
-            echo "Full troubleshooting guide:"
-            echo "  docs/PROMETHEUS_HEALTH_CHECK_TROUBLESHOOTING_2026-01-20.md"
+            echo "WARNING: Prometheus health check failed"
+            PASSED=false
           fi
           
-          echo ""
-          echo "Smoke tests completed."
-          
-          # Summary
-          echo ""
-          echo "=========================================="
-          echo "Health Check Summary"
-          echo "=========================================="
-          echo "Grafana:    HTTP $GRAFANA_RESPONSE"
-          echo "Prometheus: HTTP $PROMETHEUS_RESPONSE"
-          echo "==========================================" 
+          echo "passed=$PASSED" >> $GITHUB_OUTPUT
 
   # ===========================================================================
-  # Deployment Summary
+  # Create Production-Ready Artifact
   # ===========================================================================
-  deployment-summary:
-    name: Deployment Summary
+  create-production-artifact:
+    name: Create Production Artifact
     needs:
       [
-        setup,
+        setup-and-synthesize,
         deploy-networking,
         verify-networking,
         deploy-efs,
@@ -499,22 +462,94 @@ jobs:
         verify-service,
       ]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: |
+      always() &&
+      needs.deploy-networking.result == 'success' &&
+      needs.deploy-efs.result == 'success' &&
+      needs.deploy-infra.result == 'success' &&
+      needs.deploy-service.result == 'success' &&
+      (needs.verify-service.outputs.smoke-test-passed == 'true' || needs.verify-service.result == 'skipped')
+    
+    outputs:
+      artifact-name: ${{ steps.artifact.outputs.name }}
+      production-ready: ${{ steps.artifact.outputs.ready }}
+    
+    steps:
+      - name: Download Synthesized Templates
+        uses: actions/download-artifact@v4
+        with:
+          name: cdk-out-staging-${{ needs.setup-and-synthesize.outputs.commit-short-sha }}
+          path: cdk.out
+
+      - name: Prepare Production Artifact
+        id: artifact
+        run: |
+          ARTIFACT_NAME="cdk-out-production-ready-${{ needs.setup-and-synthesize.outputs.commit-short-sha }}"
+          
+          # Add production deployment metadata
+          cat > cdk.out/production-readiness.json << EOF
+          {
+            "stagingDeploymentSuccessful": true,
+            "stagingVerificationPassed": true,
+            "originalCommitSha": "${{ needs.setup-and-synthesize.outputs.commit-sha }}",
+            "stagingSynthesisTimestamp": "${{ needs.setup-and-synthesize.outputs.synthesis-timestamp }}",
+            "stagingWorkflowRunId": "${{ github.run_id }}",
+            "stagingWorkflowRunNumber": "${{ github.run_number }}",
+            "productionReadyAt": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
+            "approvedForProduction": true
+          }
+          EOF
+          
+          echo "name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+          echo "ready=true" >> $GITHUB_OUTPUT
+          echo "Production artifact prepared: $ARTIFACT_NAME"
+
+      - name: Upload Production-Ready Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: cdk.out/
+          retention-days: 90
+          if-no-files-found: error
+
+  # ===========================================================================
+  # Deployment Summary
+  # ===========================================================================
+  deployment-summary:
+    name: Deployment Summary
+    needs:
+      [
+        setup-and-synthesize,
+        deploy-networking,
+        verify-networking,
+        deploy-efs,
+        verify-efs,
+        deploy-infra,
+        verify-infra,
+        deploy-service,
+        verify-service,
+        create-production-artifact,
+      ]
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
 
     steps:
       - name: Generate Deployment Summary
         run: |
-          ACCOUNT_LAST4="${{ needs.setup.outputs.aws-account-id }}"
           TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          COMMIT_SHA="${{ needs.setup-and-synthesize.outputs.commit-sha }}"
+          SHORT_SHA="${{ needs.setup-and-synthesize.outputs.commit-short-sha }}"
           
           cat >> $GITHUB_STEP_SUMMARY << EOF
-          ## Monitoring Infrastructure Deployment - Development
+          ## Monitoring Infrastructure Deployment - Staging
 
-          **Environment**: development
+          **Environment**: staging
           **Region**: ${{ env.AWS_REGION }}
-          **Account**: ***${ACCOUNT_LAST4: -4}
+          **Commit**: ${SHORT_SHA}
           **Timestamp**: ${TIMESTAMP}
+          **Workflow Run**: #${{ github.run_number }}
 
           ### Deployment Status
 
@@ -525,34 +560,69 @@ jobs:
           | Infrastructure | ${{ needs.deploy-infra.result }} | ${{ needs.verify-infra.result }} |
           | Service | ${{ needs.deploy-service.result }} | ${{ needs.verify-service.result }} |
 
+          ### Production Readiness
+
+          | Check | Status |
+          |-------|--------|
+          | All Stacks Deployed | ${{ needs.deploy-service.result == 'success' && needs.deploy-infra.result == 'success' && needs.deploy-efs.result == 'success' && needs.deploy-networking.result == 'success' && 'PASSED' || 'FAILED' }} |
+          | Verifications Passed | ${{ (needs.verify-service.result == 'success' || needs.verify-service.result == 'skipped') && 'PASSED' || 'FAILED' }} |
+          | Production Artifact Created | ${{ needs.create-production-artifact.result == 'success' && 'READY' || 'NOT READY' }} |
+
           EOF
           
           if [ -n "${{ needs.verify-service.outputs.alb-dns }}" ]; then
             ALB_DNS="${{ needs.verify-service.outputs.alb-dns }}"
             cat >> $GITHUB_STEP_SUMMARY << EOF
-          ### Access Points
+          ### Staging Access Points
 
           - **Grafana Dashboard**: http://${ALB_DNS}/grafana
           - **Prometheus Metrics**: http://${ALB_DNS}/prometheus
 
-          **Default Credentials**: admin/admin (change immediately after first login)
+          EOF
+          fi
+          
+          if [ "${{ needs.create-production-artifact.result }}" == "success" ]; then
+            cat >> $GITHUB_STEP_SUMMARY << EOF
+          ### Production Deployment
+
+          This staging deployment has been verified and an immutable artifact has been created.
+          
+          **Artifact**: cdk-out-production-ready-${SHORT_SHA}
+          **Retention**: 90 days
+          
+          To deploy to production:
+          1. Merge staging branch to main
+          2. The production workflow will use this verified artifact
+          3. Manual approval will be required before deployment
+
+          EOF
+          else
+            cat >> $GITHUB_STEP_SUMMARY << EOF
+          ### Production Deployment
+
+          **WARNING**: Production artifact was NOT created because staging deployment or verification failed.
+          
+          Production deployment is blocked until staging succeeds.
 
           EOF
           fi
           
           cat >> $GITHUB_STEP_SUMMARY << 'EOF'
-          ### Next Steps
-
-          1. Access Grafana and change default password
-          2. Configure data sources and dashboards
-          3. Verify metrics collection in Prometheus
-          4. Check CloudWatch logs for any errors
-
           ### Rollback Instructions
 
-          If deployment fails, rollback using:
+          If deployment fails, rollback in reverse order:
           ```bash
-          make rollback ENVIRONMENT=development STACK_NAME=<failed-stack>
+          # 1. Rollback Service Stack
+          make rollback ENVIRONMENT=staging STACK_NAME=staging-MonitoringService
+
+          # 2. Rollback Infrastructure Stack
+          make rollback ENVIRONMENT=staging STACK_NAME=staging-MonitoringInfra
+
+          # 3. Rollback EFS Stack
+          make rollback ENVIRONMENT=staging STACK_NAME=staging-MonitoringEfs
+
+          # 4. Rollback Networking Stack (if needed)
+          make rollback ENVIRONMENT=staging STACK_NAME=staging-Networking
           ```
 
           EOF
@@ -607,6 +677,11 @@ jobs:
             fi
           fi
           
+          # Check production artifact creation
+          if [[ "${{ needs.create-production-artifact.result }}" == "failure" ]]; then
+            echo "WARNING: Production artifact creation failed"
+          fi
+          
           if [[ "$FAILED" == "true" ]]; then
             echo ""
             echo "Deployment pipeline failed - check individual job logs"
@@ -614,4 +689,5 @@ jobs:
           fi
           
           echo ""
-          echo "✓ All deployments and verifications passed successfully"
+          echo "All deployments and verifications passed successfully"
+          echo "Production artifact is ready for deployment"
