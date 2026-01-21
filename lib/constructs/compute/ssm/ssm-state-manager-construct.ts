@@ -785,8 +785,9 @@ echo "Dashboard sync completed successfully"
       parameters: {
         commands: [dashboardSyncScript],
       } as Record<string, string[]>,
-      // Run every 5 minutes to pick up new dashboards quickly
-      scheduleExpression: "rate(5 minutes)",
+      // AWS SSM requires minimum 30 minutes for rate-based schedules
+      // Run every 30 minutes to sync dashboards from S3
+      scheduleExpression: "rate(30 minutes)",
       // Note: applyOnlyAtCronInterval is NOT supported with rate schedules
       // (only works with cron expressions). With rate schedules, the association
       // runs on the schedule by default.
