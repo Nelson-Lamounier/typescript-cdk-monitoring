@@ -314,9 +314,9 @@ mkdir -p /mnt/efs/grafana-data/plugins
 mkdir -p /mnt/efs/grafana-data/logs
 mkdir -p /mnt/efs/grafana-data/csv
 mkdir -p /mnt/efs/grafana-data/png
+mkdir -p /mnt/efs/grafana-dashboards
 mkdir -p /mnt/efs/config/grafana/provisioning/datasources
 mkdir -p /mnt/efs/config/grafana/provisioning/dashboards
-mkdir -p /mnt/efs/config/grafana/dashboards
 
 # Alertmanager directory (future use)
 mkdir -p /mnt/efs/config/alertmanager

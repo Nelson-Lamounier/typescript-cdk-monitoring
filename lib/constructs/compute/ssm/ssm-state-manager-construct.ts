@@ -579,10 +579,10 @@ mkdir -p ${mountPoint}/grafana-data/plugins
 mkdir -p ${mountPoint}/grafana-data/logs
 mkdir -p ${mountPoint}/grafana-data/csv
 mkdir -p ${mountPoint}/grafana-data/png
+mkdir -p ${mountPoint}/grafana-dashboards
 mkdir -p ${mountPoint}/config/prometheus
 mkdir -p ${mountPoint}/config/grafana/provisioning/datasources
 mkdir -p ${mountPoint}/config/grafana/provisioning/dashboards
-mkdir -p ${mountPoint}/config/grafana/dashboards
 mkdir -p ${mountPoint}/config/alertmanager
 
 echo "Setting ownership and permissions..."
@@ -636,26 +636,29 @@ aws ssm get-parameter --region ${region} --name "/monitoring/${envName}/grafana-
 
 # Download pre-built Grafana dashboards from S3
 echo "Downloading pre-built Grafana dashboards from S3..."
-DASHBOARD_BUCKET=$(aws ssm get-parameter --region ${region} --name "/monitoring/${envName}/dashboard-bucket-name" --query "Parameter.Value" --output text)
+DASHBOARD_BUCKET=$(aws ssm get-parameter --region ${region} --name "/monitoring/${envName}/s3/dashboard-bucket-name" --query "Parameter.Value" --output text)
 
 if [ -z "$DASHBOARD_BUCKET" ]; then
-  echo "ERROR: Dashboard bucket name not found in SSM"
+  echo "ERROR: Dashboard bucket name not found in SSM at /monitoring/${envName}/s3/dashboard-bucket-name"
+  echo "Ensure MonitoringS3Stack has been deployed and creates this SSM parameter"
   exit 1
 fi
 
-# Download all dashboards from S3
-aws s3 sync s3://\${DASHBOARD_BUCKET}/dashboards/ ${mountPoint}/config/grafana/dashboards/ --region ${region}
+# Download all dashboards from S3 to the correct location
+# Grafana expects dashboards at /var/lib/grafana/dashboards (container path)
+# which is mounted from /mnt/efs/grafana-dashboards (host path)
+aws s3 sync s3://\${DASHBOARD_BUCKET}/dashboards/ ${mountPoint}/grafana-dashboards/ --region ${region}
 
 # Count downloaded dashboards
-DASHBOARD_COUNT=\$(find ${mountPoint}/config/grafana/dashboards -name "*.json" | wc -l)
-echo "Downloaded \${DASHBOARD_COUNT} pre-built dashboards successfully"
+DASHBOARD_COUNT=\$(find ${mountPoint}/grafana-dashboards -name "*.json" | wc -l)
+echo "Downloaded \${DASHBOARD_COUNT} pre-built dashboards successfully to ${mountPoint}/grafana-dashboards"
 
 # Set proper ownership for config files
 chown 65534:65534 ${mountPoint}/config/prometheus/prometheus.yml
 chown 472:0 ${mountPoint}/config/grafana/provisioning/datasources/prometheus.yml
 chown 472:0 ${mountPoint}/config/grafana/provisioning/dashboards/dashboards.yml
-chown -R 472:0 ${mountPoint}/config/grafana/dashboards/
-chmod -R 644 ${mountPoint}/config/grafana/dashboards/*.json
+chown -R 472:0 ${mountPoint}/grafana-dashboards/
+chmod -R 644 ${mountPoint}/grafana-dashboards/*.json 2>/dev/null || echo "No dashboards found yet (will be downloaded from S3)"
 
 echo "Verifying setup..."
 ls -lh ${mountPoint}/config/prometheus/
