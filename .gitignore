@@ -70,3 +70,5 @@ prompts/*
 *docs/*
 
 iam/*
+
+scripts/helper/*
