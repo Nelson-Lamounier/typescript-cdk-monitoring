@@ -37,5 +37,13 @@
     "scripts/**/*.ts",
     "tests/**/*.ts"
   ],
-  "exclude": ["node_modules", "cdk.out", "**/*.js", "**/*.d.ts"]
+  "exclude": [
+    "node_modules",
+    "cdk.out",
+    "**/*.js",
+    "**/*.d.ts",
+    "scripts/integration/deployment/monitoring/verify-efs-mount-depregated.ts",
+    "scripts/integration/deployment/monitoring/verify-efs-mount.ts",
+    "scripts/integration/deployment/monitoring/verify-infra-stack.ts"
+  ]
 }

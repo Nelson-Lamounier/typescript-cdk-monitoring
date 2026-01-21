@@ -362,9 +362,10 @@ export class S3BucketConstruct extends Construct {
    * Apply standard tags to bucket
    */
   private applyTags(envName: string, purpose: string): void {
-    cdk.Tags.of(this.bucket).add("Environment", envName);
-    cdk.Tags.of(this.bucket).add("Purpose", purpose);
-    cdk.Tags.of(this.bucket).add("ManagedBy", "CDK");
+    // Apply tags to the construct so they propagate to all child resources
+    cdk.Tags.of(this).add("Environment", envName);
+    cdk.Tags.of(this).add("Purpose", purpose);
+    cdk.Tags.of(this).add("ManagedBy", "CDK");
   }
 
   /**
