@@ -811,6 +811,17 @@ providers:
       "access": "proxy",
       "url": "http://HOST_IP_PLACEHOLDER:9090/prometheus",
       "isDefault": true
+    },
+    {
+      "name": "CloudWatch",
+      "type": "cloudwatch",
+      "access": "proxy",
+      "jsonData": {
+        "authType": "default",
+        "defaultRegion": "eu-west-1"
+      },
+      "isDefault": false,
+      "editable": true
     }
   ]
 }",
@@ -834,7 +845,15 @@ datasources:
         type: prometheus
         access: proxy
         url: "http://HOST_IP_PLACEHOLDER:9090/prometheus"
-        isDefault: true",
+        isDefault: true
+  -     name: CloudWatch
+        type: cloudwatch
+        access: proxy
+        jsonData:
+          authType: default
+          defaultRegion: eu-west-1
+        isDefault: false
+        editable: true",
       },
       "Type": "AWS::SSM::Parameter",
     },
