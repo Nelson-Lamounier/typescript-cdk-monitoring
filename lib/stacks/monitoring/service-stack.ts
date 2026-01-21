@@ -341,6 +341,59 @@ export class MonitoringServiceStack extends cdk.Stack {
     grafanaAdminSecret.grantRead(executionRole);
 
     // ========================================================================
+    // 3a. GRANT CLOUDWATCH PERMISSIONS TO GRAFANA
+    // ========================================================================
+    // Grant Grafana task role permissions to read CloudWatch metrics and logs
+    const grafanaTaskRole = grafanaConstruct.taskDefinition.taskRole;
+    if (grafanaTaskRole) {
+      grafanaTaskRole.addToPrincipalPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: [
+            // CloudWatch Metrics
+            "cloudwatch:DescribeAlarmsForMetric",
+            "cloudwatch:DescribeAlarmHistory",
+            "cloudwatch:DescribeAlarms",
+            "cloudwatch:ListMetrics",
+            "cloudwatch:GetMetricStatistics",
+            "cloudwatch:GetMetricData",
+            // CloudWatch Logs
+            "logs:DescribeLogGroups",
+            "logs:GetLogGroupFields",
+            "logs:StartQuery",
+            "logs:StopQuery",
+            "logs:GetQueryResults",
+            "logs:GetLogEvents",
+            // EC2 (for resource metadata in CloudWatch)
+            "ec2:DescribeTags",
+            "ec2:DescribeInstances",
+            "ec2:DescribeRegions",
+            // Resource Groups & Tag Editor (for CloudWatch metrics discovery)
+            "resource-groups:ListGroupResources",
+            "tag:GetResources",
+          ],
+          resources: ["*"],
+        })
+      );
+
+      // CDK Nag suppression for CloudWatch wildcard (required for metrics access)
+      NagSuppressions.addResourceSuppressions(
+        grafanaTaskRole,
+        [
+          {
+            id: "AwsSolutions-IAM5",
+            reason:
+              "CloudWatch datasource requires wildcard permissions to query metrics and logs across all resources. " +
+              "These are read-only operations required for Grafana to display CloudWatch data. " +
+              "Scoping to specific resources would defeat the purpose of a monitoring dashboard.",
+            appliesTo: ["Resource::*"],
+          },
+        ],
+        true
+      );
+    }
+
+    // ========================================================================
     // 4. CREATE NODE EXPORTER SERVICE
     // ========================================================================
     const nodeExporterConstruct = new NodeExporterConstruct(

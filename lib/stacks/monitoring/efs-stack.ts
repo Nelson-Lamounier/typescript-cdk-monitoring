@@ -464,6 +464,17 @@ export class MonitoringEfsStack extends cdk.Stack {
           url: `http://${GRAFANA_HOST_IP_PLACEHOLDER}:9090/prometheus`,
           isDefault: true,
         },
+        {
+          name: "CloudWatch",
+          type: "cloudwatch",
+          access: "proxy",
+          jsonData: {
+            authType: "default",
+            defaultRegion: this.region,
+          },
+          isDefault: false,
+          editable: true,
+        },
       ],
     };
 
