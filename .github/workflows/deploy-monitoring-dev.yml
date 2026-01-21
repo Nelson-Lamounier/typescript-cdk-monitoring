@@ -386,6 +386,106 @@ jobs:
       AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_DEV }}
 
   # ===========================================================================
+  # Deploy Security (Prowler) Stack
+  # ===========================================================================
+  deploy-security:
+    name: Deploy Security
+    needs: [setup, deploy-service, verify-service]
+    if: always() && needs.deploy-service.result == 'success' && (needs.verify-service.result == 'success' || needs.verify-service.result == 'skipped')
+    uses: ./.github/workflows/_deploy-stack.yml
+    with:
+      stack-name: "development-SecurityProwler"
+      environment: "development"
+      aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
+      aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
+      require-approval: "never"
+      outputs-directory: "deployment-outputs"
+    secrets:
+      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_DEV }}
+
+  # ===========================================================================
+  # Verify Security Stack
+  # ===========================================================================
+  verify-security:
+    name: Verify Security
+    needs: [setup, deploy-security]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: development
+    if: always() && needs.deploy-security.result == 'success' && inputs.skip_verification != true
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_DEV }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Verify Security Stack
+        run: |
+          echo "Verifying Security Stack deployment..."
+          echo ""
+          echo "Checking Prowler resources:"
+          
+          # Verify S3 bucket exists
+          BUCKET_NAME=$(aws cloudformation describe-stacks \
+            --stack-name "development-SecurityProwler" \
+            --query 'Stacks[0].Outputs[?OutputKey==`ResultsBucketName`].OutputValue' \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -n "$BUCKET_NAME" ] && [ "$BUCKET_NAME" != "None" ]; then
+            echo "  - Results bucket: $BUCKET_NAME"
+            
+            # Check bucket exists
+            if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+              echo "  - Bucket accessible: YES"
+            else
+              echo "  - Bucket accessible: NO (may be newly created)"
+            fi
+          else
+            echo "WARNING: Could not retrieve results bucket name"
+          fi
+          
+          # Verify task definition exists
+          TASK_DEF_ARN=$(aws cloudformation describe-stacks \
+            --stack-name "development-SecurityProwler" \
+            --query 'Stacks[0].Outputs[?OutputKey==`TaskDefinitionArn`].OutputValue' \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -n "$TASK_DEF_ARN" ] && [ "$TASK_DEF_ARN" != "None" ]; then
+            echo "  - Task definition: Created"
+          else
+            echo "WARNING: Could not retrieve task definition ARN"
+          fi
+          
+          # Check EventBridge rule
+          RULE_NAME="${{ env.ENVIRONMENT }}-security-prowler-schedule"
+          RULE_STATE=$(aws events describe-rule \
+            --name "$RULE_NAME" \
+            --query 'State' \
+            --output text 2>/dev/null || echo "NOT_FOUND")
+          
+          if [ "$RULE_STATE" = "ENABLED" ]; then
+            echo "  - Schedule rule: ENABLED"
+          elif [ "$RULE_STATE" = "DISABLED" ]; then
+            echo "  - Schedule rule: DISABLED"
+          else
+            echo "  - Schedule rule: Could not verify (may use different naming)"
+          fi
+          
+          echo ""
+          echo "Security stack verification completed."
+
+  # ===========================================================================
   # Verify Service Stack & Connectivity
   # ===========================================================================
   verify-service:
@@ -568,6 +668,8 @@ jobs:
         verify-infra,
         deploy-service,
         verify-service,
+        deploy-security,
+        verify-security,
       ]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -595,6 +697,7 @@ jobs:
           | EFS | ${{ needs.deploy-efs.result }} | ${{ needs.verify-efs.result }} |
           | Infrastructure | ${{ needs.deploy-infra.result }} | ${{ needs.verify-infra.result }} |
           | Service | ${{ needs.deploy-service.result }} | ${{ needs.verify-service.result }} |
+          | Security (Prowler) | ${{ needs.deploy-security.result }} | ${{ needs.verify-security.result }} |
 
           EOF
           
@@ -655,6 +758,11 @@ jobs:
             FAILED=true
           fi
           
+          if [[ "${{ needs.deploy-security.result }}" == "failure" ]]; then
+            echo "ERROR: Security (Prowler) deployment failed"
+            FAILED=true
+          fi
+          
           # Check verification results (only if not skipped)
           if [[ "${{ inputs.skip_verification }}" != "true" ]]; then
             if [[ "${{ needs.verify-networking.result }}" == "failure" ]]; then
@@ -674,6 +782,11 @@ jobs:
             
             if [[ "${{ needs.verify-service.result }}" == "failure" ]]; then
               echo "ERROR: Service verification failed"
+              FAILED=true
+            fi
+            
+            if [[ "${{ needs.verify-security.result }}" == "failure" ]]; then
+              echo "ERROR: Security (Prowler) verification failed"
               FAILED=true
             fi
           fi

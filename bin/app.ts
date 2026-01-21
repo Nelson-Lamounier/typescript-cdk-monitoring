@@ -8,6 +8,7 @@ import { environments } from "../config/environments";
 
 import { deployFoundationStacks } from "./stacks/foundation-stack";
 import { createMonitoringStacks } from "./stacks/monitoring-stack";
+import { createSecurityStacks } from "./stacks/security-stack";
 import { createWebappStacks } from "./stacks/webapp-stack";
 
 const app = new cdk.App();
@@ -61,7 +62,28 @@ const { networkingStack } = deployFoundationStacks(app, envConfig, stackProps);
 // MONITORING STACKS
 // ============================================================================
 
-createMonitoringStacks(app, envName, envConfig, networkingStack, stackProps);
+const { infraStack: monitoringInfraStack } = createMonitoringStacks(
+  app,
+  envName,
+  envConfig,
+  networkingStack,
+  stackProps
+);
+
+// ============================================================================
+// SECURITY STACKS (Prowler Compliance Scanning)
+// ============================================================================
+// Uses the existing EC2-based ECS cluster from monitoring infrastructure
+// Prowler checks include: Security Groups, ALB/ELB, VPC, IAM, S3, and 300+ more
+
+createSecurityStacks(
+  app,
+  envName,
+  envConfig,
+  networkingStack,
+  monitoringInfraStack.cluster,
+  stackProps
+);
 
 // ============================================================================
 // WEBAPP STACKS

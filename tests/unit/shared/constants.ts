@@ -331,3 +331,33 @@ export const MONITORING_SERVICE_OUTPUT_NAMES = {
   GRAFANA_TARGET_GROUP_ARN: "GrafanaTargetGroupArn",
   GRAFANA_ADMIN_SECRET_ARN: "GrafanaAdminSecretArn",
 } as const;
+
+// ============================================================================
+// SECURITY STACK CONSTANTS
+// ============================================================================
+
+export const SECURITY_RESOURCE_COUNTS = {
+  TASK_DEFINITIONS: 1,
+  S3_BUCKETS: 1,
+  LOG_GROUPS: 1,
+  IAM_ROLES: 2,
+  SSM_PARAMETERS: 4,
+  EVENTBRIDGE_RULES: 1,
+} as const;
+
+export const SECURITY_SSM_PARAMETER_NAMES = {
+  RESULTS_BUCKET_NAME: "results-bucket-name",
+  RESULTS_BUCKET_ARN: "results-bucket-arn",
+  TASK_DEFINITION_ARN: "task-definition-arn",
+  SCHEDULE_RULE_ARN: "schedule-rule-arn",
+} as const;
+
+export const SECURITY_OUTPUT_NAMES = {
+  RESULTS_BUCKET_NAME: "ResultsBucketName",
+  RESULTS_BUCKET_ARN: "ResultsBucketArn",
+  CLUSTER_ARN: "ClusterArn",
+  TASK_DEFINITION_ARN: "TaskDefinitionArn",
+  LOG_GROUP_NAME: "LogGroupName",
+  SCHEDULE_RULE_ARN: "ScheduleRuleArn",
+  MANUAL_RUN_INFO: "ManualRunInfo",
+} as const;
