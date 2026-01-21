@@ -437,6 +437,131 @@ export class SuppressionManager {
   }
 
   /**
+   * API Gateway
+   * For REST API Gateway resources
+   */
+  static getApiGatewaySuppressions(): NagPackSuppression[] {
+    return [
+      {
+        id: "AwsSolutions-APIG1",
+        reason:
+          "API Gateway access logging is configured via CloudWatch Logs. Log group is created with retention policies and permissions are granted through CloudWatch role.",
+      },
+      {
+        id: "AwsSolutions-APIG2",
+        reason:
+          "Request validation is implemented per-method basis using validators. Not all endpoints require request validation (e.g., GET requests without bodies).",
+      },
+      {
+        id: "AwsSolutions-APIG3",
+        reason:
+          "WAF is optionally enabled for production environments. For development environments, WAF is disabled to reduce costs. Enable WAF in production via enableWaf parameter.",
+      },
+      {
+        id: "AwsSolutions-APIG4",
+        reason:
+          "API authorization is implemented per-method using IAM, API keys, or Lambda authorizers as needed. Not all endpoints require authorization (e.g., public read-only endpoints for published articles).",
+      },
+      {
+        id: "AwsSolutions-APIG6",
+        reason:
+          "CloudWatch Logs are enabled for API Gateway with environment-specific retention. Production uses 1 month retention, development uses 1 week retention for cost optimisation.",
+      },
+      {
+        id: "AwsSolutions-IAM4",
+        reason:
+          "API Gateway CloudWatch role uses AWS managed policy AmazonAPIGatewayPushToCloudWatchLogs. This is the standard pattern recommended by AWS for API Gateway logging and is automatically created by CDK.",
+        appliesTo: [
+          "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs",
+        ],
+      },
+    ];
+  }
+
+  /**
+   * Lambda Functions
+   * For Lambda functions used in API handlers
+   */
+  static getLambdaFunctionSuppressions(): NagPackSuppression[] {
+    return [
+      {
+        id: "AwsSolutions-IAM4",
+        reason:
+          "Lambda functions use AWSLambdaBasicExecutionRole for CloudWatch Logs access. This is the standard AWS managed policy for Lambda functions and is created by CDK. The alternative would be to create a custom role with identical permissions, which adds no security benefit.",
+        appliesTo: [
+          "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+        ],
+      },
+      {
+        id: "AwsSolutions-L1",
+        reason:
+          "Lambda function uses Node.js 20.x which is the latest LTS runtime as of 2024. Runtime versions are regularly updated with CDK upgrades.",
+      },
+    ];
+  }
+
+  /**
+   * DynamoDB Permissions
+   * For Lambda functions that access DynamoDB tables
+   */
+  static getDynamoDbPermissionSuppressions(): NagPackSuppression[] {
+    return [
+      {
+        id: "AwsSolutions-IAM5",
+        reason:
+          "DynamoDB table permissions use wildcard for indexes because GSI and LSI names contain tokens that are not known at synthesis time. The wildcard is scoped to the specific table ARN and indexes, providing reasonable security while allowing access to all table indexes.",
+        appliesTo: [
+          {
+            regex: "/^Resource::<.*Table.*\\.Arn>\\/index\\/\\*$/",
+          },
+        ],
+      },
+      {
+        id: "AwsSolutions-IAM5",
+        reason:
+          "DynamoDB streams require wildcard permissions for stream records as stream ARNs are dynamically generated. The wildcard is scoped to the specific table's stream.",
+        appliesTo: [
+          {
+            regex: "/^Resource::<.*Table.*\\.StreamArn>$/",
+          },
+        ],
+      },
+    ];
+  }
+
+  /**
+   * S3 Bucket Permissions
+   * For Lambda functions that access S3 buckets
+   */
+  static getS3BucketPermissionSuppressions(): NagPackSuppression[] {
+    return [
+      {
+        id: "AwsSolutions-IAM5",
+        reason:
+          "S3 GetObject* permissions are required for Lambda functions to read assets (images, content files) from the S3 bucket. The wildcard is scoped to the specific bucket ARN and is read-only access.",
+        appliesTo: [
+          "Action::s3:GetObject*",
+          {
+            regex: "/^Resource::<.*Bucket.*\\.Arn>\\/\\*$/",
+          },
+        ],
+      },
+      {
+        id: "AwsSolutions-IAM5",
+        reason:
+          "S3 GetBucket* permissions are required for Lambda functions to access bucket metadata and policies. The wildcard is scoped to the specific bucket and is read-only access.",
+        appliesTo: ["Action::s3:GetBucket*"],
+      },
+      {
+        id: "AwsSolutions-IAM5",
+        reason:
+          "S3 List* permissions are required for Lambda functions to list objects in the bucket. The wildcard is scoped to the specific bucket and is read-only access.",
+        appliesTo: ["Action::s3:List*"],
+      },
+    ];
+  }
+
+  /**
    * Apply all relevant suppressions to a stack
    * This is the recommended way to apply suppressions
    */
@@ -447,7 +572,7 @@ export class SuppressionManager {
    * - Monitoring Domain: MonitoringStack, MonitoringEfsStack, MonitoringInfraStack, MonitoringServiceStack
    * - Networking Domain: NetworkingStack, LoadBalancerStack, CertificateStack
    * - Compute Domain: ComputeStack
-   * - Webapp Domain: WebappEcrStack, WebappDynamoDbStack (isolated - separate pipeline)
+   * - Webapp Domain: WebappEcrStack, WebappDynamoDbStack, WebappApiStack (isolated - separate pipeline)
    * 
    * @param stack - The CDK stack to apply suppressions to
    * @param stackType - The type of stack (determines which suppressions to apply)
@@ -465,7 +590,8 @@ export class SuppressionManager {
       | "LoadBalancerStack"
       | "CertificateStack"
       | "WebappEcrStack" // Webapp domain - ECR repository
-      | "WebappDynamoDbStack", // Webapp domain - DynamoDB + S3
+      | "WebappDynamoDbStack" // Webapp domain - DynamoDB + S3
+      | "WebappApiStack", // Webapp domain - API Gateway + Lambda
     envName?: string
   ): void {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -542,6 +668,18 @@ export class SuppressionManager {
         // Gets base CDK suppressions + S3 bucket suppressions
         // Note: DynamoDB and S3 don't typically require additional suppressions
         // as they use AWS managed encryption and don't have wildcard IAM policies
+        break;
+
+      case "WebappApiStack":
+        // Webapp API stack - API Gateway + Lambda functions for articles API
+        // Gets API Gateway, Lambda, DynamoDB, and S3 permission suppressions
+        suppressions.push(...this.getApiGatewaySuppressions());
+        suppressions.push(...this.getLambdaFunctionSuppressions());
+        suppressions.push(...this.getDynamoDbPermissionSuppressions());
+        suppressions.push(...this.getS3BucketPermissionSuppressions());
+        if (envName) {
+          suppressions.push(...this.getCloudWatchLogsSuppressions(envName));
+        }
         break;
     }
 
