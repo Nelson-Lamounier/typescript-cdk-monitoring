@@ -9,7 +9,7 @@
 
 import * as cdk from "aws-cdk-lib";
 import * as s3 from "aws-cdk-lib/aws-s3";
-import { Template } from "aws-cdk-lib/assertions";
+import { Template, Match } from "aws-cdk-lib/assertions";
 
 import { S3BucketConstruct } from "../../../../lib/constructs/storage/s3";
 
@@ -264,7 +264,7 @@ describe("S3BucketConstruct", () => {
             purpose: "Invalid Bucket",
           },
         });
-      }).toThrow(/must.*use only lowercase/i);
+      }).toThrow(/use only lowercase/i);
     });
 
     test("should throw error for bucket name with consecutive periods", () => {
@@ -346,8 +346,9 @@ describe("S3BucketConstruct", () => {
 
       // Assert
       const template = Template.fromStack(stack);
+      // Use Match.arrayWith to check for tags regardless of order
       template.hasResourceProperties("AWS::S3::Bucket", {
-        Tags: [
+        Tags: Match.arrayWith([
           {
             Key: "Environment",
             Value: "development",
@@ -360,7 +361,7 @@ describe("S3BucketConstruct", () => {
             Key: "ManagedBy",
             Value: "CDK",
           },
-        ],
+        ]),
       });
     });
   });

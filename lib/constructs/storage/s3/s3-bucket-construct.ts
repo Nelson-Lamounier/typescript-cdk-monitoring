@@ -219,7 +219,9 @@ export class S3BucketConstruct extends Construct {
 
     // Create bucket
     this.bucket = this.createBucket(resolvedConfig);
-    this.bucketName = this.bucket.bucketName;
+    // Use the configured bucket name directly instead of the bucket's bucketName property
+    // which may return a CDK token if not explicitly set
+    this.bucketName = config.bucketName;
     this.bucketArn = this.bucket.bucketArn;
 
     // Apply tags

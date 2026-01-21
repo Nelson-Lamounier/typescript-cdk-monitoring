@@ -165,9 +165,11 @@ describe("MonitoringInfraStack - Creation & Validation", () => {
       const fixtures = InfraTestFixtures.getInstance(testApp);
       const efsResources = fixtures.getEfsResources();
 
-      // Create mock S3 bucket
+      // Create mock S3 bucket under a temporary stack
+      // Constructs cannot be created directly under App
+      const tempStack = new cdk.Stack(testApp, "TempStack1");
       const dashboardBucket = s3.Bucket.fromBucketName(
-        testApp,
+        tempStack,
         "MockBucket1",
         "test-bucket"
       );
@@ -194,9 +196,10 @@ describe("MonitoringInfraStack - Creation & Validation", () => {
       const vpc = fixtures.getVpc();
       const efsResources = fixtures.getEfsResources();
 
-      // Create mock S3 bucket
+      // Create mock S3 bucket under a temporary stack
+      const tempStack = new cdk.Stack(testApp, "TempStack2");
       const dashboardBucket = s3.Bucket.fromBucketName(
-        testApp,
+        tempStack,
         "MockBucket2",
         "test-bucket"
       );
@@ -223,9 +226,10 @@ describe("MonitoringInfraStack - Creation & Validation", () => {
       const vpc = fixtures.getVpc();
       const efsResources = fixtures.getEfsResources();
 
-      // Create mock S3 bucket
+      // Create mock S3 bucket under a temporary stack
+      const tempStack = new cdk.Stack(testApp, "TempStack3");
       const dashboardBucket = s3.Bucket.fromBucketName(
-        testApp,
+        tempStack,
         "MockBucket3",
         "test-bucket"
       );
@@ -252,9 +256,10 @@ describe("MonitoringInfraStack - Creation & Validation", () => {
       const vpc = fixtures.getVpc();
       const efsResources = fixtures.getEfsResources();
 
-      // Create mock S3 bucket
+      // Create mock S3 bucket under a temporary stack
+      const tempStack = new cdk.Stack(testApp, "TempStack4");
       const dashboardBucket = s3.Bucket.fromBucketName(
-        testApp,
+        tempStack,
         "MockBucket4",
         "test-bucket"
       );

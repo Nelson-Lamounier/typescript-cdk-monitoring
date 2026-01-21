@@ -39,7 +39,15 @@ describe("Security Posture: Network Security", () => {
   let stacks: ConnectivityTestStacks;
 
   beforeAll(() => {
-    stacks = SecurityTestFixtures.getDevelopmentStacks();
+    try {
+      stacks = SecurityTestFixtures.getDevelopmentStacks();
+      if (!stacks) {
+        throw new Error("SecurityTestFixtures.getDevelopmentStacks() returned undefined");
+      }
+    } catch (error) {
+      console.error("Error creating test stacks:", error);
+      throw error;
+    }
   });
 
   /**
