@@ -135,6 +135,37 @@ verify-infra: ## Verify Infrastructure stack deployment and readiness
 		npx tsx scripts/integration/deployment/monitoring/verify-infra-stack.ts -e $(ENVIRONMENT) -r $(AWS_REGION); \
 	fi
 
+verify-s3: ## Verify S3 stack deployment and readiness
+	@echo "$(BLUE)Verifying S3 Stack...$(NC)"
+	@echo "Environment: $(ENVIRONMENT)"
+	@echo "AWS Region: $(AWS_REGION)"
+	@if [ -n "$(AWS_PROFILE)" ]; then \
+		echo "AWS Profile: $(AWS_PROFILE)"; \
+		if [ -n "$(BUCKET_NAME)" ]; then \
+			npx tsx scripts/integration/deployment/monitoring/verify-s3-creation.ts \
+				-e $(ENVIRONMENT) \
+				-r $(AWS_REGION) \
+				-p $(AWS_PROFILE) \
+				-b $(BUCKET_NAME); \
+		else \
+			npx tsx scripts/integration/deployment/monitoring/verify-s3-creation.ts \
+				-e $(ENVIRONMENT) \
+				-r $(AWS_REGION) \
+				-p $(AWS_PROFILE); \
+		fi \
+	elif [ -n "$(BUCKET_NAME)" ]; then \
+		echo "AWS Profile: (using default credentials)"; \
+		npx tsx scripts/integration/deployment/monitoring/verify-s3-creation.ts \
+			-e $(ENVIRONMENT) \
+			-r $(AWS_REGION) \
+			-b $(BUCKET_NAME); \
+	else \
+		echo "AWS Profile: (using default credentials)"; \
+		npx tsx scripts/integration/deployment/monitoring/verify-s3-creation.ts \
+			-e $(ENVIRONMENT) \
+			-r $(AWS_REGION); \
+	fi
+
 verify-service: ## Verify Service stack deployment and readiness
 	@echo "$(BLUE)Verifying Service Stack...$(NC)"
 	@echo "Environment: $(ENVIRONMENT)"
@@ -159,7 +190,7 @@ verify-grafana-prometheus: ## Diagnose Grafana-Prometheus connectivity issues
 		npx tsx scripts/integration/deployment/monitoring/verify-datasource-connectivity.ts -e $(ENVIRONMENT) -r $(AWS_REGION); \
 	fi
 
-verify-all: verify-networking verify-efs verify-infra verify-service ## Verify all stacks in order
+verify-all: verify-networking verify-s3 verify-efs verify-infra verify-service ## Verify all stacks in order
 	@echo ""
 	@echo "$(GREEN)✓ All verification checks completed$(NC)"
 
