@@ -252,7 +252,7 @@ jobs:
   # ===========================================================================
   deploy-efs:
     name: Deploy EFS
-    needs: [setup, deploy-networking, verify-networking]
+    needs: [setup, deploy-s3, verify-s3]
     if: always() && needs.deploy-networking.result == 'success' && (needs.verify-networking.result == 'success' || needs.verify-networking.result == 'skipped')
     uses: ./.github/workflows/_deploy-stack.yml
     with:
