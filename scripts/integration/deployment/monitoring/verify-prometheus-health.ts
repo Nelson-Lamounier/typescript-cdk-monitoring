@@ -4,10 +4,11 @@
 /**
  * Prometheus Health Check Verification Script
  *
- * This script verifies Prometheus health check configuration and connectivity
- * during pipeline deployments. It performs comprehensive checks to identify
- * common failure scenarios:
+ * Verifies Prometheus health check configuration and connectivity during
+ * pipeline deployments. Performs comprehensive checks to identify common
+ * failure scenarios.
  *
+ * Checks:
  * 1. ECS Task Status - Verifies tasks are running and healthy
  * 2. Container Health - Checks container-level health status
  * 3. ALB Target Health - Validates target group health check configuration
@@ -24,40 +25,43 @@
  *     [--blocking]
  */
 
-import { program } from "commander";
 import {
   ECSClient,
   ListTasksCommand,
   DescribeTasksCommand,
-  DescribeServicesCommand,
   DescribeContainerInstancesCommand,
 } from "@aws-sdk/client-ecs";
-import {
-  ElasticLoadBalancingV2Client,
-  DescribeTargetHealthCommand,
-  DescribeTargetGroupsCommand,
-  DescribeLoadBalancersCommand,
-} from "@aws-sdk/client-elastic-load-balancing-v2";
-import {
-  EC2Client,
-  DescribeSecurityGroupsCommand,
-} from "@aws-sdk/client-ec2";
 import {
   SSMClient,
   SendCommandCommand,
   GetCommandInvocationCommand,
   DescribeInstanceInformationCommand,
 } from "@aws-sdk/client-ssm";
-import {
-  CloudFormationClient,
-  DescribeStacksCommand,
-} from "@aws-sdk/client-cloudformation";
-import { Logger } from "../utils/logger";
+import { EC2Client } from "@aws-sdk/client-ec2";
 
-// Constants
-const PROMETHEUS_PORT = 9090;
-const EXPECTED_HEALTH_CHECK_PATH = "/prometheus/-/healthy";
-const HEALTH_CHECK_TIMEOUT_SECONDS = 10;
+import { Logger } from "../utils/logger";
+import { AwsClientFactory, BaseAwsClients } from "../shared/aws-client-factory";
+import {
+  CloudFormationUtility,
+  ECSUtility,
+  ELBUtility,
+  EC2Utility,
+} from "../shared/aws-utilities";
+import {
+  VerificationRunner,
+  CheckBuilder,
+  ReadinessChecker,
+} from "../shared/verification-framework";
+import { TableFormatter } from "../shared/formatters";
+import { CliBuilder } from "../shared/cli-base";
+
+interface PrometheusHealthClients extends BaseAwsClients {
+  cfn: any;
+  ecs: ECSClient;
+  elbv2: any;
+  ec2: EC2Client;
+  ssm: SSMClient;
+}
 
 interface VerifyPrometheusHealthConfig {
   profile?: string;
@@ -69,431 +73,48 @@ interface VerifyPrometheusHealthConfig {
   retryIntervalSeconds?: number;
 }
 
-interface PrometheusHealthState {
-  taskStatus: {
-    serviceName: string;
+interface PrometheusHealthContext {
+  config: VerifyPrometheusHealthConfig;
+  clients: PrometheusHealthClients;
+  clusterName: string;
+  serviceName: string;
+  taskStatus?: {
     desiredCount: number;
     runningCount: number;
     pendingCount: number;
-    tasks: Array<{
-      taskArn: string;
-      lastStatus: string;
-      healthStatus?: string;
-      stoppedReason?: string;
-      containerStatuses: Array<{
-        name: string;
-        lastStatus: string;
-        healthStatus?: string;
-        exitCode?: number;
-        reason?: string;
-      }>;
-    }>;
+    tasks: any[];
   };
-  targetGroupHealth: {
-    name: string;
-    arn: string;
-    healthCheckPath: string;
-    healthCheckPort: string;
-    healthCheckProtocol: string;
-    targets: Array<{
-      id: string;
-      port: number;
-      health: string;
-      reason?: string;
-      description?: string;
-    }>;
-  } | null;
-  securityGroupAnalysis: {
-    albSecurityGroups: string[];
-    instanceSecurityGroups: string[];
-    prometheusPortAllowed: boolean;
-    issues: string[];
-  };
-  endpointTests: {
-    localHealthCheck: {
-      tested: boolean;
-      success: boolean;
-      httpCode?: string;
-      error?: string;
-    };
-    routePrefixHealthCheck: {
-      tested: boolean;
-      success: boolean;
-      httpCode?: string;
-      error?: string;
-    };
-  };
-  configurationIssues: string[];
+  targetGroup?: any;
+  loadBalancer?: any;
+  healthyTargets: number;
+  totalTargets: number;
   criticalErrors: string[];
   warnings: string[];
-  isHealthy: boolean;
 }
+
+const PROMETHEUS_PORT = 9090;
+const EXPECTED_HEALTH_CHECK_PATH = "/prometheus/-/healthy";
+const HEALTH_CHECK_TIMEOUT_SECONDS = 10;
 
 function sleep(seconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 }
 
-async function createClients(config: VerifyPrometheusHealthConfig): Promise<{
-  ecs: ECSClient;
-  elbv2: ElasticLoadBalancingV2Client;
-  ec2: EC2Client;
-  ssm: SSMClient;
-  cfn: CloudFormationClient;
-}> {
-  const clientConfig: { region: string } = { region: config.region };
-
-  const isOidcAuth = !!process.env.AWS_SESSION_TOKEN;
-
-  if (config.profile && !isOidcAuth) {
-    process.env.AWS_PROFILE = config.profile;
-    Logger.info(`Using AWS profile: ${config.profile}`);
-  } else if (isOidcAuth) {
-    delete process.env.AWS_PROFILE;
-    Logger.info("Using OIDC credentials from environment");
-  }
-
-  return {
-    ecs: new ECSClient(clientConfig),
-    elbv2: new ElasticLoadBalancingV2Client(clientConfig),
-    ec2: new EC2Client(clientConfig),
-    ssm: new SSMClient(clientConfig),
-    cfn: new CloudFormationClient(clientConfig),
-  };
-}
-
-async function getStackOutputs(
-  cfnClient: CloudFormationClient,
-  stackName: string
-): Promise<Record<string, string>> {
-  try {
-    const command = new DescribeStacksCommand({ StackName: stackName });
-    const response = await cfnClient.send(command);
-    const stack = response.Stacks?.[0];
-
-    if (!stack) {
-      return {};
-    }
-
-    const outputs: Record<string, string> = {};
-    stack.Outputs?.forEach((output) => {
-      if (output.OutputKey && output.OutputValue) {
-        outputs[output.OutputKey] = output.OutputValue;
-      }
-    });
-
-    return outputs;
-  } catch (error: any) {
-    if (error.name === "ValidationError" || error.message?.includes("does not exist")) {
-      Logger.warning(`Stack ${stackName} not found`);
-      return {};
-    }
-    throw error;
-  }
-}
-
-async function checkEcsTaskStatus(
-  ecsClient: ECSClient,
-  clusterName: string,
-  serviceName: string,
-  config: VerifyPrometheusHealthConfig
-): Promise<PrometheusHealthState["taskStatus"]> {
-  const result: PrometheusHealthState["taskStatus"] = {
-    serviceName,
-    desiredCount: 0,
-    runningCount: 0,
-    pendingCount: 0,
-    tasks: [],
-  };
-
-  try {
-    // Get service details
-    const serviceResponse = await ecsClient.send(
-      new DescribeServicesCommand({
-        cluster: clusterName,
-        services: [serviceName],
-      })
-    );
-
-    const service = serviceResponse.services?.[0];
-    if (!service) {
-      Logger.warning(`Service ${serviceName} not found in cluster ${clusterName}`);
-      return result;
-    }
-
-    result.desiredCount = service.desiredCount ?? 0;
-    result.runningCount = service.runningCount ?? 0;
-    result.pendingCount = service.pendingCount ?? 0;
-
-    // List tasks for the service
-    const tasksResponse = await ecsClient.send(
-      new ListTasksCommand({
-        cluster: clusterName,
-        serviceName,
-      })
-    );
-
-    const taskArns = tasksResponse.taskArns ?? [];
-    if (taskArns.length === 0) {
-      Logger.warning("No tasks found for Prometheus service");
-      return result;
-    }
-
-    // Describe tasks
-    const describeResponse = await ecsClient.send(
-      new DescribeTasksCommand({
-        cluster: clusterName,
-        tasks: taskArns,
-      })
-    );
-
-    for (const task of describeResponse.tasks ?? []) {
-      const taskInfo = {
-        taskArn: task.taskArn ?? "unknown",
-        lastStatus: task.lastStatus ?? "UNKNOWN",
-        healthStatus: task.healthStatus,
-        stoppedReason: task.stoppedReason,
-        containerStatuses:
-          task.containers?.map((container) => ({
-            name: container.name ?? "unknown",
-            lastStatus: container.lastStatus ?? "UNKNOWN",
-            healthStatus: container.healthStatus,
-            exitCode: container.exitCode,
-            reason: container.reason,
-          })) ?? [],
-      };
-
-      result.tasks.push(taskInfo);
-
-      if (config.verbose) {
-        Logger.info(`Task ${task.taskArn?.split("/").pop()}: ${task.lastStatus}`);
-        task.containers?.forEach((container) => {
-          Logger.info(
-            `  Container ${container.name}: ${container.lastStatus}` +
-              (container.healthStatus ? ` (health: ${container.healthStatus})` : "") +
-              (container.exitCode !== undefined ? ` (exit: ${container.exitCode})` : "") +
-              (container.reason ? ` - ${container.reason}` : "")
-          );
-        });
-      }
-    }
-
-    // Also check for stopped tasks to understand failure reasons
-    const stoppedTasksResponse = await ecsClient.send(
-      new ListTasksCommand({
-        cluster: clusterName,
-        serviceName,
-        desiredStatus: "STOPPED",
-      })
-    );
-
-    if ((stoppedTasksResponse.taskArns?.length ?? 0) > 0) {
-      const stoppedDescribe = await ecsClient.send(
-        new DescribeTasksCommand({
-          cluster: clusterName,
-          tasks: stoppedTasksResponse.taskArns?.slice(0, 5) ?? [],
-        })
-      );
-
-      for (const task of stoppedDescribe.tasks ?? []) {
-        if (task.stoppedReason) {
-          Logger.warning(`Stopped task reason: ${task.stoppedReason}`);
-          result.tasks.push({
-            taskArn: task.taskArn ?? "unknown",
-            lastStatus: "STOPPED",
-            stoppedReason: task.stoppedReason,
-            containerStatuses:
-              task.containers?.map((container) => ({
-                name: container.name ?? "unknown",
-                lastStatus: container.lastStatus ?? "STOPPED",
-                exitCode: container.exitCode,
-                reason: container.reason,
-              })) ?? [],
-          });
-        }
-      }
-    }
-  } catch (error: any) {
-    Logger.error(`Failed to check ECS task status: ${error.message}`);
-  }
-
-  return result;
-}
-
-async function checkTargetGroupHealth(
-  elbv2Client: ElasticLoadBalancingV2Client,
-  environment: string,
-  config: VerifyPrometheusHealthConfig
-): Promise<PrometheusHealthState["targetGroupHealth"]> {
-  try {
-    // Find Prometheus target group
-    const tgPatterns = [
-      `${environment}-monitoring-prom`,
-      `${environment}-prometheus`,
-    ];
-
-    let targetGroup: any = null;
-    for (const pattern of tgPatterns) {
-      const response = await elbv2Client.send(
-        new DescribeTargetGroupsCommand({
-          Names: [pattern],
-        })
-      ).catch(() => null);
-
-      if (response?.TargetGroups?.[0]) {
-        targetGroup = response.TargetGroups[0];
-        break;
-      }
-    }
-
-    if (!targetGroup) {
-      // Try searching by tag or listing all
-      const allTgs = await elbv2Client.send(new DescribeTargetGroupsCommand({}));
-      targetGroup = allTgs.TargetGroups?.find((tg) =>
-        tg.TargetGroupName?.includes("prom") || tg.TargetGroupName?.includes("prometheus")
-      );
-    }
-
-    if (!targetGroup) {
-      Logger.warning("Prometheus target group not found");
-      return null;
-    }
-
-    Logger.info(`Found target group: ${targetGroup.TargetGroupName}`);
-
-    // Get target health
-    const healthResponse = await elbv2Client.send(
-      new DescribeTargetHealthCommand({
-        TargetGroupArn: targetGroup.TargetGroupArn,
-      })
-    );
-
-    const result: PrometheusHealthState["targetGroupHealth"] = {
-      name: targetGroup.TargetGroupName ?? "unknown",
-      arn: targetGroup.TargetGroupArn ?? "unknown",
-      healthCheckPath: targetGroup.HealthCheckPath ?? "/",
-      healthCheckPort: targetGroup.HealthCheckPort ?? "traffic-port",
-      healthCheckProtocol: targetGroup.HealthCheckProtocol ?? "HTTP",
-      targets:
-        healthResponse.TargetHealthDescriptions?.map((desc) => ({
-          id: desc.Target?.Id ?? "unknown",
-          port: desc.Target?.Port ?? 0,
-          health: desc.TargetHealth?.State ?? "unknown",
-          reason: desc.TargetHealth?.Reason,
-          description: desc.TargetHealth?.Description,
-        })) ?? [],
-    };
-
-    if (config.verbose) {
-      Logger.keyValue("Health Check Path", result.healthCheckPath);
-      Logger.keyValue("Health Check Port", result.healthCheckPort);
-      result.targets.forEach((target) => {
-        const status = target.health === "healthy" ? "HEALTHY" : target.health.toUpperCase();
-        Logger.info(
-          `  Target ${target.id}:${target.port} - ${status}` +
-            (target.reason ? ` (${target.reason})` : "") +
-            (target.description ? ` - ${target.description}` : "")
-        );
-      });
-    }
-
-    return result;
-  } catch (error: any) {
-    Logger.error(`Failed to check target group health: ${error.message}`);
-    return null;
-  }
-}
-
-async function checkSecurityGroups(
-  ec2Client: EC2Client,
-  elbv2Client: ElasticLoadBalancingV2Client,
-  environment: string,
-  config: VerifyPrometheusHealthConfig
-): Promise<PrometheusHealthState["securityGroupAnalysis"]> {
-  const result: PrometheusHealthState["securityGroupAnalysis"] = {
-    albSecurityGroups: [],
-    instanceSecurityGroups: [],
-    prometheusPortAllowed: false,
-    issues: [],
-  };
-
-  try {
-    // Find ALB
-    const lbPatterns = [
-      `${environment}-monitoring-alb`,
-      `${environment}-alb`,
-    ];
-
-    let loadBalancer: any = null;
-    for (const pattern of lbPatterns) {
-      const response = await elbv2Client.send(
-        new DescribeLoadBalancersCommand({
-          Names: [pattern],
-        })
-      ).catch(() => null);
-
-      if (response?.LoadBalancers?.[0]) {
-        loadBalancer = response.LoadBalancers[0];
-        break;
-      }
-    }
-
-    if (!loadBalancer) {
-      const allLbs = await elbv2Client.send(new DescribeLoadBalancersCommand({}));
-      loadBalancer = allLbs.LoadBalancers?.find((lb) =>
-        lb.LoadBalancerName?.includes(environment)
-      );
-    }
-
-    if (loadBalancer?.SecurityGroups) {
-      result.albSecurityGroups = loadBalancer.SecurityGroups;
-
-      // Check ALB security group rules
-      const sgResponse = await ec2Client.send(
-        new DescribeSecurityGroupsCommand({
-          GroupIds: loadBalancer.SecurityGroups,
-        })
-      );
-
-      for (const sg of sgResponse.SecurityGroups ?? []) {
-        // Check egress rules for port 9090
-        const hasEgressToPrometheus = sg.IpPermissionsEgress?.some((rule) => {
-          if (rule.IpProtocol === "-1") return true; // All traffic
-          if (rule.FromPort === undefined || rule.ToPort === undefined) return false;
-          return rule.FromPort <= PROMETHEUS_PORT && rule.ToPort >= PROMETHEUS_PORT;
-        });
-
-        if (!hasEgressToPrometheus) {
-          result.issues.push(
-            `ALB security group ${sg.GroupId} may not allow egress to port ${PROMETHEUS_PORT}`
-          );
-        }
-      }
-    }
-
-    if (config.verbose && result.issues.length > 0) {
-      result.issues.forEach((issue) => Logger.warning(issue));
-    }
-  } catch (error: any) {
-    Logger.warning(`Failed to analyse security groups: ${error.message}`);
-  }
-
-  return result;
-}
-
-async function testHealthEndpointsViaSSM(
+async function testHealthEndpointViaSSM(
   ssmClient: SSMClient,
-  _ec2Client: EC2Client,
   ecsClient: ECSClient,
   clusterName: string,
-  config: VerifyPrometheusHealthConfig
-): Promise<PrometheusHealthState["endpointTests"]> {
-  const result: PrometheusHealthState["endpointTests"] = {
-    localHealthCheck: { tested: false, success: false },
-    routePrefixHealthCheck: { tested: false, success: false },
+  healthCheckPath: string,
+  verbose: boolean
+): Promise<{ tested: boolean; success: boolean; httpCode?: string; error?: string }> {
+  const result = { tested: false, success: false, httpCode: undefined, error: undefined } as {
+    tested: boolean;
+    success: boolean;
+    httpCode?: string;
+    error?: string;
   };
 
   try {
-    // Get container instance
     const tasksResponse = await ecsClient.send(
       new ListTasksCommand({
         cluster: clusterName,
@@ -502,7 +123,7 @@ async function testHealthEndpointsViaSSM(
     );
 
     if (!tasksResponse.taskArns?.length) {
-      Logger.warning("No running tasks found - cannot test endpoints");
+      result.error = "No running tasks found";
       return result;
     }
 
@@ -515,11 +136,10 @@ async function testHealthEndpointsViaSSM(
 
     const task = describeResponse.tasks?.[0];
     if (!task?.containerInstanceArn) {
-      Logger.warning("No container instance found for task");
+      result.error = "No container instance found";
       return result;
     }
 
-    // Get EC2 instance ID from container instance
     const containerInstanceResponse = await ecsClient.send(
       new DescribeContainerInstancesCommand({
         cluster: clusterName,
@@ -527,13 +147,13 @@ async function testHealthEndpointsViaSSM(
       })
     );
 
-    const instanceId = containerInstanceResponse.containerInstances?.[0]?.ec2InstanceId;
+    const instanceId =
+      containerInstanceResponse.containerInstances?.[0]?.ec2InstanceId;
     if (!instanceId) {
-      Logger.warning("Could not get EC2 instance ID from container instance");
+      result.error = "Could not get EC2 instance ID";
       return result;
     }
 
-    // Check if instance is reachable via SSM
     const ssmInfoResponse = await ssmClient.send(
       new DescribeInstanceInformationCommand({
         Filters: [{ Key: "InstanceIds", Values: [instanceId] }],
@@ -545,513 +165,497 @@ async function testHealthEndpointsViaSSM(
     );
 
     if (!isOnline) {
-      Logger.warning(`Instance ${instanceId} is not reachable via SSM`);
+      result.error = `Instance ${instanceId} not reachable via SSM`;
       return result;
     }
 
-    Logger.info(`Testing health endpoints on instance ${instanceId}`);
-
-    // Test local health check (/-/healthy on localhost:9090)
-    try {
-      result.localHealthCheck.tested = true;
-      const localCmd = await ssmClient.send(
-        new SendCommandCommand({
-          InstanceIds: [instanceId],
-          DocumentName: "AWS-RunShellScript",
-          Parameters: {
-            commands: [
-              `curl -s -o /dev/null -w "%{http_code}" --max-time ${HEALTH_CHECK_TIMEOUT_SECONDS} http://localhost:${PROMETHEUS_PORT}/-/healthy`,
-            ],
-          },
-        })
-      );
-
-      await sleep(3);
-
-      const localResult = await ssmClient.send(
-        new GetCommandInvocationCommand({
-          CommandId: localCmd.Command?.CommandId!,
-          InstanceId: instanceId,
-        })
-      );
-
-      result.localHealthCheck.httpCode = localResult.StandardOutputContent?.trim();
-      result.localHealthCheck.success = result.localHealthCheck.httpCode === "200";
-
-      if (config.verbose) {
-        Logger.info(
-          `Local health check (/-/healthy): ${result.localHealthCheck.httpCode} - ` +
-            (result.localHealthCheck.success ? "SUCCESS" : "FAILED")
-        );
-      }
-    } catch (error: any) {
-      result.localHealthCheck.error = error.message;
-      Logger.warning(`Local health check failed: ${error.message}`);
+    if (verbose) {
+      Logger.info(`Testing health endpoint on instance ${instanceId}`);
     }
 
-    // Test route-prefix health check (/prometheus/-/healthy on localhost:9090)
-    try {
-      result.routePrefixHealthCheck.tested = true;
-      const prefixCmd = await ssmClient.send(
-        new SendCommandCommand({
-          InstanceIds: [instanceId],
-          DocumentName: "AWS-RunShellScript",
-          Parameters: {
-            commands: [
-              `curl -s -o /dev/null -w "%{http_code}" --max-time ${HEALTH_CHECK_TIMEOUT_SECONDS} http://localhost:${PROMETHEUS_PORT}${EXPECTED_HEALTH_CHECK_PATH}`,
-            ],
-          },
-        })
-      );
+    result.tested = true;
+    const cmd = await ssmClient.send(
+      new SendCommandCommand({
+        InstanceIds: [instanceId],
+        DocumentName: "AWS-RunShellScript",
+        Parameters: {
+          commands: [
+            `curl -s -o /dev/null -w "%{http_code}" --max-time ${HEALTH_CHECK_TIMEOUT_SECONDS} http://localhost:${PROMETHEUS_PORT}${healthCheckPath}`,
+          ],
+        },
+      })
+    );
 
-      await sleep(3);
+    await sleep(3);
 
-      const prefixResult = await ssmClient.send(
-        new GetCommandInvocationCommand({
-          CommandId: prefixCmd.Command?.CommandId!,
-          InstanceId: instanceId,
-        })
-      );
+    const cmdResult = await ssmClient.send(
+      new GetCommandInvocationCommand({
+        CommandId: cmd.Command?.CommandId || "",
+        InstanceId: instanceId,
+      })
+    );
 
-      result.routePrefixHealthCheck.httpCode = prefixResult.StandardOutputContent?.trim();
-      result.routePrefixHealthCheck.success = result.routePrefixHealthCheck.httpCode === "200";
+    result.httpCode = cmdResult.StandardOutputContent?.trim();
+    result.success = result.httpCode === "200";
 
-      if (config.verbose) {
-        Logger.info(
-          `Route prefix health check (${EXPECTED_HEALTH_CHECK_PATH}): ` +
-            `${result.routePrefixHealthCheck.httpCode} - ` +
-            (result.routePrefixHealthCheck.success ? "SUCCESS" : "FAILED")
-        );
-      }
-    } catch (error: any) {
-      result.routePrefixHealthCheck.error = error.message;
-      Logger.warning(`Route prefix health check failed: ${error.message}`);
-    }
+    return result;
   } catch (error: any) {
-    Logger.warning(`Endpoint testing failed: ${error.message}`);
+    result.error = error.message;
+    return result;
   }
-
-  return result;
-}
-
-function analyseConfiguration(
-  state: PrometheusHealthState
-): { issues: string[]; criticalErrors: string[]; warnings: string[] } {
-  const issues: string[] = [];
-  const criticalErrors: string[] = [];
-  const warnings: string[] = [];
-
-  // Check target group health check path
-  if (state.targetGroupHealth) {
-    const actualPath = state.targetGroupHealth.healthCheckPath;
-    if (actualPath !== EXPECTED_HEALTH_CHECK_PATH) {
-      criticalErrors.push(
-        `Health check path mismatch: Expected "${EXPECTED_HEALTH_CHECK_PATH}", got "${actualPath}". ` +
-          `ALB forwards the FULL path to the target. Prometheus is configured with --web.route-prefix=/prometheus, ` +
-          `so it expects health checks at ${EXPECTED_HEALTH_CHECK_PATH}.`
-      );
-    }
-
-    // Check if targets are unhealthy
-    const unhealthyTargets = state.targetGroupHealth.targets.filter(
-      (t) => t.health !== "healthy"
-    );
-    if (unhealthyTargets.length > 0) {
-      for (const target of unhealthyTargets) {
-        if (target.reason === "Target.FailedHealthChecks") {
-          criticalErrors.push(
-            `Target ${target.id}:${target.port} failed health checks. ` +
-              `This usually means either: 1) Prometheus is not running, ` +
-              `2) Health check path is incorrect, or 3) Security groups block port ${PROMETHEUS_PORT}.`
-          );
-        } else if (target.reason === "Target.NotRegistered") {
-          warnings.push(
-            `Target ${target.id} is not registered. ECS service may still be starting.`
-          );
-        } else if (target.reason === "Target.Timeout") {
-          criticalErrors.push(
-            `Target ${target.id}:${target.port} timed out. Check if Prometheus is responding on port ${PROMETHEUS_PORT}.`
-          );
-        } else {
-          warnings.push(
-            `Target ${target.id}:${target.port} is ${target.health}: ${target.reason ?? "unknown reason"}`
-          );
-        }
-      }
-    }
-  }
-
-  // Check ECS task status
-  if (state.taskStatus.runningCount === 0) {
-    criticalErrors.push(
-      `No Prometheus tasks are running (desired: ${state.taskStatus.desiredCount}). ` +
-        "Check ECS service events and task stopped reasons."
-    );
-  } else if (state.taskStatus.runningCount < state.taskStatus.desiredCount) {
-    warnings.push(
-      `Only ${state.taskStatus.runningCount}/${state.taskStatus.desiredCount} Prometheus tasks are running.`
-    );
-  }
-
-  // Check for stopped tasks with reasons
-  const stoppedTasks = state.taskStatus.tasks.filter(
-    (t) => t.lastStatus === "STOPPED" && t.stoppedReason
-  );
-  for (const task of stoppedTasks) {
-    issues.push(`Task stopped: ${task.stoppedReason}`);
-
-    // Common failure reasons
-    if (task.stoppedReason?.includes("Essential container")) {
-      criticalErrors.push(
-        "Essential container exited. Check CloudWatch Logs for Prometheus startup errors. " +
-          "Common causes: missing prometheus.yml config file, invalid configuration, or missing EFS mount."
-      );
-    }
-    if (task.stoppedReason?.includes("OutOfMemory")) {
-      criticalErrors.push(
-        "Container ran out of memory. Consider increasing memoryMiB in Prometheus configuration."
-      );
-    }
-  }
-
-  // Check container exit codes
-  for (const task of state.taskStatus.tasks) {
-    for (const container of task.containerStatuses) {
-      if (container.exitCode !== undefined && container.exitCode !== 0) {
-        criticalErrors.push(
-          `Container ${container.name} exited with code ${container.exitCode}. ` +
-            (container.reason ? `Reason: ${container.reason}` : "Check CloudWatch Logs for details.")
-        );
-      }
-    }
-  }
-
-  // Check endpoint test results
-  if (state.endpointTests.localHealthCheck.tested) {
-    if (!state.endpointTests.localHealthCheck.success) {
-      if (state.endpointTests.routePrefixHealthCheck.success) {
-        // This is actually expected when route prefix is configured
-        issues.push(
-          `Local /-/healthy returns ${state.endpointTests.localHealthCheck.httpCode} ` +
-            `but ${EXPECTED_HEALTH_CHECK_PATH} returns 200. This is correct when using --web.route-prefix=/prometheus.`
-        );
-      } else if (state.endpointTests.localHealthCheck.httpCode === "000") {
-        criticalErrors.push(
-          "Prometheus is not responding on port 9090. Container may not be running or is still starting."
-        );
-      }
-    }
-  }
-
-  if (
-    state.endpointTests.routePrefixHealthCheck.tested &&
-    !state.endpointTests.routePrefixHealthCheck.success
-  ) {
-    if (state.endpointTests.routePrefixHealthCheck.httpCode === "404") {
-      criticalErrors.push(
-        `${EXPECTED_HEALTH_CHECK_PATH} returns 404. Prometheus may not be configured with --web.route-prefix=/prometheus. ` +
-          "Check the Prometheus command arguments in the task definition."
-      );
-    } else if (state.endpointTests.routePrefixHealthCheck.httpCode === "000") {
-      criticalErrors.push(
-        "Prometheus is not responding. Container may not be running."
-      );
-    }
-  }
-
-  // Check security group issues
-  if (state.securityGroupAnalysis.issues.length > 0) {
-    warnings.push(...state.securityGroupAnalysis.issues);
-  }
-
-  return { issues, criticalErrors, warnings };
 }
 
 async function verifyPrometheusHealth(
   config: VerifyPrometheusHealthConfig
-): Promise<PrometheusHealthState> {
+): Promise<{ isHealthy: boolean; criticalErrors: string[]; warnings: string[] }> {
   Logger.section(`Prometheus Health Check Verification - ${config.environment}`);
 
-  const clients = await createClients(config);
+  const clients = (await AwsClientFactory.createCommonClients(
+    {
+      ...config,
+      sessionName: `verify-prometheus-health-${Date.now()}`,
+    },
+    ["cfn", "ecs", "elbv2", "ec2", "ssm"]
+  )) as PrometheusHealthClients;
 
-  // Get stack outputs
   const infraStackName = `${config.environment}-MonitoringInfra`;
   const serviceStackName = `${config.environment}-MonitoringService`;
 
-  const infraOutputs = await getStackOutputs(clients.cfn, infraStackName);
-  const serviceOutputs = await getStackOutputs(clients.cfn, serviceStackName);
+  const infraStack = await CloudFormationUtility.getStackStatus(
+    clients.cfn,
+    infraStackName
+  );
+  const serviceStack = await CloudFormationUtility.getStackStatus(
+    clients.cfn,
+    serviceStackName
+  );
 
-  const clusterName = infraOutputs.ClusterName;
-  const prometheusServiceArn = serviceOutputs.PrometheusServiceArn;
+  const clusterName = (infraStack?.outputs as any)?.ClusterName;
+  const prometheusServiceArn = (serviceStack?.outputs as any)?.PrometheusServiceArn;
 
   if (!clusterName) {
     throw new Error(
-      `Cluster name not found in stack ${infraStackName}. ` +
-        "Ensure MonitoringInfra stack has been deployed successfully."
+      `Cluster name not found in stack ${infraStackName}. Ensure MonitoringInfra stack has been deployed.`
     );
   }
 
-  // Extract service name from ARN or use default
   const serviceName = prometheusServiceArn
     ? prometheusServiceArn.split("/").pop()
     : `${config.environment}-prometheus`;
 
   Logger.keyValue("Cluster Name", clusterName);
-  Logger.keyValue("Service Name", serviceName ?? "unknown");
+  Logger.keyValue("Service Name", serviceName || "unknown");
   console.log("");
 
-  // Initialize state
-  const state: PrometheusHealthState = {
-    taskStatus: {
-      serviceName: serviceName ?? "unknown",
-      desiredCount: 0,
-      runningCount: 0,
-      pendingCount: 0,
-      tasks: [],
-    },
-    targetGroupHealth: null,
-    securityGroupAnalysis: {
-      albSecurityGroups: [],
-      instanceSecurityGroups: [],
-      prometheusPortAllowed: false,
-      issues: [],
-    },
-    endpointTests: {
-      localHealthCheck: { tested: false, success: false },
-      routePrefixHealthCheck: { tested: false, success: false },
-    },
-    configurationIssues: [],
+  const runner = new VerificationRunner();
+  const context: Partial<PrometheusHealthContext> = {
+    config,
+    clients,
+    clusterName,
+    serviceName: serviceName || `${config.environment}-prometheus`,
+    healthyTargets: 0,
+    totalTargets: 0,
     criticalErrors: [],
     warnings: [],
-    isHealthy: false,
   };
 
-  // Step 1: Check ECS Task Status
-  Logger.subsection("1. ECS Task Status");
-  state.taskStatus = await checkEcsTaskStatus(
-    clients.ecs,
-    clusterName,
-    serviceName ?? `${config.environment}-prometheus`,
-    config
-  );
+  setupVerificationChecks(runner, context as PrometheusHealthContext);
 
-  if (state.taskStatus.runningCount > 0) {
-    Logger.success(
-      `${state.taskStatus.runningCount}/${state.taskStatus.desiredCount} tasks running`
-    );
-  } else {
-    Logger.error(
-      `No tasks running (desired: ${state.taskStatus.desiredCount}, pending: ${state.taskStatus.pendingCount})`
-    );
-  }
-  console.log("");
+  const summary = await runner.run();
+  runner.printSummary();
 
-  // Step 2: Check Target Group Health
-  Logger.subsection("2. ALB Target Group Health");
-  state.targetGroupHealth = await checkTargetGroupHealth(
-    clients.elbv2,
-    config.environment,
-    config
-  );
+  const isHealthy =
+    summary.checksPassed === summary.totalChecks &&
+    (context as PrometheusHealthContext).criticalErrors.length === 0;
 
-  if (state.targetGroupHealth) {
-    const healthyTargets = state.targetGroupHealth.targets.filter(
-      (t) => t.health === "healthy"
-    ).length;
-    const totalTargets = state.targetGroupHealth.targets.length;
-
-    if (healthyTargets === totalTargets && totalTargets > 0) {
-      Logger.success(`All targets healthy (${healthyTargets}/${totalTargets})`);
-    } else if (healthyTargets > 0) {
-      Logger.warning(`Partial health: ${healthyTargets}/${totalTargets} targets healthy`);
-    } else if (totalTargets > 0) {
-      Logger.error(`No healthy targets (${totalTargets} registered)`);
-    } else {
-      Logger.warning("No targets registered yet");
-    }
-
-    // Validate health check path
-    if (state.targetGroupHealth.healthCheckPath !== EXPECTED_HEALTH_CHECK_PATH) {
-      Logger.error(
-        `Health check path: ${state.targetGroupHealth.healthCheckPath} (expected: ${EXPECTED_HEALTH_CHECK_PATH})`
-      );
-    } else {
-      Logger.success(`Health check path: ${state.targetGroupHealth.healthCheckPath}`);
-    }
-  } else {
-    Logger.warning("Target group not found");
-  }
-  console.log("");
-
-  // Step 3: Test Health Endpoints via SSM
-  Logger.subsection("3. Health Endpoint Testing");
-  if (state.taskStatus.runningCount > 0) {
-    state.endpointTests = await testHealthEndpointsViaSSM(
-      clients.ssm,
-      clients.ec2,
-      clients.ecs,
-      clusterName,
-      config
-    );
-
-    if (state.endpointTests.routePrefixHealthCheck.tested) {
-      if (state.endpointTests.routePrefixHealthCheck.success) {
-        Logger.success(`${EXPECTED_HEALTH_CHECK_PATH} returns 200`);
-      } else {
-        Logger.error(
-          `${EXPECTED_HEALTH_CHECK_PATH} returns ${state.endpointTests.routePrefixHealthCheck.httpCode ?? "error"}`
-        );
-      }
-    } else {
-      Logger.warning("Could not test health endpoints via SSM");
-    }
-  } else {
-    Logger.warning("Skipping endpoint tests - no running tasks");
-  }
-  console.log("");
-
-  // Step 4: Security Group Analysis
-  Logger.subsection("4. Security Group Analysis");
-  state.securityGroupAnalysis = await checkSecurityGroups(
-    clients.ec2,
-    clients.elbv2,
-    config.environment,
-    config
-  );
-
-  if (state.securityGroupAnalysis.issues.length === 0) {
-    Logger.success("No security group issues detected");
-  } else {
-    state.securityGroupAnalysis.issues.forEach((issue) => {
-      Logger.warning(issue);
-    });
-  }
-  console.log("");
-
-  // Step 5: Configuration Analysis
-  Logger.subsection("5. Configuration Analysis");
-  const analysis = analyseConfiguration(state);
-  state.configurationIssues = analysis.issues;
-  state.criticalErrors = analysis.criticalErrors;
-  state.warnings = analysis.warnings;
-
-  // Determine overall health
-  state.isHealthy =
-    state.criticalErrors.length === 0 &&
-    state.taskStatus.runningCount > 0 &&
-    (state.targetGroupHealth?.targets.some((t) => t.health === "healthy") ?? false);
-
-  // Summary
-  Logger.section("Verification Summary");
-
-  if (state.isHealthy) {
-    Logger.success("Prometheus is healthy");
-  } else {
-    Logger.error("Prometheus is NOT healthy");
-  }
-  console.log("");
-
-  if (state.criticalErrors.length > 0) {
-    Logger.error(`Critical Errors (${state.criticalErrors.length}):`);
-    state.criticalErrors.forEach((error, index) => {
-      console.log(`  ${index + 1}. ${error}`);
-    });
-    console.log("");
+  if (!isHealthy && config.verbose) {
+    printTroubleshootingSteps(config, clusterName, serviceName || "");
   }
 
-  if (state.warnings.length > 0) {
-    Logger.warning(`Warnings (${state.warnings.length}):`);
-    state.warnings.forEach((warning, index) => {
-      console.log(`  ${index + 1}. ${warning}`);
-    });
-    console.log("");
-  }
-
-  if (state.configurationIssues.length > 0 && config.verbose) {
-    Logger.info(`Configuration Notes (${state.configurationIssues.length}):`);
-    state.configurationIssues.forEach((issue, index) => {
-      console.log(`  ${index + 1}. ${issue}`);
-    });
-    console.log("");
-  }
-
-  // Troubleshooting guidance
-  if (!state.isHealthy) {
-    Logger.section("Troubleshooting Steps");
-
-    console.log("1. Check CloudWatch Logs for Prometheus startup errors:");
-    Logger.code(
-      `aws logs tail /ecs/${config.environment}-prometheus --follow --profile ${config.profile ?? "default"}`
-    );
-    console.log("");
-
-    console.log("2. Check ECS service events:");
-    Logger.code(
-      `aws ecs describe-services --cluster ${clusterName} --services ${serviceName} ` +
-        `--query 'services[0].events[:5]' --profile ${config.profile ?? "default"}`
-    );
-    console.log("");
-
-    console.log("3. Verify Prometheus config exists on EFS:");
-    Logger.code("# Connect via SSM Session Manager and check:");
-    Logger.code("cat /mnt/efs/config/prometheus/prometheus.yml");
-    console.log("");
-
-    console.log("4. Test health endpoint directly on instance:");
-    Logger.code(`curl -v http://localhost:${PROMETHEUS_PORT}${EXPECTED_HEALTH_CHECK_PATH}`);
-    console.log("");
-  }
-
-  return state;
+  return {
+    isHealthy,
+    criticalErrors: (context as PrometheusHealthContext).criticalErrors,
+    warnings: (context as PrometheusHealthContext).warnings,
+  };
 }
 
-// CLI
-program
-  .name("verify-prometheus-health")
-  .description("Verify Prometheus health check configuration and connectivity")
-  .option(
-    "-e, --environment <env>",
-    "Environment name (default: development)",
-    "development"
-  )
-  .option(
-    "-r, --region <region>",
-    "AWS region (default: eu-west-1)",
-    "eu-west-1"
-  )
-  .option("-p, --profile <profile>", "AWS CLI profile")
-  .option("-v, --verbose", "Enable verbose output", false)
-  .option(
-    "--blocking",
-    "Exit with error if health checks fail (default: false)",
-    false
-  )
-  .option(
-    "--max-retries <retries>",
-    "Maximum retries for health checks",
-    "3"
-  )
-  .option(
-    "--retry-interval <seconds>",
-    "Seconds between retries",
-    "30"
-  )
-  .parse();
+function setupVerificationChecks(
+  runner: VerificationRunner,
+  context: PrometheusHealthContext
+): void {
+  // 1. ECS Task Status
+  runner.addCheck(
+    CheckBuilder.create("ECS Task Status")
+      .category("compute")
+      .critical(true)
+      .execute(async () => {
+        const service = await ECSUtility.getService(
+          context.clients.ecs,
+          context.clusterName,
+          context.serviceName
+        );
 
-const options = program.opts();
+        if (!service) {
+          context.criticalErrors.push(
+            `Service ${context.serviceName} not found in cluster ${context.clusterName}`
+          );
+          return {
+            passed: false,
+            message: "Prometheus service not found",
+          };
+        }
 
-const config: VerifyPrometheusHealthConfig = {
-  environment: options.environment,
-  region: options.region,
-  profile: options.profile,
-  verbose: options.verbose || false,
-  blocking: options.blocking || false,
-  maxRetries: parseInt(options.maxRetries, 10) || 3,
-  retryIntervalSeconds: parseInt(options.retryInterval, 10) || 30,
-};
+        context.taskStatus = {
+          desiredCount: service.desiredCount ?? 0,
+          runningCount: service.runningCount ?? 0,
+          pendingCount: service.pendingCount ?? 0,
+          tasks: [],
+        };
 
-async function runWithRetries(): Promise<void> {
-  let lastState: PrometheusHealthState | null = null;
+        const taskArns = await ECSUtility.listTasks(
+          context.clients.ecs,
+          context.clusterName,
+          context.serviceName
+        );
+
+        if (taskArns.length > 0) {
+          const tasks = await ECSUtility.describeTasks(
+            context.clients.ecs,
+            context.clusterName,
+            taskArns
+          );
+          context.taskStatus.tasks = tasks;
+
+          if (context.config.verbose) {
+            console.log("");
+            TableFormatter.formatTasks(tasks);
+          }
+
+          const stoppedTasks = tasks.filter(
+            (t) => t.lastStatus === "STOPPED" && t.stoppedReason
+          );
+
+          for (const task of stoppedTasks) {
+            if (task.stoppedReason?.includes("Essential container")) {
+              context.criticalErrors.push(
+                "Essential container exited. Check CloudWatch Logs for Prometheus startup errors."
+              );
+            }
+            if (task.stoppedReason?.includes("OutOfMemory")) {
+              context.criticalErrors.push(
+                "Container ran out of memory. Increase memoryMiB in configuration."
+              );
+            }
+          }
+        }
+
+        if (context.taskStatus.runningCount === 0) {
+          context.criticalErrors.push(
+            `No Prometheus tasks running (desired: ${context.taskStatus.desiredCount})`
+          );
+        } else if (context.taskStatus.runningCount < context.taskStatus.desiredCount) {
+          context.warnings.push(
+            `Only ${context.taskStatus.runningCount}/${context.taskStatus.desiredCount} tasks running`
+          );
+        }
+
+        return {
+          passed: context.taskStatus.runningCount > 0,
+          message: `${context.taskStatus.runningCount}/${context.taskStatus.desiredCount} tasks running`,
+        };
+      })
+  );
+
+  // 2. ALB Target Group Health
+  runner.addCheck(
+    CheckBuilder.create("ALB Target Group Health")
+      .category("networking")
+      .execute(async () => {
+        const tgPatterns = [
+          `${context.config.environment}-monitoring-prom`,
+          `${context.config.environment}-prometheus`,
+        ];
+
+        let targetGroup: any = null;
+        for (const pattern of tgPatterns) {
+          targetGroup = await ELBUtility.getTargetGroup(
+            context.clients.elbv2,
+            pattern
+          ).catch(() => null);
+          if (targetGroup) break;
+        }
+
+        if (!targetGroup) {
+          const allTgs = await context.clients.elbv2.send(
+            new (await import("@aws-sdk/client-elastic-load-balancing-v2"))
+              .DescribeTargetGroupsCommand({})
+          );
+          targetGroup = allTgs.TargetGroups?.find(
+            (tg: any) =>
+              tg.TargetGroupName?.includes("prom") ||
+              tg.TargetGroupName?.includes("prometheus")
+          );
+        }
+
+        if (!targetGroup) {
+          context.warnings.push("Prometheus target group not found");
+          return {
+            passed: false,
+            message: "Target group not found",
+          };
+        }
+
+        context.targetGroup = targetGroup;
+
+        const targetHealth = await ELBUtility.getTargetHealth(
+          context.clients.elbv2,
+          targetGroup.TargetGroupArn
+        );
+
+        context.totalTargets = targetHealth.length;
+        context.healthyTargets = ELBUtility.countHealthyTargets(targetHealth);
+
+        if (context.config.verbose) {
+          console.log("");
+          Logger.keyValue("Target Group", targetGroup.TargetGroupName);
+          Logger.keyValue("Health Check Path", targetGroup.HealthCheckPath);
+          Logger.keyValue("Health Check Port", targetGroup.HealthCheckPort);
+          TableFormatter.formatTargetHealth(targetHealth);
+        }
+
+        // Validate health check path
+        if (targetGroup.HealthCheckPath !== EXPECTED_HEALTH_CHECK_PATH) {
+          context.criticalErrors.push(
+            `Health check path mismatch: Expected "${EXPECTED_HEALTH_CHECK_PATH}", got "${targetGroup.HealthCheckPath}". ` +
+              `ALB forwards the FULL path. Prometheus expects health checks at ${EXPECTED_HEALTH_CHECK_PATH}.`
+          );
+        }
+
+        // Check unhealthy targets
+        const unhealthyTargets = targetHealth.filter(
+          (t: any) => t.TargetHealth?.State !== "healthy"
+        );
+
+        for (const target of unhealthyTargets) {
+          const reason = target.TargetHealth?.Reason;
+          if (reason === "Target.FailedHealthChecks") {
+            context.criticalErrors.push(
+              `Target ${target.Target?.Id}:${target.Target?.Port} failed health checks. ` +
+                `Prometheus may not be running or path is incorrect.`
+            );
+          } else if (reason === "Target.Timeout") {
+            context.criticalErrors.push(
+              `Target ${target.Target?.Id}:${target.Target?.Port} timed out. ` +
+                `Check if Prometheus is responding on port ${PROMETHEUS_PORT}.`
+            );
+          } else if (reason !== "Target.NotRegistered") {
+            context.warnings.push(
+              `Target ${target.Target?.Id}:${target.Target?.Port} is ${target.TargetHealth?.State}: ${reason}`
+            );
+          }
+        }
+
+        return {
+          passed:
+            context.healthyTargets === context.totalTargets &&
+            context.totalTargets > 0,
+          message: `${context.healthyTargets}/${context.totalTargets} targets healthy`,
+        };
+      })
+  );
+
+  // 3. Health Endpoint Testing via SSM
+  runner.addCheck(
+    CheckBuilder.create("Health Endpoint Testing")
+      .category("connectivity")
+      .optional(true)
+      .execute(async () => {
+        if (!context.taskStatus || context.taskStatus.runningCount === 0) {
+          return {
+            passed: false,
+            message: "No running tasks to test",
+          };
+        }
+
+        const localTest = await testHealthEndpointViaSSM(
+          context.clients.ssm,
+          context.clients.ecs,
+          context.clusterName,
+          "/-/healthy",
+          context.config.verbose || false
+        );
+
+        const prefixTest = await testHealthEndpointViaSSM(
+          context.clients.ssm,
+          context.clients.ecs,
+          context.clusterName,
+          EXPECTED_HEALTH_CHECK_PATH,
+          context.config.verbose || false
+        );
+
+        if (context.config.verbose) {
+          console.log("");
+          Logger.keyValue(
+            "Local Health (/-/healthy)",
+            localTest.tested
+              ? `${localTest.httpCode} - ${localTest.success ? "SUCCESS" : "FAILED"}`
+              : "Not tested"
+          );
+          Logger.keyValue(
+            `Route Prefix (${EXPECTED_HEALTH_CHECK_PATH})`,
+            prefixTest.tested
+              ? `${prefixTest.httpCode} - ${prefixTest.success ? "SUCCESS" : "FAILED"}`
+              : "Not tested"
+          );
+        }
+
+        if (prefixTest.tested && !prefixTest.success) {
+          if (prefixTest.httpCode === "404") {
+            context.criticalErrors.push(
+              `${EXPECTED_HEALTH_CHECK_PATH} returns 404. Prometheus may not be configured with --web.route-prefix=/prometheus.`
+            );
+          } else if (prefixTest.httpCode === "000") {
+            context.criticalErrors.push(
+              "Prometheus is not responding. Container may not be running."
+            );
+          }
+        }
+
+        return {
+          passed: prefixTest.success,
+          message: prefixTest.tested
+            ? `Health endpoint returns ${prefixTest.httpCode}`
+            : "Could not test health endpoint",
+        };
+      })
+  );
+
+  // 4. Security Group Analysis
+  runner.addCheck(
+    CheckBuilder.create("Security Group Analysis")
+      .category("security")
+      .optional(true)
+      .execute(async () => {
+        if (!context.targetGroup?.LoadBalancerArns?.[0]) {
+          return {
+            passed: true,
+            message: "No load balancer to analyse",
+          };
+        }
+
+        const lbArn = context.targetGroup.LoadBalancerArns[0];
+        const loadBalancer = await ELBUtility.getLoadBalancer(
+          context.clients.elbv2,
+          lbArn
+        );
+
+        if (!loadBalancer?.SecurityGroups) {
+          return {
+            passed: true,
+            message: "No security groups to analyse",
+          };
+        }
+
+        const securityGroups = await Promise.all(
+          loadBalancer.SecurityGroups.map((sgId: string) =>
+            EC2Utility.getSecurityGroup(context.clients.ec2, sgId)
+          )
+        );
+
+        let hasEgressToPrometheus = false;
+        for (const sg of securityGroups.filter(Boolean)) {
+          const egressRules = sg?.IpPermissionsEgress || [];
+          hasEgressToPrometheus = egressRules.some((rule: any) => {
+            if (rule.IpProtocol === "-1") return true;
+            if (!rule.FromPort || !rule.ToPort) return false;
+            return rule.FromPort <= PROMETHEUS_PORT && rule.ToPort >= PROMETHEUS_PORT;
+          });
+
+          if (!hasEgressToPrometheus) {
+            context.warnings.push(
+              `ALB security group ${sg?.GroupId} may not allow egress to port ${PROMETHEUS_PORT}`
+            );
+          }
+        }
+
+        return {
+          passed: hasEgressToPrometheus,
+          message: hasEgressToPrometheus
+            ? "Security groups allow traffic to Prometheus"
+            : "Security groups may block Prometheus traffic",
+        };
+      })
+  );
+
+  // 5. Overall Health Assessment
+  runner.addCheck(
+    CheckBuilder.create("Overall Health Assessment")
+      .category("readiness")
+      .execute(async () => {
+        const checker = new ReadinessChecker();
+
+        if (context.criticalErrors.length > 0) {
+          context.criticalErrors.forEach((error) => checker.addBlocker(error));
+        }
+
+        if (context.warnings.length > 0) {
+          context.warnings.forEach((warning) => checker.addWarning(warning));
+        }
+
+        if (checker.isReady()) {
+          checker.addNextStep("Prometheus is healthy and ready");
+        } else {
+          checker.addNextStep("Review critical errors above");
+          checker.addNextStep("Check CloudWatch Logs for Prometheus");
+          checker.addNextStep("Verify ECS service events");
+        }
+
+        console.log("");
+        checker.printAssessment("Prometheus Service");
+
+        return {
+          passed: checker.isReady(),
+          message: checker.isReady()
+            ? "Prometheus is healthy"
+            : "Prometheus has health issues",
+        };
+      })
+  );
+}
+
+function printTroubleshootingSteps(
+  config: VerifyPrometheusHealthConfig,
+  clusterName: string,
+  serviceName: string
+): void {
+  Logger.section("Troubleshooting Steps");
+
+  console.log("1. Check CloudWatch Logs for Prometheus startup errors:");
+  Logger.code(
+    `aws logs tail /ecs/${config.environment}-prometheus --follow --profile ${config.profile ?? "default"}`
+  );
+  console.log("");
+
+  console.log("2. Check ECS service events:");
+  Logger.code(
+    `aws ecs describe-services --cluster ${clusterName} --services ${serviceName} ` +
+      `--query 'services[0].events[:5]' --profile ${config.profile ?? "default"}`
+  );
+  console.log("");
+
+  console.log("3. Verify Prometheus config exists on EFS:");
+  Logger.code("# Connect via SSM Session Manager and check:");
+  Logger.code("cat /mnt/efs/config/prometheus/prometheus.yml");
+  console.log("");
+
+  console.log("4. Test health endpoint directly on instance:");
+  Logger.code(
+    `curl -v http://localhost:${PROMETHEUS_PORT}${EXPECTED_HEALTH_CHECK_PATH}`
+  );
+  console.log("");
+}
+
+async function runWithRetries(config: VerifyPrometheusHealthConfig): Promise<void> {
   let attempts = 0;
   const maxAttempts = config.blocking ? config.maxRetries! : 1;
 
@@ -1063,9 +667,9 @@ async function runWithRetries(): Promise<void> {
       await sleep(config.retryIntervalSeconds!);
     }
 
-    lastState = await verifyPrometheusHealth(config);
+    const result = await verifyPrometheusHealth(config);
 
-    if (lastState.isHealthy) {
+    if (result.isHealthy) {
       Logger.success("Prometheus health verification passed");
       process.exit(0);
     }
@@ -1090,7 +694,38 @@ async function runWithRetries(): Promise<void> {
   }
 }
 
-runWithRetries().catch((error) => {
+const cli = CliBuilder.create(
+  "verify-prometheus-health",
+  "Verify Prometheus health check configuration and connectivity"
+);
+
+cli
+  .option("-v, --verbose", "Enable verbose output", false)
+  .option(
+    "--blocking",
+    "Exit with error if health checks fail (default: false)",
+    false
+  )
+  .option("--max-retries <retries>", "Maximum retries for health checks", "3")
+  .option("--retry-interval <seconds>", "Seconds between retries", "30");
+
+cli.parse();
+
+const options = cli.opts();
+
+CliBuilder.validateEnvironment(options.environment);
+
+const config: VerifyPrometheusHealthConfig = {
+  environment: options.environment,
+  region: options.region,
+  profile: options.profile,
+  verbose: options.verbose || false,
+  blocking: options.blocking || false,
+  maxRetries: parseInt(options.maxRetries, 10) || 3,
+  retryIntervalSeconds: parseInt(options.retryInterval, 10) || 30,
+};
+
+runWithRetries(config).catch((error) => {
   Logger.error(`Verification failed: ${error.message}`);
   if (config.blocking) {
     process.exit(1);

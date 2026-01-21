@@ -1,572 +1,209 @@
 #!/usr/bin/env node
 /** @format */
 
-// infrastructure/scripts/deployment/monitoring/verify-health-checks.ts
-
 /**
  * Automated Health Check Verification Script
- * 
+ *
  * This script automates health check verification for the monitoring infrastructure,
  * specifically addressing common failure scenarios:
- * 
+ *
  * 1. SSM Agent connectivity issues
  * 2. ECS container instance registration delays
  * 3. ALB target health check configuration
  * 4. Service discovery and container networking
- * 
+ *
  * The script has a non-blocking mode to allow ServiceStack deployment even when
  * health checks fail, enabling better troubleshooting of deployment issues.
+ *
+ * Usage:
+ *   npx ts-node scripts/integration/deployment/monitoring/verify-health-checks.ts \
+ *     --environment development \
+ *     --region eu-west-1 \
+ *     [--profile dev-account] \
+ *     [--verbose] \
+ *     [--blocking] \
+ *     [--max-wait 10]
  */
 
-import { program } from "commander";
 import {
   ECSClient,
-
-  ListContainerInstancesCommand,
   DescribeContainerInstancesCommand,
-  ListTasksCommand,
-  DescribeTasksCommand,
 } from "@aws-sdk/client-ecs";
-import {
-  ElasticLoadBalancingV2Client,
-  DescribeTargetHealthCommand,
-  DescribeTargetGroupsCommand,
-  DescribeLoadBalancersCommand,
-} from "@aws-sdk/client-elastic-load-balancing-v2";
-import {
-  SSMClient,
-  DescribeInstanceInformationCommand,
-
-} from "@aws-sdk/client-ssm";
-import {
-  CloudFormationClient,
-  DescribeStacksCommand,
-} from "@aws-sdk/client-cloudformation";
-import { STSClient,  } from "@aws-sdk/client-sts";
+import { SSMClient } from "@aws-sdk/client-ssm";
+import { EC2Client } from "@aws-sdk/client-ec2";
 
 import { Logger } from "../utils/logger";
+import { AwsClientFactory, BaseAwsClients } from "../shared/aws-client-factory";
+import {
+  CloudFormationUtility,
+  ECSUtility,
+  ELBUtility,
+  SSMUtility,
+} from "../shared/aws-utilities";
+import {
+  VerificationRunner,
+  CheckBuilder,
+  ReadinessChecker,
+} from "../shared/verification-framework";
+import { TableFormatter } from "../shared/formatters";
+import { CliBuilder } from "../shared/cli-base";
+
+interface HealthCheckClients extends BaseAwsClients {
+  cfn: any;
+  ecs: ECSClient;
+  elbv2: any;
+  ssm: SSMClient;
+  ec2: EC2Client;
+}
 
 interface VerifyHealthChecksConfig {
   profile?: string;
   region: string;
   environment: string;
   verbose?: boolean;
-  blocking?: boolean;  // If true, script exits with error on failures
-  maxWaitMinutes?: number;  // Maximum time to wait for health checks
+  blocking?: boolean;
+  maxWaitMinutes?: number;
 }
 
-interface HealthCheckState {
-  ssmAgentConnectivity: {
+interface HealthCheckContext {
+  config: VerifyHealthChecksConfig;
+  clients: HealthCheckClients;
+  clusterName: string;
+  albArn?: string;
+  instanceIds: string[];
+  ssmConnectivity: {
     total: number;
     reachable: number;
     unreachable: number;
     details: Array<{ instanceId: string; status: string; reason?: string }>;
   };
-  ecsContainerInstances: {
+  containerInstances: {
     total: number;
     active: number;
     draining: number;
     inactive: number;
-    details: Array<{ arn: string; status: string; runningTasks: number }>;
+    details: any[];
   };
-  albTargetHealth: {
+  targetHealth: {
     targetGroups: Array<{
       name: string;
-      arn: string;
-      port: number;
-      healthCheckPath: string;
       healthyTargets: number;
-      unhealthyTargets: number;
-      drainingTargets: number;
-      details: Array<{
-        targetId: string;
-        port: number;
-        health: string;
-        reason?: string;
-      }>;
+      totalTargets: number;
+      details: any[];
     }>;
   };
-  ecsTasks: {
+  tasks: {
     total: number;
     running: number;
     pending: number;
-    stopped: number;
-    details: Array<{
-      taskArn: string;
-      status: string;
-      healthStatus?: string;
-      containers: Array<{ name: string; status: string; healthStatus?: string }>;
-    }>;
+    unhealthyContainers: number;
   };
-  readinessScore: number;  // 0-100, indicates overall health
+  readinessScore: number;
   criticalIssues: string[];
   warnings: string[];
 }
 
-async function createClients(config: VerifyHealthChecksConfig): Promise<{
-  ecs: ECSClient;
-  elbv2: ElasticLoadBalancingV2Client;
-  ssm: SSMClient;
-  cfn: CloudFormationClient;
-  sts: STSClient;
-}> {
-  const clientConfig: { region: string } = { region: config.region };
-
-  const isOidcAuth = !!process.env.AWS_SESSION_TOKEN;
-
-  if (config.profile && !isOidcAuth) {
-    process.env.AWS_PROFILE = config.profile;
-    Logger.info(`Using AWS profile: ${config.profile}`);
-  } else if (isOidcAuth) {
-    delete process.env.AWS_PROFILE;
-    Logger.info("Using OIDC credentials from environment");
-  }
-
-  return {
-    ecs: new ECSClient(clientConfig),
-    elbv2: new ElasticLoadBalancingV2Client(clientConfig),
-    ssm: new SSMClient(clientConfig),
-    cfn: new CloudFormationClient(clientConfig),
-    sts: new STSClient(clientConfig),
-  };
-}
-
-async function getStackOutputs(
-  cfnClient: CloudFormationClient,
-  stackName: string
-): Promise<Record<string, string>> {
-  try {
-    const command = new DescribeStacksCommand({ StackName: stackName });
-    const response = await cfnClient.send(command);
-    const stack = response.Stacks?.[0];
-
-    if (!stack) {
-      return {};
-    }
-
-    const outputs: Record<string, string> = {};
-    stack.Outputs?.forEach((output) => {
-      if (output.OutputKey && output.OutputValue) {
-        outputs[output.OutputKey] = output.OutputValue;
-      }
-    });
-
-    return outputs;
-  } catch (error: any) {
-    Logger.warning(`Could not retrieve stack outputs: ${error.message}`);
-    return {};
-  }
-}
-
-async function checkSsmAgentConnectivity(
-  ssmClient: SSMClient,
-  instanceIds: string[]
-): Promise<HealthCheckState["ssmAgentConnectivity"]> {
-  const result: HealthCheckState["ssmAgentConnectivity"] = {
-    total: instanceIds.length,
-    reachable: 0,
-    unreachable: 0,
-    details: [],
-  };
-
-  if (instanceIds.length === 0) {
-    return result;
-  }
-
-  try {
-    const command = new DescribeInstanceInformationCommand({
-      Filters: [
-        {
-          Key: "InstanceIds",
-          Values: instanceIds,
-        },
-      ],
-    });
-
-    const response = await ssmClient.send(command);
-    const managedInstances = response.InstanceInformationList || [];
-
-    instanceIds.forEach((instanceId) => {
-      const managed = managedInstances.find(
-        (info) => info.InstanceId === instanceId
-      );
-
-      if (managed && managed.PingStatus === "Online") {
-        result.reachable++;
-        result.details.push({
-          instanceId,
-          status: "Online",
-        });
-      } else if (managed) {
-        result.unreachable++;
-        result.details.push({
-          instanceId,
-          status: managed.PingStatus || "Unknown",
-          reason: `Last ping: ${managed.LastPingDateTime?.toISOString()}`,
-        });
-      } else {
-        result.unreachable++;
-        result.details.push({
-          instanceId,
-          status: "Not Managed",
-          reason: "Instance not registered with Systems Manager",
-        });
-      }
-    });
-  } catch (error: any) {
-    Logger.warning(`SSM connectivity check failed: ${error.message}`);
-    instanceIds.forEach((instanceId) => {
-      result.unreachable++;
-      result.details.push({
-        instanceId,
-        status: "Error",
-        reason: error.message,
-      });
-    });
-  }
-
-  return result;
-}
-
-async function checkEcsContainerInstances(
-  ecsClient: ECSClient,
-  clusterName: string
-): Promise<HealthCheckState["ecsContainerInstances"]> {
-  const result: HealthCheckState["ecsContainerInstances"] = {
-    total: 0,
-    active: 0,
-    draining: 0,
-    inactive: 0,
-    details: [],
-  };
-
-  try {
-    const listCommand = new ListContainerInstancesCommand({
-      cluster: clusterName,
-    });
-    const listResponse = await ecsClient.send(listCommand);
-
-    const instanceArns = listResponse.containerInstanceArns || [];
-    result.total = instanceArns.length;
-
-    if (instanceArns.length === 0) {
-      return result;
-    }
-
-    const describeCommand = new DescribeContainerInstancesCommand({
-      cluster: clusterName,
-      containerInstances: instanceArns,
-    });
-    const describeResponse = await ecsClient.send(describeCommand);
-
-    const instances = describeResponse.containerInstances || [];
-
-    instances.forEach((instance) => {
-      const status = instance.status || "UNKNOWN";
-      const runningTasks = instance.runningTasksCount || 0;
-
-      if (status === "ACTIVE") {
-        result.active++;
-      } else if (status === "DRAINING") {
-        result.draining++;
-      } else {
-        result.inactive++;
-      }
-
-      result.details.push({
-        arn: instance.containerInstanceArn || "unknown",
-        status,
-        runningTasks,
-      });
-    });
-  } catch (error: any) {
-    Logger.warning(`ECS container instance check failed: ${error.message}`);
-  }
-
-  return result;
-}
-
-async function checkAlbTargetHealth(
-  elbv2Client: ElasticLoadBalancingV2Client,
-  albArn: string
-): Promise<HealthCheckState["albTargetHealth"]> {
-  const result: HealthCheckState["albTargetHealth"] = {
-    targetGroups: [],
-  };
-
-  try {
-    // Get all target groups for the ALB
-    const tgCommand = new DescribeTargetGroupsCommand({
-      LoadBalancerArn: albArn,
-    });
-    const tgResponse = await elbv2Client.send(tgCommand);
-
-    const targetGroups = tgResponse.TargetGroups || [];
-
-    for (const tg of targetGroups) {
-      const healthCommand = new DescribeTargetHealthCommand({
-        TargetGroupArn: tg.TargetGroupArn,
-      });
-
-      const healthResponse = await elbv2Client.send(healthCommand);
-      const healthDescriptions = healthResponse.TargetHealthDescriptions || [];
-
-      let healthy = 0;
-      let unhealthy = 0;
-      let draining = 0;
-
-      const details = healthDescriptions.map((desc) => {
-        const health = desc.TargetHealth?.State || "unknown";
-        const reason = desc.TargetHealth?.Reason;
-
-        if (health === "healthy") {
-          healthy++;
-        } else if (health === "draining") {
-          draining++;
-        } else {
-          unhealthy++;
-        }
-
-        return {
-          targetId: desc.Target?.Id || "unknown",
-          port: desc.Target?.Port || 0,
-          health,
-          reason,
-        };
-      });
-
-      result.targetGroups.push({
-        name: tg.TargetGroupName || "unknown",
-        arn: tg.TargetGroupArn || "unknown",
-        port: tg.Port || 0,
-        healthCheckPath: tg.HealthCheckPath || "/",
-        healthyTargets: healthy,
-        unhealthyTargets: unhealthy,
-        drainingTargets: draining,
-        details,
-      });
-    }
-  } catch (error: any) {
-    Logger.warning(`ALB target health check failed: ${error.message}`);
-  }
-
-  return result;
-}
-
-async function checkEcsTasks(
-  ecsClient: ECSClient,
-  clusterName: string
-): Promise<HealthCheckState["ecsTasks"]> {
-  const result: HealthCheckState["ecsTasks"] = {
-    total: 0,
-    running: 0,
-    pending: 0,
-    stopped: 0,
-    details: [],
-  };
-
-  try {
-    const listCommand = new ListTasksCommand({
-      cluster: clusterName,
-      desiredStatus: "RUNNING",
-    });
-    const listResponse = await ecsClient.send(listCommand);
-
-    const taskArns = listResponse.taskArns || [];
-    result.total = taskArns.length;
-
-    if (taskArns.length === 0) {
-      return result;
-    }
-
-    const describeCommand = new DescribeTasksCommand({
-      cluster: clusterName,
-      tasks: taskArns,
-    });
-    const describeResponse = await ecsClient.send(describeCommand);
-
-    const tasks = describeResponse.tasks || [];
-
-    tasks.forEach((task) => {
-      const status = task.lastStatus || "UNKNOWN";
-      const healthStatus = task.healthStatus;
-
-      if (status === "RUNNING") {
-        result.running++;
-      } else if (status === "PENDING") {
-        result.pending++;
-      } else {
-        result.stopped++;
-      }
-
-      result.details.push({
-        taskArn: task.taskArn || "unknown",
-        status,
-        healthStatus,
-        containers:
-          task.containers?.map((container) => ({
-            name: container.name || "unknown",
-            status: container.lastStatus || "UNKNOWN",
-            healthStatus: container.healthStatus,
-          })) || [],
-      });
-    });
-  } catch (error: any) {
-    Logger.warning(`ECS task check failed: ${error.message}`);
-  }
-
-  return result;
-}
-
-function calculateReadinessScore(state: HealthCheckState): number {
+function calculateReadinessScore(context: HealthCheckContext): number {
   let score = 0;
   let maxScore = 0;
 
   // SSM Agent connectivity (20 points)
   maxScore += 20;
-  if (state.ssmAgentConnectivity.total > 0) {
-    score +=
-      20 *
-      (state.ssmAgentConnectivity.reachable / state.ssmAgentConnectivity.total);
+  if (context.ssmConnectivity.total > 0) {
+    score += 20 * (context.ssmConnectivity.reachable / context.ssmConnectivity.total);
+  } else {
+    score += 20; // No instances yet is not a failure
   }
 
   // ECS container instances (30 points)
   maxScore += 30;
-  if (state.ecsContainerInstances.total > 0) {
-    score +=
-      30 *
-      (state.ecsContainerInstances.active / state.ecsContainerInstances.total);
+  if (context.containerInstances.total > 0) {
+    score += 30 * (context.containerInstances.active / context.containerInstances.total);
+  } else {
+    score += 15; // Half points if no instances yet
   }
 
   // ALB target health (30 points)
   maxScore += 30;
-  const totalTargets = state.albTargetHealth.targetGroups.reduce(
-    (sum, tg) => sum + tg.healthyTargets + tg.unhealthyTargets + tg.drainingTargets,
+  const totalTargets = context.targetHealth.targetGroups.reduce(
+    (sum, tg) => sum + tg.totalTargets,
     0
   );
-  const healthyTargets = state.albTargetHealth.targetGroups.reduce(
+  const healthyTargets = context.targetHealth.targetGroups.reduce(
     (sum, tg) => sum + tg.healthyTargets,
     0
   );
   if (totalTargets > 0) {
     score += 30 * (healthyTargets / totalTargets);
+  } else {
+    score += 30; // No targets yet (service not deployed) is not a failure
   }
 
   // ECS tasks (20 points)
   maxScore += 20;
-  if (state.ecsTasks.total > 0) {
-    score += 20 * (state.ecsTasks.running / state.ecsTasks.total);
+  if (context.tasks.total > 0) {
+    const healthyTasks = context.tasks.running - context.tasks.unhealthyContainers;
+    score += 20 * (healthyTasks / context.tasks.total);
   } else {
-    // If no tasks expected yet (ServiceStack not deployed), give full points
-    score += 20;
+    score += 20; // No tasks yet (service not deployed) is not a failure
   }
 
   return Math.round((score / maxScore) * 100);
 }
 
-function identifyIssues(state: HealthCheckState): {
-  critical: string[];
-  warnings: string[];
-} {
-  const critical: string[] = [];
-  const warnings: string[] = [];
+async function extractInstanceIds(
+  context: HealthCheckContext
+): Promise<string[]> {
+  const instanceIds: string[] = [];
 
-  // SSM Agent issues
-  if (state.ssmAgentConnectivity.unreachable > 0) {
-    if (state.ssmAgentConnectivity.reachable === 0) {
-      critical.push(
-        `All instances (${state.ssmAgentConnectivity.total}) unreachable via SSM Agent`
-      );
-    } else {
-      warnings.push(
-        `${state.ssmAgentConnectivity.unreachable}/${state.ssmAgentConnectivity.total} instances unreachable via SSM Agent`
-      );
-    }
-  }
-
-  // ECS container instance issues
-  if (state.ecsContainerInstances.total === 0) {
-    critical.push("No ECS container instances registered");
-  } else if (state.ecsContainerInstances.active === 0) {
-    critical.push(
-      `No active container instances (${state.ecsContainerInstances.total} total, all non-active)`
-    );
-  } else if (state.ecsContainerInstances.active < state.ecsContainerInstances.total) {
-    warnings.push(
-      `Only ${state.ecsContainerInstances.active}/${state.ecsContainerInstances.total} container instances are active`
-    );
-  }
-
-  // ALB target health issues
-  state.albTargetHealth.targetGroups.forEach((tg) => {
-    const totalTargets =
-      tg.healthyTargets + tg.unhealthyTargets + tg.drainingTargets;
-
-    if (totalTargets === 0) {
-      warnings.push(`Target group ${tg.name} has no registered targets`);
-    } else if (tg.healthyTargets === 0) {
-      critical.push(
-        `Target group ${tg.name} has no healthy targets (${tg.unhealthyTargets} unhealthy)`
-      );
-
-      // Provide specific failure reasons
-      tg.details.forEach((detail) => {
-        if (detail.health !== "healthy" && detail.reason) {
-          warnings.push(
-            `  └─ Target ${detail.targetId}:${detail.port} - ${detail.health}: ${detail.reason}`
-          );
-        }
+  for (const detail of context.containerInstances.details) {
+    try {
+      const describeCommand = new DescribeContainerInstancesCommand({
+        cluster: context.clusterName,
+        containerInstances: [detail.containerInstanceArn],
       });
-    } else if (tg.unhealthyTargets > 0) {
-      warnings.push(
-        `Target group ${tg.name}: ${tg.healthyTargets}/${totalTargets} healthy`
-      );
+      const describeResponse = await context.clients.ecs.send(describeCommand);
+      const ec2InstanceId =
+        describeResponse.containerInstances?.[0]?.ec2InstanceId;
+      if (ec2InstanceId) {
+        instanceIds.push(ec2InstanceId);
+      }
+    } catch (error: any) {
+      if (context.config.verbose) {
+        Logger.warning(`Could not get EC2 instance ID: ${error.message}`);
+      }
     }
-  });
-
-  // ECS task issues
-  if (state.ecsTasks.total > 0) {
-    if (state.ecsTasks.running === 0) {
-      critical.push(
-        `No running ECS tasks (${state.ecsTasks.pending} pending, ${state.ecsTasks.stopped} stopped)`
-      );
-    } else if (state.ecsTasks.pending > 0) {
-      warnings.push(
-        `${state.ecsTasks.pending} ECS tasks still pending (${state.ecsTasks.running} running)`
-      );
-    }
-
-    // Check for unhealthy containers
-    state.ecsTasks.details.forEach((task) => {
-      task.containers.forEach((container) => {
-        if (container.healthStatus === "UNHEALTHY") {
-          warnings.push(
-            `Container ${container.name} in task ${task.taskArn.split("/").pop()} is UNHEALTHY`
-          );
-        }
-      });
-    });
   }
 
-  return { critical, warnings };
+  return instanceIds;
 }
 
 async function verifyHealthChecks(
   config: VerifyHealthChecksConfig
-): Promise<HealthCheckState> {
+): Promise<{ isHealthy: boolean; readinessScore: number; criticalIssues: string[] }> {
   Logger.section(`Health Check Verification - ${config.environment}`);
 
-  const clients = await createClients(config);
+  const clients = (await AwsClientFactory.createCommonClients(
+    {
+      ...config,
+      sessionName: `verify-health-checks-${Date.now()}`,
+    },
+    ["cfn", "ecs", "elbv2", "ssm", "ec2"]
+  )) as HealthCheckClients;
 
-  // Get stack outputs
   const infraStackName = `${config.environment}-MonitoringInfra`;
-  const infraOutputs = await getStackOutputs(clients.cfn, infraStackName);
+  const infraStack = await CloudFormationUtility.getStackStatus(
+    clients.cfn,
+    infraStackName
+  );
 
-  const clusterName = infraOutputs.ClusterName;
-  const albDns = infraOutputs.LoadBalancerDns;
+  const clusterName = (infraStack?.outputs as any)?.ClusterName;
+  const albDns = (infraStack?.outputs as any)?.LoadBalancerDns;
 
   if (!clusterName) {
-    throw new Error(`Cluster name not found in stack ${infraStackName}`);
+    throw new Error(
+      `Cluster name not found in stack ${infraStackName}. Ensure MonitoringInfra stack has been deployed.`
+    );
   }
 
   Logger.keyValue("Cluster Name", clusterName);
@@ -576,251 +213,500 @@ async function verifyHealthChecks(
   // Get ALB ARN
   let albArn: string | undefined;
   if (albDns) {
-    try {
-      const lbCommand = new DescribeLoadBalancersCommand({});
-      const lbResponse = await clients.elbv2.send(lbCommand);
-      const alb = lbResponse.LoadBalancers?.find((lb) => lb.DNSName === albDns);
-      albArn = alb?.LoadBalancerArn;
-    } catch (error: any) {
-      Logger.warning(`Could not retrieve ALB ARN: ${error.message}`);
-    }
+    const alb = await ELBUtility.getLoadBalancerByDns(clients.elbv2, albDns);
+    albArn = alb?.LoadBalancerArn;
   }
 
-  // Initialize state
-  const state: HealthCheckState = {
-    ssmAgentConnectivity: {
+  const runner = new VerificationRunner();
+  const context: Partial<HealthCheckContext> = {
+    config,
+    clients,
+    clusterName,
+    albArn,
+    instanceIds: [],
+    ssmConnectivity: {
       total: 0,
       reachable: 0,
       unreachable: 0,
       details: [],
     },
-    ecsContainerInstances: {
+    containerInstances: {
       total: 0,
       active: 0,
       draining: 0,
       inactive: 0,
       details: [],
     },
-    albTargetHealth: {
+    targetHealth: {
       targetGroups: [],
     },
-    ecsTasks: {
+    tasks: {
       total: 0,
       running: 0,
       pending: 0,
-      stopped: 0,
-      details: [],
+      unhealthyContainers: 0,
     },
     readinessScore: 0,
     criticalIssues: [],
     warnings: [],
   };
 
-  // Step 1: Check ECS Container Instances
-  Logger.subsection("1. ECS Container Instances");
-  state.ecsContainerInstances = await checkEcsContainerInstances(
-    clients.ecs,
-    clusterName
+  setupVerificationChecks(runner, context as HealthCheckContext);
+
+  runner.run();
+  runner.printSummary();
+
+
+  // Calculate readiness score
+  (context as HealthCheckContext).readinessScore = calculateReadinessScore(
+    context as HealthCheckContext
   );
 
-  if (state.ecsContainerInstances.total === 0) {
-    Logger.error("No container instances found");
-  } else {
-    Logger.success(
-      `Container Instances: ${state.ecsContainerInstances.active} active, ${state.ecsContainerInstances.draining} draining, ${state.ecsContainerInstances.inactive} inactive`
-    );
+  runner.printSummary();
 
-    if (config.verbose) {
-      state.ecsContainerInstances.details.forEach((instance) => {
-        Logger.info(
-          `  ${instance.arn.split("/").pop()}: ${instance.status} (${instance.runningTasks} tasks)`
-        );
-      });
-    }
-  }
+  // Print readiness assessment
+  console.log("");
+  Logger.section("Readiness Assessment");
+  Logger.keyValue(
+    "Readiness Score",
+    `${(context as HealthCheckContext).readinessScore}/100`
+  );
   console.log("");
 
-  // Extract instance IDs from container instances
-  const instanceIds: string[] = [];
-  for (const detail of state.ecsContainerInstances.details) {
-    try {
-      const describeCommand = new DescribeContainerInstancesCommand({
-        cluster: clusterName,
-        containerInstances: [detail.arn],
-      });
-      const describeResponse = await clients.ecs.send(describeCommand);
-      const ec2InstanceId =
-        describeResponse.containerInstances?.[0]?.ec2InstanceId;
-      if (ec2InstanceId) {
-        instanceIds.push(ec2InstanceId);
-      }
-    } catch (error: any) {
-      Logger.warning(`Could not get EC2 instance ID: ${error.message}`);
-    }
-  }
-
-  // Step 2: Check SSM Agent Connectivity
-  Logger.subsection("2. SSM Agent Connectivity");
-  state.ssmAgentConnectivity = await checkSsmAgentConnectivity(
-    clients.ssm,
-    instanceIds
-  );
-
-  if (state.ssmAgentConnectivity.reachable === state.ssmAgentConnectivity.total) {
-    Logger.success(
-      `All instances reachable (${state.ssmAgentConnectivity.reachable}/${state.ssmAgentConnectivity.total})`
-    );
-  } else if (state.ssmAgentConnectivity.reachable > 0) {
-    Logger.warning(
-      `Partial connectivity: ${state.ssmAgentConnectivity.reachable}/${state.ssmAgentConnectivity.total} reachable`
-    );
-  } else {
+  if ((context as HealthCheckContext).criticalIssues.length > 0) {
     Logger.error(
-      `No instances reachable (${state.ssmAgentConnectivity.unreachable} unreachable)`
+      `Critical Issues (${(context as HealthCheckContext).criticalIssues.length}):`
     );
-  }
-
-  if (config.verbose) {
-    state.ssmAgentConnectivity.details.forEach((detail) => {
-      const icon = detail.status === "Online" ? "✓" : "✗";
-      Logger.info(
-        `  ${icon} ${detail.instanceId}: ${detail.status}${detail.reason ? ` - ${detail.reason}` : ""}`
-      );
-    });
-  }
-  console.log("");
-
-  // Step 3: Check ALB Target Health
-  Logger.subsection("3. ALB Target Health");
-  if (albArn) {
-    state.albTargetHealth = await checkAlbTargetHealth(clients.elbv2, albArn);
-
-    if (state.albTargetHealth.targetGroups.length === 0) {
-      Logger.info("No target groups found (ServiceStack not deployed yet)");
-    } else {
-      state.albTargetHealth.targetGroups.forEach((tg) => {
-        const totalTargets =
-          tg.healthyTargets + tg.unhealthyTargets + tg.drainingTargets;
-
-        if (totalTargets === 0) {
-          Logger.warning(`${tg.name}: No targets registered`);
-        } else if (tg.healthyTargets === 0) {
-          Logger.error(
-            `${tg.name}: 0/${totalTargets} healthy (health check path: ${tg.healthCheckPath})`
-          );
-
-          if (config.verbose) {
-            tg.details.forEach((detail) => {
-              Logger.info(
-                `    ${detail.targetId}:${detail.port} - ${detail.health}${detail.reason ? `: ${detail.reason}` : ""}`
-              );
-            });
-          }
-        } else if (tg.unhealthyTargets > 0) {
-          Logger.warning(
-            `${tg.name}: ${tg.healthyTargets}/${totalTargets} healthy (health check path: ${tg.healthCheckPath})`
-          );
-        } else {
-          Logger.success(
-            `${tg.name}: All targets healthy (${tg.healthyTargets}/${totalTargets})`
-          );
-        }
-      });
-    }
-  } else {
-    Logger.info("ALB not configured yet");
-  }
-  console.log("");
-
-  // Step 4: Check ECS Tasks
-  Logger.subsection("4. ECS Tasks");
-  state.ecsTasks = await checkEcsTasks(clients.ecs, clusterName);
-
-  if (state.ecsTasks.total === 0) {
-    Logger.info("No ECS tasks found (ServiceStack not deployed yet)");
-  } else {
-    Logger.success(
-      `Tasks: ${state.ecsTasks.running} running, ${state.ecsTasks.pending} pending, ${state.ecsTasks.stopped} stopped`
-    );
-
-    if (config.verbose) {
-      state.ecsTasks.details.forEach((task) => {
-        Logger.info(
-          `  ${task.taskArn.split("/").pop()}: ${task.status}${task.healthStatus ? ` (health: ${task.healthStatus})` : ""}`
-        );
-        task.containers.forEach((container) => {
-          Logger.info(
-            `    └─ ${container.name}: ${container.status}${container.healthStatus ? ` (health: ${container.healthStatus})` : ""}`
-          );
-        });
-      });
-    }
-  }
-  console.log("");
-
-  // Calculate readiness score and identify issues
-  state.readinessScore = calculateReadinessScore(state);
-  const issues = identifyIssues(state);
-  state.criticalIssues = issues.critical;
-  state.warnings = issues.warnings;
-
-  // Summary
-  Logger.section("Health Check Summary");
-  Logger.keyValue("Readiness Score", `${state.readinessScore}/100`);
-  console.log("");
-
-  if (state.criticalIssues.length > 0) {
-    Logger.error(`Critical Issues (${state.criticalIssues.length}):`);
-    state.criticalIssues.forEach((issue) => {
+    (context as HealthCheckContext).criticalIssues.forEach((issue) => {
       Logger.error(`  ${issue}`);
     });
     console.log("");
   }
 
-  if (state.warnings.length > 0) {
-    Logger.warning(`Warnings (${state.warnings.length}):`);
-    state.warnings.forEach((warning) => {
+  if ((context as HealthCheckContext).warnings.length > 0) {
+    Logger.warning(
+      `Warnings (${(context as HealthCheckContext).warnings.length}):`
+    );
+    (context as HealthCheckContext).warnings.forEach((warning) => {
       Logger.warning(`  ${warning}`);
     });
     console.log("");
   }
 
-  if (state.criticalIssues.length === 0 && state.warnings.length === 0) {
+  if (
+    (context as HealthCheckContext).criticalIssues.length === 0 &&
+    (context as HealthCheckContext).warnings.length === 0
+  ) {
     Logger.success("All health checks passed!");
   }
 
-  return state;
+  const isHealthy = (context as HealthCheckContext).criticalIssues.length === 0;
+
+  return {
+    isHealthy,
+    readinessScore: (context as HealthCheckContext).readinessScore,
+    criticalIssues: (context as HealthCheckContext).criticalIssues,
+  };
 }
 
-// CLI
-program
-  .name("verify-health-checks")
-  .description("Verify infrastructure health checks with non-blocking option")
-  .option(
-    "-e, --environment <env>",
-    "Environment name (default: development)",
-    "development"
-  )
-  .option(
-    "-r, --region <region>",
-    "AWS region (default: eu-west-1)",
-    "eu-west-1"
-  )
-  .option("-p, --profile <profile>", "AWS CLI profile")
+function setupVerificationChecks(
+  runner: VerificationRunner,
+  context: HealthCheckContext
+): void {
+  // 1. ECS Container Instances
+  runner.addCheck(
+    CheckBuilder.create("ECS Container Instances")
+      .category("compute")
+      .critical(true)
+      .execute(async () => {
+        const containerInstances = await ECSUtility.listContainerInstances(
+          context.clients.ecs,
+          context.clusterName
+        );
+
+        context.containerInstances.total = containerInstances.length;
+
+        if (containerInstances.length === 0) {
+          context.criticalIssues.push("No ECS container instances registered");
+          return {
+            passed: false,
+            message: "No container instances found",
+          };
+        }
+
+        const instances = await ECSUtility.describeContainerInstances(
+          context.clients.ecs,
+          context.clusterName,
+          containerInstances
+        );
+
+        context.containerInstances.details = instances;
+
+        instances.forEach((instance) => {
+          const status = instance.status || "UNKNOWN";
+          if (status === "ACTIVE") {
+            context.containerInstances.active++;
+          } else if (status === "DRAINING") {
+            context.containerInstances.draining++;
+          } else {
+            context.containerInstances.inactive++;
+          }
+        });
+
+        if (context.config.verbose) {
+          console.log("");
+          Logger.info("Container Instance Details:");
+          instances.forEach((instance) => {
+            const shortArn = instance.containerInstanceArn?.split("/").pop() || "unknown";
+            Logger.info(
+              `  ${shortArn}: ${instance.status} (${instance.runningTasksCount || 0} tasks)`
+            );
+          });
+        }
+
+        if (context.containerInstances.active === 0) {
+          context.criticalIssues.push(
+            `No active container instances (${context.containerInstances.total} total, all non-active)`
+          );
+          return {
+            passed: false,
+            message: "No active container instances",
+          };
+        }
+
+        if (context.containerInstances.active < context.containerInstances.total) {
+          context.warnings.push(
+            `Only ${context.containerInstances.active}/${context.containerInstances.total} container instances are active`
+          );
+        }
+
+        return {
+          passed: true,
+          message: `${context.containerInstances.active} active, ${context.containerInstances.draining} draining, ${context.containerInstances.inactive} inactive`,
+        };
+      })
+  );
+
+  // 2. SSM Agent Connectivity
+  runner.addCheck(
+    CheckBuilder.create("SSM Agent Connectivity")
+      .category("connectivity")
+      .execute(async () => {
+        // Extract instance IDs from container instances
+        context.instanceIds = await extractInstanceIds(context);
+
+        if (context.instanceIds.length === 0) {
+          return {
+            passed: true,
+            message: "No instances to check",
+          };
+        }
+
+        context.ssmConnectivity.total = context.instanceIds.length;
+
+        const managedInstances = await SSMUtility.describeInstanceInformation(
+          context.clients.ssm,
+          context.instanceIds
+        );
+
+        context.instanceIds.forEach((instanceId) => {
+          const managed = managedInstances.find(
+            (info) => info.InstanceId === instanceId
+          );
+
+          if (managed && managed.PingStatus === "Online") {
+            context.ssmConnectivity.reachable++;
+            context.ssmConnectivity.details.push({
+              instanceId,
+              status: "Online",
+            });
+          } else if (managed) {
+            context.ssmConnectivity.unreachable++;
+            context.ssmConnectivity.details.push({
+              instanceId,
+              status: managed.PingStatus || "Unknown",
+              reason: `Last ping: ${managed.LastPingDateTime?.toISOString()}`,
+            });
+          } else {
+            context.ssmConnectivity.unreachable++;
+            context.ssmConnectivity.details.push({
+              instanceId,
+              status: "Not Managed",
+              reason: "Instance not registered with Systems Manager",
+            });
+          }
+        });
+
+        if (context.config.verbose) {
+          console.log("");
+          Logger.info("SSM Agent Details:");
+          context.ssmConnectivity.details.forEach((detail) => {
+            const icon = detail.status === "Online" ? "✓" : "✗";
+            Logger.info(
+              `  ${icon} ${detail.instanceId}: ${detail.status}${detail.reason ? ` - ${detail.reason}` : ""}`
+            );
+          });
+        }
+
+        if (context.ssmConnectivity.unreachable > 0) {
+          if (context.ssmConnectivity.reachable === 0) {
+            context.criticalIssues.push(
+              `All instances (${context.ssmConnectivity.total}) unreachable via SSM Agent`
+            );
+            return {
+              passed: false,
+              message: "All instances unreachable",
+            };
+          } else {
+            context.warnings.push(
+              `${context.ssmConnectivity.unreachable}/${context.ssmConnectivity.total} instances unreachable via SSM Agent`
+            );
+          }
+        }
+
+        return {
+          passed: context.ssmConnectivity.reachable > 0,
+          message: `${context.ssmConnectivity.reachable}/${context.ssmConnectivity.total} instances reachable`,
+        };
+      })
+  );
+
+  // 3. ALB Target Health
+  runner.addCheck(
+    CheckBuilder.create("ALB Target Health")
+      .category("networking")
+      .optional(true)
+      .execute(async () => {
+        if (!context.albArn) {
+          return {
+            passed: true,
+            message: "ALB not configured yet",
+          };
+        }
+
+        const targetGroups = await ELBUtility.getTargetGroupsByLoadBalancer(
+          context.clients.elbv2,
+          context.albArn
+        );
+
+        if (targetGroups.length === 0) {
+          return {
+            passed: true,
+            message: "No target groups found (ServiceStack not deployed yet)",
+          };
+        }
+
+        for (const tg of targetGroups) {
+          if (!tg.TargetGroupArn) {
+            continue;
+          }
+
+          const targetHealth = await ELBUtility.getTargetHealth(
+            context.clients.elbv2,
+            tg.TargetGroupArn
+          );
+
+          const totalTargets = targetHealth.length;
+          const healthyTargets = ELBUtility.countHealthyTargets(targetHealth);
+
+          context.targetHealth.targetGroups.push({
+            name: tg.TargetGroupName || "unknown",
+            healthyTargets,
+            totalTargets,
+            details: targetHealth,
+          });
+
+          if (context.config.verbose) {
+            console.log("");
+            Logger.info(`Target Group: ${tg.TargetGroupName}`);
+            Logger.keyValue("  Health Check Path", tg.HealthCheckPath || "/");
+            Logger.keyValue("  Healthy Targets", `${healthyTargets}/${totalTargets}`);
+
+            if (totalTargets > 0) {
+              TableFormatter.formatTargetHealth(targetHealth);
+            }
+          }
+
+          if (totalTargets === 0) {
+            context.warnings.push(
+              `Target group ${tg.TargetGroupName} has no registered targets`
+            );
+          } else if (healthyTargets === 0) {
+            context.criticalIssues.push(
+              `Target group ${tg.TargetGroupName} has no healthy targets (${totalTargets - healthyTargets} unhealthy)`
+            );
+
+            // Provide specific failure reasons
+            targetHealth.forEach((target) => {
+              if (
+                target.TargetHealth?.State !== "healthy" &&
+                target.TargetHealth?.Reason
+              ) {
+                context.warnings.push(
+                  `  └─ Target ${target.Target?.Id}:${target.Target?.Port} - ${target.TargetHealth.State}: ${target.TargetHealth.Reason}`
+                );
+              }
+            });
+          } else if (healthyTargets < totalTargets) {
+            context.warnings.push(
+              `Target group ${tg.TargetGroupName}: ${healthyTargets}/${totalTargets} healthy`
+            );
+          }
+        }
+
+        const allHealthy = context.targetHealth.targetGroups.every(
+          (tg) => tg.healthyTargets === tg.totalTargets && tg.totalTargets > 0
+        );
+
+        const totalHealthy = context.targetHealth.targetGroups.reduce(
+          (sum, tg) => sum + tg.healthyTargets,
+          0
+        );
+        const totalTargets = context.targetHealth.targetGroups.reduce(
+          (sum, tg) => sum + tg.totalTargets,
+          0
+        );
+
+        return {
+          passed: allHealthy || totalTargets === 0,
+          message:
+            totalTargets === 0
+              ? "No targets registered yet"
+              : `${totalHealthy}/${totalTargets} targets healthy across ${targetGroups.length} target groups`,
+        };
+      })
+  );
+
+  // 4. ECS Tasks
+  runner.addCheck(
+    CheckBuilder.create("ECS Tasks")
+      .category("compute")
+      .optional(true)
+      .execute(async () => {
+        const taskArns = await ECSUtility.listTasks(
+          context.clients.ecs,
+          context.clusterName
+        );
+
+        context.tasks.total = taskArns.length;
+
+        if (taskArns.length === 0) {
+          return {
+            passed: true,
+            message: "No ECS tasks found (ServiceStack not deployed yet)",
+          };
+        }
+
+        const tasks = await ECSUtility.describeTasks(
+          context.clients.ecs,
+          context.clusterName,
+          taskArns
+        );
+
+        tasks.forEach((task) => {
+          const status = task.lastStatus || "UNKNOWN";
+
+          if (status === "RUNNING") {
+            context.tasks.running++;
+          } else if (status === "PENDING") {
+            context.tasks.pending++;
+          }
+
+          // Check for unhealthy containers
+          task.containers?.forEach((container: any) => {
+            if (container.healthStatus === "UNHEALTHY") {
+              context.tasks.unhealthyContainers++;
+              context.warnings.push(
+                `Container ${container.name} in task ${task.taskArn?.split("/").pop()} is UNHEALTHY`
+              );
+            }
+          });
+        });
+
+        if (context.config.verbose) {
+          console.log("");
+          TableFormatter.formatTasks(tasks);
+        }
+
+        if (context.tasks.running === 0) {
+          context.criticalIssues.push(
+            `No running ECS tasks (${context.tasks.pending} pending)`
+          );
+          return {
+            passed: false,
+            message: "No running tasks",
+          };
+        }
+
+        if (context.tasks.pending > 0) {
+          context.warnings.push(
+            `${context.tasks.pending} ECS tasks still pending (${context.tasks.running} running)`
+          );
+        }
+
+        return {
+          passed: context.tasks.running > 0,
+          message: `${context.tasks.running} running, ${context.tasks.pending} pending`,
+        };
+      })
+  );
+
+  // 5. Overall Readiness
+  runner.addCheck(
+    CheckBuilder.create("Overall Readiness")
+      .category("readiness")
+      .execute(async () => {
+        const checker = new ReadinessChecker();
+
+        if (context.criticalIssues.length > 0) {
+          context.criticalIssues.forEach((issue) => checker.addBlocker(issue));
+        }
+
+        if (context.warnings.length > 0) {
+          context.warnings.forEach((warning) => checker.addWarning(warning));
+        }
+
+        if (checker.isReady()) {
+          checker.addNextStep("Infrastructure is ready for service deployment");
+        } else {
+          checker.addNextStep("Review critical issues above");
+          checker.addNextStep("Check CloudWatch Logs for detailed error messages");
+          checker.addNextStep("Verify EC2 instance health in AWS Console");
+          checker.addNextStep("Consider using --verbose flag for detailed output");
+        }
+
+        console.log("");
+        checker.printAssessment("Monitoring Infrastructure");
+
+        return {
+          passed: checker.isReady(),
+          message: checker.isReady()
+            ? "Infrastructure ready"
+            : "Infrastructure has issues",
+        };
+      })
+  );
+}
+
+const cli = CliBuilder.create(
+  "verify-health-checks",
+  "Verify infrastructure health checks with non-blocking option"
+);
+
+cli
   .option("-v, --verbose", "Enable verbose output", false)
   .option(
     "--blocking",
     "Exit with error if health checks fail (default: false)",
     false
   )
-  .option(
-    "--max-wait <minutes>",
-    "Maximum minutes to wait for health checks",
-    "10"
-  )
-  .parse();
+  .option("--max-wait <minutes>", "Maximum minutes to wait for health checks", "10");
 
-const options = program.opts();
+cli.parse();
+
+const options = cli.opts();
+
+CliBuilder.validateEnvironment(options.environment);
 
 const config: VerifyHealthChecksConfig = {
   environment: options.environment,
@@ -832,10 +718,10 @@ const config: VerifyHealthChecksConfig = {
 };
 
 verifyHealthChecks(config)
-  .then((state) => {
+  .then((result) => {
     console.log("");
 
-    if (state.criticalIssues.length === 0) {
+    if (result.isHealthy) {
       Logger.success("Health checks passed");
       Logger.info("Infrastructure is ready for service deployment");
       process.exit(0);
@@ -849,7 +735,7 @@ verifyHealthChecks(config)
       Logger.info("Use --blocking flag to prevent deployment on health check failures");
       console.log("");
       Logger.info("Deployment will continue for troubleshooting purposes");
-      process.exit(0);  // Exit successfully to allow ServiceStack deployment
+      process.exit(0); // Exit successfully to allow ServiceStack deployment
     }
   })
   .catch((error) => {
