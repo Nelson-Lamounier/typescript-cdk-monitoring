@@ -263,6 +263,7 @@ export const projects: Record<string, ProjectConfig> = {
         compute: {
           instanceType: "t3.medium", // Production uses larger instances
           minCapacity: 2,
+          desiredCapacity: 2, // Must be >= minCapacity
           maxCapacity: 4,
         },
         networking: {
@@ -343,6 +344,7 @@ export const projects: Record<string, ProjectConfig> = {
         compute: {
           instanceType: "t3.medium",
           minCapacity: 2,
+          desiredCapacity: 2, // Must be >= minCapacity
           maxCapacity: 5,
         },
       },

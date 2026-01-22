@@ -27,11 +27,16 @@ AWS_ACCOUNT_ID ?=
 VERIFY_EFS_SCRIPT := scripts/tests/verify-efs-stack.sh
 VERIFY_INFRA_SCRIPT := scripts/tests/verify-infra-stack.sh
 
-# Stack names
+# Stack names - Monitoring
 NETWORKING_STACK := $(ENVIRONMENT)-Networking
 EFS_STACK := $(ENVIRONMENT)-MonitoringEfs
 INFRA_STACK := $(ENVIRONMENT)-MonitoringInfra
 SERVICE_STACK := $(ENVIRONMENT)-MonitoringService
+
+# Stack names - Webapp
+WEBAPP_ECR_STACK := $(ENVIRONMENT)-WebappEcr
+WEBAPP_DYNAMODB_STACK := $(ENVIRONMENT)-WebappDynamoDb
+WEBAPP_API_STACK := $(ENVIRONMENT)-WebappApi
 
 # Colours for output
 BLUE := \033[0;34m
@@ -58,7 +63,8 @@ help: ## Show this help message
 	@grep -E '^deploy-.*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-32s$(NC) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(GREEN)CDK Operations:$(NC)"
-	@grep -E '^(synth|diff|destroy|list):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-32s$(NC) %s\n", $$1, $$2}'
+	@grep -E '^(synth|diff|destroy|list)(-[a-z-]+)?:.*?## .*$$' $(MAKEFILE_LIST) | grep -v "destroy-all\|destroy-webapp-all" | head -20 | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-32s$(NC) %s\n", $$1, $$2}'
+	@echo "  ... (run 'make help-cdk' for full list)"
 	@echo ""
 	@echo "$(GREEN)Testing - Domain (CI Optimized):$(NC)"
 	@grep -E '^test-domain-.*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-32s$(NC) %s\n", $$1, $$2}'
@@ -86,7 +92,9 @@ help: ## Show this help message
 	@echo "  make test-domain-monitoring          # Run only monitoring tests (fast CI)"
 	@echo "  make test-networking                 # Run granular networking tests"
 	@echo "  make verify-webapp-all               # Verify all webapp stacks"
-	@echo "  make deploy-all                      # Deploy all stacks in order"
+	@echo "  make deploy-webapp-all               # Deploy all webapp stacks"
+	@echo "  make deploy-all                      # Deploy all monitoring stacks"
+	@echo "  make diff-webapp-api                 # Show differences for webapp API stack"
 	@echo "  make ENVIRONMENT=production deploy-efs  # Deploy to production"
 	@echo ""
 
@@ -112,12 +120,32 @@ help-tests: ## Show all available test targets
 	@echo "$(GREEN)Monitoring Tests:$(NC)"
 	@grep -E '^test-monitoring.*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-40s$(NC) %s\n", $$1, $$2}'
 	@echo ""
+	@echo "$(GREEN)Webapp Tests:$(NC)"
+	@grep -E '^test-webapp.*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-40s$(NC) %s\n", $$1, $$2}'
+	@echo ""
 	@echo "$(GREEN)Construct Tests:$(NC)"
 	@grep -E '^test-constructs[^:]*:.*?## .*$$' $(MAKEFILE_LIST) | head -10 | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-40s$(NC) %s\n", $$1, $$2}'
 	@echo "  ... (more construct tests available)"
 	@echo ""
 	@echo "$(GREEN)Helper Tests:$(NC)"
 	@grep -E '^test-helpers.*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-40s$(NC) %s\n", $$1, $$2}'
+	@echo ""
+
+help-cdk: ## Show all CDK operation targets
+	@echo ""
+	@echo "$(BLUE)All CDK Operation Targets$(NC)"
+	@echo ""
+	@echo "$(GREEN)Synthesis (Template Generation):$(NC)"
+	@grep -E '^synth(-[a-z-]+)?:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-40s$(NC) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "$(GREEN)Diff (Show Changes):$(NC)"
+	@grep -E '^diff(-[a-z-]+)?:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-40s$(NC) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "$(GREEN)Destroy (Delete Stacks):$(NC)"
+	@grep -E '^destroy(-[a-z-]+)?:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-40s$(NC) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "$(GREEN)Other Operations:$(NC)"
+	@grep -E '^list:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-40s$(NC) %s\n", $$1, $$2}'
 	@echo ""
 
 # ============================================================================
@@ -392,12 +420,64 @@ deploy-all: deploy-networking deploy-efs deploy-infra deploy-service ## Deploy a
 	@echo "  4. Access Grafana at http://<ALB-DNS>:3000"
 
 # ============================================================================
+# WEBAPP DEPLOYMENT
+# ============================================================================
+
+deploy-webapp-ecr: ## Deploy Webapp ECR stack (requires Networking stack)
+	@echo "$(BLUE)Deploying Webapp ECR Stack...$(NC)"
+	@echo "Stack: $(WEBAPP_ECR_STACK)"
+	@echo "Profile: $(AWS_PROFILE)"
+	@echo ""
+	cdk deploy $(WEBAPP_ECR_STACK) --profile $(AWS_PROFILE) --require-approval never
+
+deploy-webapp-dynamodb: ## Deploy Webapp DynamoDB stack (requires Networking stack)
+	@echo "$(BLUE)Deploying Webapp DynamoDB Stack...$(NC)"
+	@echo "Stack: $(WEBAPP_DYNAMODB_STACK)"
+	@echo "Profile: $(AWS_PROFILE)"
+	@echo ""
+	cdk deploy $(WEBAPP_DYNAMODB_STACK) --profile $(AWS_PROFILE) --require-approval never
+
+deploy-webapp-api: ## Deploy Webapp API stack (requires DynamoDB stack)
+	@echo "$(BLUE)Deploying Webapp API Stack...$(NC)"
+	@echo "Stack: $(WEBAPP_API_STACK)"
+	@echo "Profile: $(AWS_PROFILE)"
+	@echo ""
+	@echo "$(YELLOW)Note: This requires DynamoDB stack to be deployed first$(NC)"
+	@echo ""
+	cdk deploy $(WEBAPP_API_STACK) --profile $(AWS_PROFILE) --require-approval never
+
+deploy-webapp-all: deploy-networking deploy-webapp-ecr deploy-webapp-dynamodb deploy-webapp-api ## Deploy all webapp stacks in correct order
+	@echo ""
+	@echo "$(GREEN)✓ All webapp stacks deployed successfully$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Next steps:$(NC)"
+	@echo "  1. Run 'make verify-webapp-all' to verify deployment"
+	@echo "  2. Test API endpoints"
+	@echo "  3. Check DynamoDB tables and S3 buckets"
+
+# ============================================================================
 # CDK OPERATIONS
 # ============================================================================
 
 synth: ## Synthesise CloudFormation templates
 	@echo "$(BLUE)Synthesising CloudFormation templates...$(NC)"
 	cdk synth --profile $(AWS_PROFILE)
+
+synth-networking: ## Synthesise Networking stack template
+	@echo "$(BLUE)Synthesising Networking stack template...$(NC)"
+	cdk synth $(NETWORKING_STACK) --profile $(AWS_PROFILE)
+
+synth-webapp-ecr: ## Synthesise Webapp ECR stack template
+	@echo "$(BLUE)Synthesising Webapp ECR stack template...$(NC)"
+	cdk synth $(WEBAPP_ECR_STACK) --profile $(AWS_PROFILE)
+
+synth-webapp-dynamodb: ## Synthesise Webapp DynamoDB stack template
+	@echo "$(BLUE)Synthesising Webapp DynamoDB stack template...$(NC)"
+	cdk synth $(WEBAPP_DYNAMODB_STACK) --profile $(AWS_PROFILE)
+
+synth-webapp-api: ## Synthesise Webapp API stack template
+	@echo "$(BLUE)Synthesising Webapp API stack template...$(NC)"
+	cdk synth $(WEBAPP_API_STACK) --profile $(AWS_PROFILE)
 
 diff: ## Show differences between deployed and local stacks
 	@echo "$(BLUE)Showing stack differences...$(NC)"
@@ -414,6 +494,18 @@ diff-infra: ## Show differences for Infrastructure stack
 diff-service: ## Show differences for Service stack
 	@echo "$(BLUE)Showing Service stack differences...$(NC)"
 	cdk diff $(SERVICE_STACK) --profile $(AWS_PROFILE)
+
+diff-webapp-ecr: ## Show differences for Webapp ECR stack
+	@echo "$(BLUE)Showing Webapp ECR stack differences...$(NC)"
+	cdk diff $(WEBAPP_ECR_STACK) --profile $(AWS_PROFILE)
+
+diff-webapp-dynamodb: ## Show differences for Webapp DynamoDB stack
+	@echo "$(BLUE)Showing Webapp DynamoDB stack differences...$(NC)"
+	cdk diff $(WEBAPP_DYNAMODB_STACK) --profile $(AWS_PROFILE)
+
+diff-webapp-api: ## Show differences for Webapp API stack
+	@echo "$(BLUE)Showing Webapp API stack differences...$(NC)"
+	cdk diff $(WEBAPP_API_STACK) --profile $(AWS_PROFILE)
 
 list: ## List all CDK stacks
 	@echo "$(BLUE)Available CDK Stacks:$(NC)"
@@ -437,14 +529,47 @@ destroy-efs: ## Destroy EFS stack
 	@echo ""
 	cdk destroy $(EFS_STACK) --profile $(AWS_PROFILE)
 
+destroy-webapp-api: ## Destroy Webapp API stack
+	@echo "$(RED)WARNING: This will destroy the Webapp API stack$(NC)"
+	@echo "Stack: $(WEBAPP_API_STACK)"
+	@echo ""
+	cdk destroy $(WEBAPP_API_STACK) --profile $(AWS_PROFILE)
+
+destroy-webapp-dynamodb: ## Destroy Webapp DynamoDB stack
+	@echo "$(RED)WARNING: This will destroy the Webapp DynamoDB stack and all data$(NC)"
+	@echo "Stack: $(WEBAPP_DYNAMODB_STACK)"
+	@echo ""
+	cdk destroy $(WEBAPP_DYNAMODB_STACK) --profile $(AWS_PROFILE)
+
+destroy-webapp-ecr: ## Destroy Webapp ECR stack
+	@echo "$(RED)WARNING: This will destroy the Webapp ECR repository$(NC)"
+	@echo "Stack: $(WEBAPP_ECR_STACK)"
+	@echo ""
+	cdk destroy $(WEBAPP_ECR_STACK) --profile $(AWS_PROFILE)
+
+destroy-webapp-all: ## Destroy all webapp stacks in reverse order
+	@echo "$(RED)WARNING: This will destroy ALL webapp stacks$(NC)"
+	@echo ""
+	@read -p "Are you sure? Type 'yes' to confirm: " confirm; \
+	if [ "$$confirm" = "yes" ]; then \
+		$(MAKE) destroy-webapp-api || true; \
+		$(MAKE) destroy-webapp-dynamodb || true; \
+		$(MAKE) destroy-webapp-ecr || true; \
+	else \
+		echo "$(YELLOW)Destruction cancelled$(NC)"; \
+	fi
+
 destroy-all: ## Destroy all stacks in reverse order (DANGEROUS)
-	@echo "$(RED)WARNING: This will destroy ALL stacks$(NC)"
+	@echo "$(RED)WARNING: This will destroy ALL stacks (monitoring + webapp)$(NC)"
 	@echo ""
 	@read -p "Are you sure? Type 'yes' to confirm: " confirm; \
 	if [ "$$confirm" = "yes" ]; then \
 		$(MAKE) destroy-service || true; \
 		$(MAKE) destroy-infra || true; \
 		$(MAKE) destroy-efs || true; \
+		$(MAKE) destroy-webapp-api || true; \
+		$(MAKE) destroy-webapp-dynamodb || true; \
+		$(MAKE) destroy-webapp-ecr || true; \
 	else \
 		echo "$(YELLOW)Destruction cancelled$(NC)"; \
 	fi
@@ -531,7 +656,7 @@ test-unit: ## Run unit tests only
 	@echo "$(BLUE)Running unit tests...$(NC)"
 	@$(TEST_ENV) yarn test tests/unit
 
-test-stacks: test-networking test-monitoring-efs test-monitoring-infra test-monitoring-service ## Run all stack tests
+test-stacks: test-networking test-monitoring-efs test-monitoring-infra test-monitoring-service test-webapp-all ## Run all stack tests (monitoring + webapp)
 	@echo "$(GREEN)All stack tests completed$(NC)"
 
 # ============================================================================
@@ -657,6 +782,26 @@ test-monitoring-infra: ## Run monitoring infrastructure stack tests
 test-monitoring-service: ## Run monitoring service stack tests
 	@echo "$(BLUE)Running monitoring service stack tests...$(NC)"
 	@$(TEST_ENV) yarn test tests/unit/stacks/monitoring/monitoring-service-stack.test.ts
+
+# ============================================================================
+# WEBAPP TESTS
+# ============================================================================
+
+test-webapp-ecr: ## Run webapp ECR stack tests
+	@echo "$(BLUE)Running webapp ECR stack tests...$(NC)"
+	@$(TEST_ENV) yarn test tests/unit/stacks/webapp/ecr-stack.test.ts
+
+test-webapp-dynamodb: ## Run webapp DynamoDB stack tests
+	@echo "$(BLUE)Running webapp DynamoDB stack tests...$(NC)"
+	@$(TEST_ENV) yarn test tests/unit/stacks/webapp/dynamodb-stack.test.ts
+
+test-webapp-api: ## Run webapp API stack tests (when implemented)
+	@echo "$(BLUE)Running webapp API stack tests...$(NC)"
+	@$(TEST_ENV) yarn test tests/unit/stacks/webapp/api-stack.test.ts --passWithNoTests
+
+test-webapp-all: test-webapp-ecr test-webapp-dynamodb test-webapp-api ## Run all webapp stack tests
+	@echo ""
+	@echo "$(GREEN)✓ All webapp stack tests completed$(NC)"
 
 # ============================================================================
 # CONSTRUCT TESTS - ECS

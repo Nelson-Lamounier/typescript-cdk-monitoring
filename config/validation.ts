@@ -421,9 +421,20 @@ export function validateConfiguration(
   }
 
   // Get project config if specified
-  const projectConfig = projectName
-    ? getProjectConfig(projectName, envName)
-    : undefined;
+  let projectConfig: ProjectConfig | undefined;
+  if (projectName) {
+    try {
+      projectConfig = getProjectConfig(projectName, envName);
+    } catch (error) {
+      // Project doesn't exist - return validation error
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        valid: false,
+        errors: [errorMessage],
+        warnings: [],
+      };
+    }
+  }
 
   const ctx: ValidationContext = {
     envName,
