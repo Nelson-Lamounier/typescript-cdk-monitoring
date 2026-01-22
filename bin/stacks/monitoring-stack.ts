@@ -8,6 +8,7 @@ import { MonitoringEfsStack } from "../../lib/stacks/monitoring/efs-stack";
 import { MonitoringInfraStack } from "../../lib/stacks/monitoring/infra-stack";
 import { MonitoringServiceStack } from "../../lib/stacks/monitoring/service-stack";
 import { EnvironmentConfig } from "../../config/environments";
+import { getProjectConfig } from "../../config/projects";
 
 /**
  * Create all monitoring stacks for a single environment
@@ -42,6 +43,9 @@ export function createMonitoringStacks(
 } {
   const stackNamePrefix = `${envName}-Monitoring`;
   const projectName = "monitoring";
+  
+  // Get project configuration with environment-specific overrides
+  const projectConfig = getProjectConfig(projectName, envName);
 
   // ============================================================================
   // 1. MONITORING S3 STACK (Dashboard Storage Layer)
@@ -143,16 +147,15 @@ export function createMonitoringStacks(
       // Service Configuration
       enableExecuteCommand: true,
 
-      // Memory allocation optimised for t3.micro (916 MiB available)
-      // Default is 1024 MiB per service, which exceeds instance capacity
-      // Development: Reduce to 384 MiB each (768 MiB total + 148 MiB buffer)
-      // Production: Use t3.small or larger with default allocations
-      prometheusProps: envConfig.isProduction
-        ? undefined // Use defaults (1024 MiB) for production
-        : { memoryMiB: 384 }, // Optimised for t3.micro in dev
-      grafanaProps: envConfig.isProduction
-        ? undefined // Use defaults (1024 MiB) for production
-        : { memoryMiB: 384 }, // Optimised for t3.micro in dev
+      // Memory allocation from centralised configuration
+      // Development: Uses optimised settings (384 MiB each) for t3.micro compatibility
+      // Production: Uses default settings (1024 MiB Prometheus, 512 MiB Grafana) for t3.small+
+      prometheusProps: projectConfig.compute?.services?.prometheus
+        ? { memoryMiB: projectConfig.compute.services.prometheus.memoryMiB }
+        : undefined,
+      grafanaProps: projectConfig.compute?.services?.grafana
+        ? { memoryMiB: projectConfig.compute.services.grafana.memoryMiB }
+        : undefined,
     }
   );
 

@@ -63,11 +63,39 @@ export interface ResourceProtectionConfig {
   enableSystemUpdates: boolean;
 }
 
+/**
+ * Encryption Configuration
+ * 
+ * Centralised KMS key configuration for all encrypted resources.
+ * Use customer-managed keys for production environments to:
+ * - Enable key rotation policies
+ * - Implement fine-grained access controls
+ * - Meet compliance requirements
+ * - Audit key usage via CloudTrail
+ * 
+ * Development environments use AWS-managed keys by default (no additional cost).
+ */
+export interface EncryptionConfig {
+  /** Customer-managed KMS key ARN for EBS volumes */
+  ebsKmsKeyArn?: string;
+  /** Customer-managed KMS key ARN for EFS file systems */
+  efsKmsKeyArn?: string;
+  /** Customer-managed KMS key ARN for ECR repositories */
+  ecrKmsKeyArn?: string;
+  /** Customer-managed KMS key ARN for S3 buckets */
+  s3KmsKeyArn?: string;
+  /** Customer-managed KMS key ARN for DynamoDB tables */
+  dynamoDbKmsKeyArn?: string;
+  /** Customer-managed KMS key ARN for CloudWatch Logs */
+  logsKmsKeyArn?: string;
+}
+
 export interface SecurityBaseline {
   network: NetworkSecurityConfig;
   transport: TransportSecurityConfig;
   audit: AuditSecurityConfig;
   protection: ResourceProtectionConfig;
+  encryption?: EncryptionConfig;
 }
 
 // ============================================================================
@@ -81,6 +109,7 @@ export interface SecurityBaseline {
  * - Open access from anywhere (development only)
  * - HTTP allowed (no certificate required)
  * - Minimal logging for cost savings
+ * - AWS-managed encryption keys (no additional cost)
  */
 export const developmentSecurityBaseline: SecurityBaseline = {
   network: {
@@ -104,6 +133,10 @@ export const developmentSecurityBaseline: SecurityBaseline = {
     enableDeletionProtection: false,
     efsRemovalPolicy: cdk.RemovalPolicy.DESTROY,
     enableSystemUpdates: false,
+  },
+  encryption: {
+    // Uses AWS-managed keys by default (no ARNs specified)
+    // No additional cost, automatic key rotation
   },
 };
 
@@ -145,6 +178,14 @@ export const stagingSecurityBaseline: SecurityBaseline = {
     enableDeletionProtection: false, // Allow teardown in staging
     efsRemovalPolicy: cdk.RemovalPolicy.RETAIN,
     enableSystemUpdates: true,
+  },
+  encryption: {
+    // Optional: Use customer-managed KMS keys for staging
+    // Uncomment and set environment variables if required:
+    // ebsKmsKeyArn: process.env.STAGING_EBS_KMS_KEY_ARN,
+    // efsKmsKeyArn: process.env.STAGING_EFS_KMS_KEY_ARN,
+    // ecrKmsKeyArn: process.env.STAGING_ECR_KMS_KEY_ARN,
+    // s3KmsKeyArn: process.env.STAGING_S3_KMS_KEY_ARN,
   },
 };
 
@@ -190,6 +231,17 @@ export const productionSecurityBaseline: SecurityBaseline = {
     efsRemovalPolicy: cdk.RemovalPolicy.RETAIN,
     enableSystemUpdates: true, // Apply security patches
   },
+  encryption: {
+    // RECOMMENDED: Use customer-managed KMS keys for production
+    // Provides key rotation, audit logging, and fine-grained access control
+    // Set via environment variables or AWS Systems Manager Parameter Store
+    ebsKmsKeyArn: process.env.PROD_EBS_KMS_KEY_ARN,
+    efsKmsKeyArn: process.env.PROD_EFS_KMS_KEY_ARN,
+    ecrKmsKeyArn: process.env.PROD_ECR_KMS_KEY_ARN,
+    s3KmsKeyArn: process.env.PROD_S3_KMS_KEY_ARN,
+    dynamoDbKmsKeyArn: process.env.PROD_DYNAMODB_KMS_KEY_ARN,
+    logsKmsKeyArn: process.env.PROD_LOGS_KMS_KEY_ARN,
+  },
 };
 
 // ============================================================================
@@ -213,6 +265,30 @@ export function getSecurityBaseline(envName: string): SecurityBaseline {
     default:
       return developmentSecurityBaseline;
   }
+}
+
+/**
+ * Get encryption configuration for environment
+ * 
+ * Returns customer-managed KMS key ARNs if configured for the environment.
+ * Falls back to AWS-managed keys (undefined) for development or when not configured.
+ * 
+ * @param envName - Environment name (development, staging, production)
+ * @returns EncryptionConfig with KMS key ARNs or empty object for AWS-managed keys
+ * 
+ * @example
+ * ```typescript
+ * const encConfig = getEncryptionConfig('production');
+ * if (encConfig.ebsKmsKeyArn) {
+ *   // Use customer-managed key
+ * } else {
+ *   // Use AWS-managed key (default)
+ * }
+ * ```
+ */
+export function getEncryptionConfig(envName: string): EncryptionConfig {
+  const baseline = getSecurityBaseline(envName);
+  return baseline.encryption ?? {};
 }
 
 /**

@@ -5,6 +5,17 @@ import "source-map-support/register";
 import * as cdk from "aws-cdk-lib";
 
 import { environments } from "../config/environments";
+import { getDefaultTags, toTagsRecord } from "../config/tagging";
+import {
+  validateConfiguration,
+  validateAllProjects,
+  formatValidationResult,
+} from "../config/validation";
+import {
+  calculateProjectCost,
+  formatCostBreakdown,
+  compareCosts,
+} from "../lib/shared/helpers/cost-helper";
 
 import { deployFoundationStacks } from "./stacks/foundation-stack";
 import { createMonitoringStacks } from "./stacks/monitoring-stack";
@@ -43,6 +54,71 @@ if (contextAccount) {
 if (contextRegion) {
   console.log(`  (Region overridden via context)`);
 }
+
+// ============================================================================
+// CONFIGURATION VALIDATION (Pre-Deployment Checks)
+// ============================================================================
+
+console.log(`\n${"=".repeat(80)}`);
+console.log("CONFIGURATION VALIDATION");
+console.log("=".repeat(80));
+
+// Validate environment configuration
+const envValidation = validateConfiguration(envName);
+console.log(formatValidationResult(envValidation, `Environment: ${envName}`));
+
+if (!envValidation.valid) {
+  throw new Error(
+    `\n❌ Environment configuration validation failed for '${envName}'.\n` +
+    `Please fix the errors above before deploying.`
+  );
+}
+
+// Validate all projects that will be deployed
+const projectsToValidate = ["monitoring", "webapp"];
+const projectValidations = validateAllProjects(envName, projectsToValidate);
+
+let hasProjectErrors = false;
+projectValidations.forEach((validation, projectName) => {
+  console.log(formatValidationResult(validation, `Project: ${projectName}`));
+  if (!validation.valid) {
+    hasProjectErrors = true;
+  }
+});
+
+if (hasProjectErrors) {
+  throw new Error(
+    `\n❌ Project configuration validation failed.\n` +
+    `Please fix the errors above before deploying.`
+  );
+}
+
+console.log(`\n✅ All configuration validation checks passed!`);
+console.log("=".repeat(80) + "\n");
+
+// ============================================================================
+// COST ESTIMATION (Budget Planning)
+// ============================================================================
+
+console.log(`${"=".repeat(80)}`);
+console.log("ESTIMATED MONTHLY COSTS");
+console.log("=".repeat(80));
+
+// Display cost estimates for each project
+const projectsForCost = ["monitoring", "webapp"];
+
+projectsForCost.forEach((projectName) => {
+  const costBreakdown = calculateProjectCost(projectName, envName, targetRegion);
+  console.log(formatCostBreakdown(projectName, envName, costBreakdown, targetRegion));
+});
+
+// Show cost comparison if not in production
+if (envName !== "production") {
+  console.log(compareCosts("monitoring", ["development", "production"], targetRegion));
+  console.log(compareCosts("webapp", ["development", "production"], targetRegion));
+}
+
+console.log("=".repeat(80) + "\n");
 
 // Stack props
 const stackProps: cdk.StackProps = {
@@ -92,11 +168,19 @@ createSecurityStacks(
 createWebappStacks(app, envName, envConfig, networkingStack, stackProps);
 
 // ============================================================================
-// STACK TAGGING
+// STACK TAGGING (Centralised Configuration)
 // ============================================================================
 
-cdk.Tags.of(app).add("Environment", envName);
-cdk.Tags.of(app).add("ManagedBy", "CDK");
-cdk.Tags.of(app).add("Repository", "monitoring-iac");
+// Get tags from centralised configuration
+// Includes: Environment, ManagedBy, Repository, CostCentre, Owner, Compliance, DataClassification
+const appTags = getDefaultTags(envName);
+const tagsRecord = toTagsRecord(appTags);
+
+// Apply all tags to the app
+Object.entries(tagsRecord).forEach(([key, value]) => {
+  cdk.Tags.of(app).add(key, value);
+});
+
+console.log(`\nApplied tags:`, JSON.stringify(tagsRecord, null, 2));
 
 app.synth();
