@@ -370,7 +370,7 @@ export class ApiGatewayConstruct extends Construct {
       failOnWarnings: false,
 
       // Minimum compression size (bytes)
-      minimumCompressionSize: 1024,
+      minCompressionSize: cdk.Size.kibibytes(1),
 
       // Policy document for resource policy
       policy: undefined, // Can be added later for VPC/IP restrictions

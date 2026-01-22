@@ -241,6 +241,14 @@ exports[`MonitoringEfsStack Stack Creation matches snapshot for minimal configur
       "Properties": {
         "AccessPointTags": [
           {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
             "Key": "Environment",
             "Value": "development",
           },
@@ -259,6 +267,10 @@ exports[`MonitoringEfsStack Stack Creation matches snapshot for minimal configur
           {
             "Key": "Purpose",
             "Value": "shared-storage",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
           },
         ],
         "FileSystemId": {
@@ -288,6 +300,14 @@ exports[`MonitoringEfsStack Stack Creation matches snapshot for minimal configur
         "Encrypted": true,
         "FileSystemTags": [
           {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
             "Key": "Environment",
             "Value": "development",
           },
@@ -306,6 +326,10 @@ exports[`MonitoringEfsStack Stack Creation matches snapshot for minimal configur
           {
             "Key": "Purpose",
             "Value": "shared-storage",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
           },
         ],
         "LifecyclePolicies": [
@@ -543,6 +567,14 @@ echo "EFS setup completed successfully"
             "Value": "EFS-Initialization",
           },
           {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
             "Key": "Environment",
             "Value": "development",
           },
@@ -553,6 +585,10 @@ echo "EFS setup completed successfully"
           {
             "Key": "ManagedBy",
             "Value": "CDK",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
           },
         ],
         "UpdateMethod": "NewVersion",
@@ -633,6 +669,14 @@ echo "EFS setup completed successfully"
             "Value": "EFS-Initialization",
           },
           {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
             "Key": "Environment",
             "Value": "development",
           },
@@ -643,6 +687,10 @@ echo "EFS setup completed successfully"
           {
             "Key": "ManagedBy",
             "Value": "CDK",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
           },
         ],
       },
@@ -709,6 +757,14 @@ echo "EFS setup completed successfully"
         ],
         "Tags": [
           {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
             "Key": "Environment",
             "Value": "development",
           },
@@ -728,6 +784,10 @@ echo "EFS setup completed successfully"
             "Key": "Purpose",
             "Value": "EfsAccess",
           },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
         ],
         "VpcId": {
           "Fn::ImportValue": "TestVpcStack:ExportsOutputRefTestVpcE77CE67811D13B85",
@@ -740,9 +800,12 @@ echo "EFS setup completed successfully"
         "Description": "Grafana dashboard provider configuration for development",
         "Name": "/monitoring/development/grafana-dashboard-config",
         "Tags": {
+          "CostCentre": "DEV-001",
+          "DataClassification": "internal",
           "Environment": "development",
           "Layer": "Storage",
           "ManagedBy": "CDK",
+          "Repository": "monitoring-iac",
         },
         "Tier": "Standard",
         "Type": "String",
@@ -771,9 +834,12 @@ echo "EFS setup completed successfully"
         "Description": "Grafana YAML dashboard provider configuration for development",
         "Name": "/monitoring/development/grafana-dashboard-config-yaml",
         "Tags": {
+          "CostCentre": "DEV-001",
+          "DataClassification": "internal",
           "Environment": "development",
           "Layer": "Storage",
           "ManagedBy": "CDK",
+          "Repository": "monitoring-iac",
         },
         "Tier": "Standard",
         "Type": "String",
@@ -796,9 +862,12 @@ providers:
         "Description": "Grafana datasource configuration for development",
         "Name": "/monitoring/development/grafana-datasource-config",
         "Tags": {
+          "CostCentre": "DEV-001",
+          "DataClassification": "internal",
           "Environment": "development",
           "Layer": "Storage",
           "ManagedBy": "CDK",
+          "Repository": "monitoring-iac",
         },
         "Tier": "Standard",
         "Type": "String",
@@ -808,6 +877,7 @@ providers:
     {
       "name": "Prometheus",
       "type": "prometheus",
+      "uid": "prometheus",
       "access": "proxy",
       "url": "http://HOST_IP_PLACEHOLDER:9090/prometheus",
       "isDefault": true
@@ -815,6 +885,7 @@ providers:
     {
       "name": "CloudWatch",
       "type": "cloudwatch",
+      "uid": "cloudwatch",
       "access": "proxy",
       "jsonData": {
         "authType": "default",
@@ -833,9 +904,12 @@ providers:
         "Description": "Grafana YAML datasource configuration for development",
         "Name": "/monitoring/development/grafana-datasource-config-yaml",
         "Tags": {
+          "CostCentre": "DEV-001",
+          "DataClassification": "internal",
           "Environment": "development",
           "Layer": "Storage",
           "ManagedBy": "CDK",
+          "Repository": "monitoring-iac",
         },
         "Tier": "Standard",
         "Type": "String",
@@ -843,11 +917,13 @@ providers:
 datasources:
   -     name: Prometheus
         type: prometheus
+        uid: prometheus
         access: proxy
         url: "http://HOST_IP_PLACEHOLDER:9090/prometheus"
         isDefault: true
   -     name: CloudWatch
         type: cloudwatch
+        uid: cloudwatch
         access: proxy
         jsonData:
           authType: default
@@ -863,9 +939,12 @@ datasources:
         "Name": "/monitoring/development/efs/config/file-system-id",
         "Tags": {
           "Component": "SSMParameters",
+          "CostCentre": "DEV-001",
+          "DataClassification": "internal",
           "Environment": "development",
           "Layer": "Storage",
           "ManagedBy": "CDK",
+          "Repository": "monitoring-iac",
         },
         "Tier": "Standard",
         "Type": "String",
@@ -881,9 +960,12 @@ datasources:
         "Name": "/monitoring/development/efs/config/access-point-id",
         "Tags": {
           "Component": "SSMParameters",
+          "CostCentre": "DEV-001",
+          "DataClassification": "internal",
           "Environment": "development",
           "Layer": "Storage",
           "ManagedBy": "CDK",
+          "Repository": "monitoring-iac",
         },
         "Tier": "Standard",
         "Type": "String",
@@ -899,9 +981,12 @@ datasources:
         "Name": "/monitoring/development/efs/config/security-group-id",
         "Tags": {
           "Component": "SSMParameters",
+          "CostCentre": "DEV-001",
+          "DataClassification": "internal",
           "Environment": "development",
           "Layer": "Storage",
           "ManagedBy": "CDK",
+          "Repository": "monitoring-iac",
         },
         "Tier": "Standard",
         "Type": "String",
@@ -920,9 +1005,12 @@ datasources:
         "Name": "/monitoring/development/efs/config/availability-zone",
         "Tags": {
           "Component": "SSMParameters",
+          "CostCentre": "DEV-001",
+          "DataClassification": "internal",
           "Environment": "development",
           "Layer": "Storage",
           "ManagedBy": "CDK",
+          "Repository": "monitoring-iac",
         },
         "Tier": "Standard",
         "Type": "String",
@@ -935,9 +1023,12 @@ datasources:
         "Description": "Prometheus configuration for development monitoring",
         "Name": "/monitoring/development/prometheus-config",
         "Tags": {
+          "CostCentre": "DEV-001",
+          "DataClassification": "internal",
           "Environment": "development",
           "Layer": "Storage",
           "ManagedBy": "CDK",
+          "Repository": "monitoring-iac",
         },
         "Tier": "Standard",
         "Type": "String",
@@ -1048,9 +1139,12 @@ datasources:
         "Description": "Prometheus YAML configuration for development monitoring",
         "Name": "/monitoring/development/prometheus-config-yaml",
         "Tags": {
+          "CostCentre": "DEV-001",
+          "DataClassification": "internal",
           "Environment": "development",
           "Layer": "Storage",
           "ManagedBy": "CDK",
+          "Repository": "monitoring-iac",
         },
         "Tier": "Standard",
         "Type": "String",

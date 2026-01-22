@@ -60,8 +60,8 @@ export const API_TEST_CONSTANTS = {
     API: 1,
     LAMBDA: 3,
     LOG_GROUP: 4, // 3 Lambda log groups + 1 API Gateway log group
-    IAM_ROLE: 3, // 1 role per Lambda function
-    IAM_POLICY: 6, // 2 policies per Lambda (DynamoDB + S3)
+    IAM_ROLE: 4, // 3 Lambda roles + 1 API Gateway CloudWatch role
+    IAM_POLICY: 3, // 1 consolidated policy per Lambda (includes DynamoDB, S3, CloudWatch Logs)
   },
   STACK_IDS: {
     ...BASE_TEST_CONSTANTS.STACK_IDS,
@@ -301,9 +301,16 @@ export function createTestApiStack(
   
   // Determine environment based on stack ID
   const isProduction = id.toLowerCase().includes("prod");
-  const envName = isProduction 
-    ? BASE_TEST_CONSTANTS.ENVIRONMENTS.PRODUCTION 
-    : BASE_TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT;
+  const isPipeline = id.toLowerCase().includes("pipeline");
+  
+  let envName: string;
+  if (isProduction) {
+    envName = BASE_TEST_CONSTANTS.ENVIRONMENTS.PRODUCTION;
+  } else if (isPipeline) {
+    envName = "development-pipeline";  // Pipeline environment naming convention
+  } else {
+    envName = BASE_TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT;
+  }
   
   const minimalProps = fixtures.getMinimalProps(envName, isProduction);
 

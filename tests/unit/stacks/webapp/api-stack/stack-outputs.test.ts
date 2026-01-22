@@ -91,7 +91,7 @@ describe("WebappApiStack: Stack Outputs & Tagging", () => {
     // eslint-disable-next-line jest/expect-expect -- template.hasOutput throws on failure
     test("should export API Gateway endpoint", () => {
       template.hasOutput(API_TEST_CONSTANTS.OUTPUT_KEYS.API_ENDPOINT, {
-        Description: "API Gateway endpoint",
+        Description: "Full API endpoint with stage",
         Export: {
           Name: API_TEST_CONSTANTS.EXPORT_NAMES.DEV_API_ENDPOINT,
         },

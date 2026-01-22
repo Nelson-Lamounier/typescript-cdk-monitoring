@@ -150,6 +150,10 @@ export class LambdaFunctionConstruct extends Construct {
 
     this.role = this.function.role as iam.Role;
 
+    // Grant explicit CloudWatch Logs permissions
+    // These are required for Lambda to write logs to CloudWatch
+    this.logGroup.grantWrite(this.function);
+
     // ========================================================================
     // CDK NAG SUPPRESSIONS
     // ========================================================================
@@ -176,16 +180,18 @@ export class LambdaFunctionConstruct extends Construct {
     // ========================================================================
     // OUTPUTS
     // ========================================================================
+    const shouldExport = !props.envName.includes("pipeline");
+
     new cdk.CfnOutput(this, "FunctionArn", {
       value: this.function.functionArn,
       description: `Lambda function ARN for ${props.functionName}`,
-      exportName: `${props.envName}-${props.functionName}-arn`,
+      ...(shouldExport && { exportName: `${props.envName}-${props.functionName}-arn` }),
     });
 
     new cdk.CfnOutput(this, "FunctionName", {
       value: this.function.functionName,
       description: `Lambda function name for ${props.functionName}`,
-      exportName: `${props.envName}-${props.functionName}-name`,
+      ...(shouldExport && { exportName: `${props.envName}-${props.functionName}-name` }),
     });
 
     // ========================================================================

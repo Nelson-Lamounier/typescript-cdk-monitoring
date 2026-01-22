@@ -108,10 +108,10 @@ export function getLogRetentionDays(isProduction: boolean): number {
  * @returns Match pattern for DynamoDB read actions
  */
 export function validateDynamoDbReadPermissions() {
+  // These are the actions granted by table.grantReadData()
+  // See: https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_dynamodb.Table.html#grantwbrreadwbrdatagrantee
   return Match.arrayWith([
     "dynamodb:BatchGetItem",
-    "dynamodb:GetRecords",
-    "dynamodb:GetShardIterator",
     "dynamodb:Query",
     "dynamodb:GetItem",
     "dynamodb:Scan",
