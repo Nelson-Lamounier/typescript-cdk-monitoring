@@ -10,6 +10,7 @@ import {
   DEFAULT_MAX_AZS,
   DEFAULT_SUBNET_CIDR_MASK,
 } from "../../../../../lib/shared/constants/networking-constants";
+import { environments } from "../../../../../config/environments";
 
 // ============================================================================
 // TEST CONFIGURATION
@@ -17,7 +18,7 @@ import {
 
 /**
  * Test configuration constants
- * Centralised configuration values used across all tests
+ * Uses mock AWS account/region for CDK synthesis
  */
 export const TEST_CONFIG = {
   account: "123456789012",
@@ -25,20 +26,38 @@ export const TEST_CONFIG = {
 } as const;
 
 /**
- * Test constants - avoid magic numbers and strings
- * All hardcoded values used in tests should be defined here
+ * Test constants
+ * Uses VPC_CIDR_BLOCKS from networking-constants for consistency with stack implementation.
+ * Config values are available via CONFIG_VALUES for integration testing.
  */
 export const TEST_CONSTANTS = {
   VPC: {
     CIDR: {
+      // Use networking-constants for stack test consistency
       DEVELOPMENT: VPC_CIDR_BLOCKS.DEV,
       PRODUCTION: VPC_CIDR_BLOCKS.PRODUCTION,
       STAGING: VPC_CIDR_BLOCKS.STAGING,
       PIPELINE: VPC_CIDR_BLOCKS.PIPELINE,
+      // Keep custom CIDR for edge case testing
       CUSTOM: "10.99.0.0/16",
     },
     MAX_AZS: DEFAULT_MAX_AZS,
     SUBNET_MASK: DEFAULT_SUBNET_CIDR_MASK,
+  },
+  // Config values available for integration testing
+  CONFIG_VALUES: {
+    VPC_CIDRS: {
+      DEVELOPMENT: environments.development.vpcCidr,
+      STAGING: environments.staging.vpcCidr,
+      PRODUCTION: environments.production.vpcCidr,
+      PIPELINE: environments.pipeline.vpcCidr,
+    },
+    NAT_GATEWAYS: {
+      DEVELOPMENT: environments.development.natGateways ?? 0,
+      STAGING: environments.staging.natGateways ?? 0,
+      PRODUCTION: environments.production.natGateways ?? 0,
+      PIPELINE: environments.pipeline.natGateways ?? 0,
+    },
   },
   RESOURCE_COUNTS: {
     VPC: 1,

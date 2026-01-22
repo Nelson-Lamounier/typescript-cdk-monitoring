@@ -7,6 +7,8 @@
  * connectivity integration tests to eliminate code duplication and ensure
  * consistency across test suites.
  *
+ * Now integrates with config/ files for environment and project values.
+ *
  * @module tests/unit/connectivity/test-config
  */
 
@@ -25,6 +27,9 @@ import {
   CAPACITY_CONFIG,
   RESOURCE_TYPES,
 } from "../shared/constants";
+import { environments } from "../../../config/environments";
+import { getProjectConfig } from "../../../config/projects";
+import { getSecurityBaseline } from "../../../config/security-baseline";
 
 // Re-export all constants from shared constants file for backward compatibility
 export {
@@ -38,6 +43,11 @@ export {
   TAG_KEYS,
   SUBNET_TYPES,
 } from "../shared/constants";
+
+// Re-export config modules for convenience
+export { environments } from "../../../config/environments";
+export { getProjectConfig } from "../../../config/projects";
+export { getSecurityBaseline } from "../../../config/security-baseline";
 
 // ============================================================================
 // TYPES
@@ -104,20 +114,28 @@ export interface SubnetCidrs {
 // ============================================================================
 
 /**
+ * Get monitoring project config for default values
+ */
+const monitoringDevConfig = getProjectConfig("monitoring", "development");
+
+/**
  * Default test configuration
+ * Uses values from config/ files for consistency with actual deployment
  */
 export const DEFAULT_TEST_CONFIG: ResolvedTestConfig = {
   account: AWS_CONFIG.ACCOUNT,
   region: AWS_CONFIG.REGION,
   environment: ENVIRONMENT_CONFIG.DEVELOPMENT,
   projectName: PROJECT_CONFIG.NAME,
-  vpcCidr: NETWORK_CONFIG.VPC_CIDR,
+  // Use VPC CIDR from config/environments.ts
+  vpcCidr: environments.development.vpcCidr,
   allowedCidr: NETWORK_CONFIG.ALLOWED_CIDR,
   enableVpcFlowLogs: true,
   flowLogRetention: PROJECT_CONFIG.FLOW_LOG_RETENTION,
-  minCapacity: CAPACITY_CONFIG.MIN,
-  desiredCapacity: CAPACITY_CONFIG.DESIRED,
-  maxCapacity: CAPACITY_CONFIG.MAX,
+  // Use capacity from config/projects.ts
+  minCapacity: monitoringDevConfig.compute?.minCapacity ?? CAPACITY_CONFIG.MIN,
+  desiredCapacity: monitoringDevConfig.compute?.desiredCapacity ?? CAPACITY_CONFIG.DESIRED,
+  maxCapacity: monitoringDevConfig.compute?.maxCapacity ?? CAPACITY_CONFIG.MAX,
 } as const;
 
 // ============================================================================
@@ -136,6 +154,41 @@ export function resolveTestConfig(
   return {
     ...DEFAULT_TEST_CONFIG,
     ...options,
+  };
+}
+
+/**
+ * Get test configuration for a specific environment/project
+ * Uses values from config/ files
+ *
+ * @param envName - Environment name (development, staging, production, pipeline)
+ * @param projectName - Project name (monitoring, webapp, etc.)
+ * @returns Resolved test configuration
+ */
+export function getConfigAwareTestConfig(
+  envName: string = "development",
+  projectName: string = "monitoring"
+): ResolvedTestConfig {
+  const envConfig = environments[envName];
+  if (!envConfig) {
+    throw new Error(`Environment '${envName}' not found in config`);
+  }
+
+  const projectConfig = getProjectConfig(projectName, envName);
+  const securityBaseline = getSecurityBaseline(envName);
+
+  return {
+    account: AWS_CONFIG.ACCOUNT,
+    region: AWS_CONFIG.REGION,
+    environment: envName,
+    projectName: projectName,
+    vpcCidr: envConfig.vpcCidr,
+    allowedCidr: securityBaseline.network.allowedIpRanges[0] ?? "10.0.0.0/8",
+    enableVpcFlowLogs: securityBaseline.audit.enableVpcFlowLogs,
+    flowLogRetention: securityBaseline.audit.logRetention,
+    minCapacity: projectConfig.compute?.minCapacity ?? 1,
+    desiredCapacity: projectConfig.compute?.desiredCapacity ?? 1,
+    maxCapacity: projectConfig.compute?.maxCapacity ?? 2,
   };
 }
 

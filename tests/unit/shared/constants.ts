@@ -4,12 +4,16 @@
  * Shared Test Constants
  *
  * Centralised constants used across all test suites to eliminate duplication
- * and ensure consistency.
+ * and ensure consistency. Now integrates with config files for environment
+ * and project-specific values.
  *
  * @module tests/unit/shared/constants
  */
 
 import * as logs from "aws-cdk-lib/aws-logs";
+
+import { environments } from "../../../config/environments";
+import { projects, getProjectConfig } from "../../../config/projects";
 
 // ============================================================================
 // AWS CONFIGURATION
@@ -17,6 +21,7 @@ import * as logs from "aws-cdk-lib/aws-logs";
 
 /**
  * Default AWS configuration for all tests
+ * Uses mock account/region for CDK synthesis
  */
 export const AWS_CONFIG = {
   ACCOUNT: "123456789012",
@@ -29,9 +34,18 @@ export const AWS_CONFIG = {
 
 /**
  * Network configuration constants
+ * Uses values from config/environments.ts where applicable
  */
 export const NETWORK_CONFIG = {
-  VPC_CIDR: "10.0.0.0/16",
+  // VPC CIDRs from config
+  VPC_CIDR: environments.development.vpcCidr,
+  VPC_CIDRS: {
+    DEVELOPMENT: environments.development.vpcCidr,
+    STAGING: environments.staging.vpcCidr,
+    PRODUCTION: environments.production.vpcCidr,
+    PIPELINE: environments.pipeline.vpcCidr,
+  },
+  // Test-specific values
   ALLOWED_CIDR: "10.0.0.0/8",
   EXPECTED_SUBNETS: {
     PUBLIC: 2,
@@ -39,6 +53,13 @@ export const NETWORK_CONFIG = {
     TOTAL: 4,
   },
   EXPECTED_AZS: 2,
+  // NAT gateway counts from config
+  NAT_GATEWAYS: {
+    DEVELOPMENT: environments.development.natGateways ?? 0,
+    STAGING: environments.staging.natGateways ?? 0,
+    PRODUCTION: environments.production.natGateways ?? 0,
+    PIPELINE: environments.pipeline.natGateways ?? 0,
+  },
 } as const;
 
 // ============================================================================
@@ -47,11 +68,15 @@ export const NETWORK_CONFIG = {
 
 /**
  * Environment configuration
+ * Environment names from config/environments.ts
  */
 export const ENVIRONMENT_CONFIG = {
   DEVELOPMENT: "development",
   PRODUCTION: "production",
   STAGING: "staging",
+  PIPELINE: "pipeline",
+  // Full environment objects from config
+  ENVIRONMENTS: environments,
 } as const;
 
 // ============================================================================
@@ -60,10 +85,17 @@ export const ENVIRONMENT_CONFIG = {
 
 /**
  * Project configuration
+ * Project names and config from config/projects.ts
  */
 export const PROJECT_CONFIG = {
   NAME: "monitoring",
   FLOW_LOG_RETENTION: logs.RetentionDays.ONE_WEEK,
+  // Project names from config
+  NAMES: Object.keys(projects),
+  // Full project objects from config
+  PROJECTS: projects,
+  // Helper to get project config
+  getConfig: getProjectConfig,
 } as const;
 
 // ============================================================================
@@ -72,11 +104,14 @@ export const PROJECT_CONFIG = {
 
 /**
  * Capacity configuration for ECS
+ * Uses monitoring project config from config/projects.ts
  */
+const monitoringConfig = getProjectConfig("monitoring", "development");
+
 export const CAPACITY_CONFIG = {
-  MIN: 1,
-  DESIRED: 1,
-  MAX: 2,
+  MIN: monitoringConfig.compute?.minCapacity ?? 1,
+  DESIRED: monitoringConfig.compute?.desiredCapacity ?? 1,
+  MAX: monitoringConfig.compute?.maxCapacity ?? 2,
 } as const;
 
 // ============================================================================
@@ -145,6 +180,10 @@ export const TAG_KEYS = {
   STACK_NAME: "StackName",
   SUBNET_TYPE: "aws-cdk:subnet-type",
   NAME: "Name",
+  COST_CENTRE: "CostCentre",
+  OWNER: "Owner",
+  COMPLIANCE: "Compliance",
+  DATA_CLASSIFICATION: "DataClassification",
 } as const;
 
 // ============================================================================
@@ -361,3 +400,15 @@ export const SECURITY_OUTPUT_NAMES = {
   SCHEDULE_RULE_ARN: "ScheduleRuleArn",
   MANUAL_RUN_INFO: "ManualRunInfo",
 } as const;
+
+// ============================================================================
+// CONFIG RE-EXPORTS FOR CONVENIENCE
+// ============================================================================
+
+/**
+ * Re-export config modules for convenience
+ */
+export { environments } from "../../../config/environments";
+export { projects, getProjectConfig } from "../../../config/projects";
+export { getSecurityBaseline } from "../../../config/security-baseline";
+export { getDefaultTags } from "../../../config/tagging";

@@ -237,6 +237,14 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
             "Value": "VpcFlowLogs",
           },
           {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
             "Key": "Environment",
             "Value": "development",
           },
@@ -251,6 +259,10 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
           {
             "Key": "NetworkType",
             "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
           },
           {
             "Key": "StackName",
@@ -282,6 +294,14 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
             "Value": "VpcFlowLogs",
           },
           {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
             "Key": "Environment",
             "Value": "development",
           },
@@ -296,6 +316,10 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
           {
             "Key": "NetworkType",
             "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
           },
           {
             "Key": "StackName",
@@ -387,6 +411,14 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
             "Value": "VpcFlowLogs",
           },
           {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
             "Key": "Environment",
             "Value": "development",
           },
@@ -407,6 +439,10 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
             "Value": "SharedVpc",
           },
           {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
+          {
             "Key": "StackName",
             "Value": "Networking",
           },
@@ -421,10 +457,13 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
         "Name": "/networking/development/config/vpc-id",
         "Tags": {
           "Component": "SSMParameters",
+          "CostCentre": "DEV-001",
+          "DataClassification": "internal",
           "Environment": "development",
           "Layer": "Foundation",
           "ManagedBy": "CDK",
           "NetworkType": "SharedVpc",
+          "Repository": "monitoring-iac",
           "StackName": "Networking",
         },
         "Tier": "Standard",
@@ -441,10 +480,13 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
         "Name": "/networking/development/config/vpc-cidr",
         "Tags": {
           "Component": "SSMParameters",
+          "CostCentre": "DEV-001",
+          "DataClassification": "internal",
           "Environment": "development",
           "Layer": "Foundation",
           "ManagedBy": "CDK",
           "NetworkType": "SharedVpc",
+          "Repository": "monitoring-iac",
           "StackName": "Networking",
         },
         "Tier": "Standard",
@@ -464,10 +506,13 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
         "Name": "/networking/development/config/vpc-azs",
         "Tags": {
           "Component": "SSMParameters",
+          "CostCentre": "DEV-001",
+          "DataClassification": "internal",
           "Environment": "development",
           "Layer": "Foundation",
           "ManagedBy": "CDK",
           "NetworkType": "SharedVpc",
+          "Repository": "monitoring-iac",
           "StackName": "Networking",
         },
         "Tier": "Standard",
@@ -482,10 +527,13 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
         "Name": "/networking/development/config/public-subnet-ids",
         "Tags": {
           "Component": "SSMParameters",
+          "CostCentre": "DEV-001",
+          "DataClassification": "internal",
           "Environment": "development",
           "Layer": "Foundation",
           "ManagedBy": "CDK",
           "NetworkType": "SharedVpc",
+          "Repository": "monitoring-iac",
           "StackName": "Networking",
         },
         "Tier": "Standard",
@@ -513,10 +561,13 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
         "Name": "/networking/development/config/private-subnet-ids",
         "Tags": {
           "Component": "SSMParameters",
+          "CostCentre": "DEV-001",
+          "DataClassification": "internal",
           "Environment": "development",
           "Layer": "Foundation",
           "ManagedBy": "CDK",
           "NetworkType": "SharedVpc",
+          "Repository": "monitoring-iac",
           "StackName": "Networking",
         },
         "Tier": "Standard",
@@ -546,6 +597,14 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
         "InstanceTenancy": "default",
         "Tags": [
           {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
             "Key": "Environment",
             "Value": "development",
           },
@@ -568,6 +627,10 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
           {
             "Key": "NetworkType",
             "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
           },
           {
             "Key": "StackName",
@@ -611,6 +674,14 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
         },
         "Tags": [
           {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
             "Key": "Environment",
             "Value": "development",
           },
@@ -633,6 +704,10 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
           {
             "Key": "NetworkType",
             "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
           },
           {
             "Key": "StackName",
@@ -672,6 +747,14 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
         ],
         "Tags": [
           {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
             "Key": "Environment",
             "Value": "development",
           },
@@ -694,6 +777,10 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
           {
             "Key": "NetworkType",
             "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
           },
           {
             "Key": "StackName",
@@ -751,6 +838,14 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
         ],
         "Tags": [
           {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
             "Key": "Environment",
             "Value": "development",
           },
@@ -773,6 +868,10 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
           {
             "Key": "NetworkType",
             "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
           },
           {
             "Key": "StackName",
@@ -793,6 +892,14 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
       "Properties": {
         "Tags": [
           {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
             "Key": "Environment",
             "Value": "development",
           },
@@ -817,6 +924,10 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
             "Value": "SharedVpc",
           },
           {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
+          {
             "Key": "StackName",
             "Value": "Networking",
           },
@@ -831,6 +942,14 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
     "VpcPrivateSubnet1RouteTable901BAEEE": {
       "Properties": {
         "Tags": [
+          {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
           {
             "Key": "Environment",
             "Value": "development",
@@ -854,6 +973,10 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
           {
             "Key": "NetworkType",
             "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
           },
           {
             "Key": "StackName",
@@ -896,6 +1019,14 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
             "Value": "Private",
           },
           {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
             "Key": "Environment",
             "Value": "development",
           },
@@ -920,6 +1051,10 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
             "Value": "SharedVpc",
           },
           {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
+          {
             "Key": "StackName",
             "Value": "Networking",
           },
@@ -937,6 +1072,14 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
     "VpcPrivateSubnet2RouteTable1EA00C9D": {
       "Properties": {
         "Tags": [
+          {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
           {
             "Key": "Environment",
             "Value": "development",
@@ -960,6 +1103,10 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
           {
             "Key": "NetworkType",
             "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
           },
           {
             "Key": "StackName",
@@ -1002,6 +1149,14 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
             "Value": "Private",
           },
           {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
             "Key": "Environment",
             "Value": "development",
           },
@@ -1024,6 +1179,10 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
           {
             "Key": "NetworkType",
             "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
           },
           {
             "Key": "StackName",
@@ -1059,6 +1218,14 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
       "Properties": {
         "Tags": [
           {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
             "Key": "Environment",
             "Value": "development",
           },
@@ -1081,6 +1248,10 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
           {
             "Key": "NetworkType",
             "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
           },
           {
             "Key": "StackName",
@@ -1123,6 +1294,14 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
             "Value": "Public",
           },
           {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
             "Key": "Environment",
             "Value": "development",
           },
@@ -1145,6 +1324,10 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
           {
             "Key": "NetworkType",
             "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
           },
           {
             "Key": "StackName",
@@ -1180,6 +1363,14 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
       "Properties": {
         "Tags": [
           {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
             "Key": "Environment",
             "Value": "development",
           },
@@ -1202,6 +1393,10 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
           {
             "Key": "NetworkType",
             "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
           },
           {
             "Key": "StackName",
@@ -1244,6 +1439,14 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
             "Value": "Public",
           },
           {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
             "Key": "Environment",
             "Value": "development",
           },
@@ -1266,6 +1469,10 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
           {
             "Key": "NetworkType",
             "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
           },
           {
             "Key": "StackName",
@@ -1332,6 +1539,14 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
         },
         "Tags": [
           {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
             "Key": "Environment",
             "Value": "development",
           },
@@ -1354,6 +1569,10 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
           {
             "Key": "NetworkType",
             "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
           },
           {
             "Key": "StackName",
@@ -1393,6 +1612,14 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
         ],
         "Tags": [
           {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
             "Key": "Environment",
             "Value": "development",
           },
@@ -1415,6 +1642,10 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
           {
             "Key": "NetworkType",
             "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
           },
           {
             "Key": "StackName",
@@ -1472,6 +1703,14 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
         ],
         "Tags": [
           {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
             "Key": "Environment",
             "Value": "development",
           },
@@ -1494,6 +1733,10 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
           {
             "Key": "NetworkType",
             "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
           },
           {
             "Key": "StackName",
@@ -1532,6 +1775,14 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
         ],
         "Tags": [
           {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
             "Key": "Environment",
             "Value": "development",
           },
@@ -1554,6 +1805,10 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
           {
             "Key": "NetworkType",
             "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
           },
           {
             "Key": "StackName",
@@ -1611,6 +1866,14 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
         ],
         "Tags": [
           {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
             "Key": "Environment",
             "Value": "development",
           },
@@ -1633,6 +1896,10 @@ exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for mi
           {
             "Key": "NetworkType",
             "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
           },
           {
             "Key": "StackName",
