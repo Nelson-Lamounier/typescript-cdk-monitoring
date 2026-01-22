@@ -5,8 +5,8 @@ import * as cdk from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 
-import { SuppressionManager } from "../../cdk-nag/suppression-manager";
-import { CrossAccountTarget } from "../../types";
+import { SuppressionManager } from "../../cdk-nag";
+import { CrossAccountTarget } from "../../shared/types/monitoring-types";
 
 // ============================================================================
 // EBS STORAGE STACK

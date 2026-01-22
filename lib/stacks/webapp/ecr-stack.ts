@@ -6,7 +6,7 @@ import { Construct } from "constructs";
 
 import { EcrConstruct } from "../../constructs/storage/ecr/ecr-construct";
 import { EnvironmentConfig } from "../../../config/environments";
-import { SuppressionManager } from "../../cdk-nag/suppression-manager";
+import { SuppressionManager } from "../../cdk-nag";
 
 /**
  * Properties for WebappEcrStack

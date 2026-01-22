@@ -8,7 +8,7 @@ import { Construct } from "constructs";
 import { EnvironmentConfig } from "../../../config/environments";
 import { ApiGatewayConstruct } from "../../constructs/networking/api/api-gateway-construct";
 import { LambdaFunctionConstruct } from "../../constructs/compute/lambda/lambda-function-construct";
-import { SuppressionManager } from "../../cdk-nag/suppression-manager";
+import { SuppressionManager } from "../../cdk-nag";
 import * as path from "path";
 
 /**

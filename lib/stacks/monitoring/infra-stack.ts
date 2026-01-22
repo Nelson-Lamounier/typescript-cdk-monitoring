@@ -13,7 +13,7 @@ import { NagSuppressions } from "cdk-nag";
 import { Construct } from "constructs";
 
 import { SuppressionManager } from "../../cdk-nag";
-import { UserDataConstruct } from "../../shared/helpers/user-data-construct";
+import { UserDataConstruct } from "../../constructs/compute/ec2";
 import { getInstanceTypeFromConfigWithEnvDefault } from "../../shared/helpers/instance-type-helper";
 import { EcsClusterConstruct } from "../../constructs/compute/ecs";
 import { LaunchTemplateConstruct } from "../../constructs/compute/launch-template";

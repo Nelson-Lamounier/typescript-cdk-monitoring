@@ -8,7 +8,7 @@ import { Construct } from "constructs";
 import { DynamoDbTableConstruct } from "../../constructs/storage/dynamodb/dynamodb-table-construct";
 import { S3BucketConstruct } from "../../constructs/storage/s3/s3-bucket-construct";
 import { EnvironmentConfig } from "../../../config/environments";
-import { SuppressionManager } from "../../cdk-nag/suppression-manager";
+import { SuppressionManager } from "../../cdk-nag";
 
 /**
  * Properties for WebappDynamoDbStack

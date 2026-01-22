@@ -10,9 +10,9 @@ import { SuppressionManager } from "../../cdk-nag";
 import {
   EfsFileSystemConstruct,
   EfsAccessPointConstruct,
+  EfsInitializationDocumentConstruct,
 } from "../../constructs/storage/efs";
 import { EfsSecurityGroupConstruct } from "../storage/efs-file-system-stack";
-import { EfsInitializationDocumentConstruct } from "../../constructs/ssm/efs-initialization-document";
 import { SsmParametersConstruct } from "../../constructs/config";
 import { applyStackTags } from "../../shared/helpers/stack-tagging-helper";
 import { buildPrometheusConfig } from "../../shared/helpers/prometheus-config-builder";
