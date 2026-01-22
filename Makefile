@@ -71,6 +71,7 @@ help: ## Show this help message
 	@echo "$(YELLOW)Examples:$(NC)"
 	@echo "  make verify-efs                    # Verify EFS stack with defaults"
 	@echo "  make verify-infra                  # Verify Infrastructure stack"
+	@echo "  make verify-webapp-all             # Verify all webapp stacks"
 	@echo "  make deploy-all                    # Deploy all stacks in order"
 	@echo "  make ENVIRONMENT=production deploy-efs  # Deploy to production"
 	@echo ""
@@ -220,6 +221,85 @@ verify-environment: ## Verify CDK deployment environment setup
 		--environment $(ENVIRONMENT) \
 		--aws-region $(AWS_REGION) \
 		--auto-build-on-failure
+
+# ============================================================================
+# WEBAPP VERIFICATION TARGETS
+# ============================================================================
+
+verify-webapp-ecr: ## Verify Webapp ECR repository deployment
+	@echo "$(BLUE)Verifying Webapp ECR Repository...$(NC)"
+	@echo "Environment: $(ENVIRONMENT)"
+	@echo "AWS Region: $(AWS_REGION)"
+	@if [ -n "$(AWS_PROFILE)" ]; then \
+		echo "AWS Profile: $(AWS_PROFILE)"; \
+		npx tsx scripts/integration/deployment/webapp/verify-ecr-stack.ts \
+			--environment $(ENVIRONMENT) \
+			--region $(AWS_REGION) \
+			--profile $(AWS_PROFILE); \
+	else \
+		echo "AWS Profile: (using default credentials)"; \
+		npx tsx scripts/integration/deployment/webapp/verify-ecr-stack.ts \
+			--environment $(ENVIRONMENT) \
+			--region $(AWS_REGION); \
+	fi
+
+verify-webapp-dynamodb: ## Verify Webapp DynamoDB table and S3 bucket deployment
+	@echo "$(BLUE)Verifying Webapp DynamoDB Stack...$(NC)"
+	@echo "Environment: $(ENVIRONMENT)"
+	@echo "AWS Region: $(AWS_REGION)"
+	@if [ -n "$(AWS_PROFILE)" ]; then \
+		echo "AWS Profile: $(AWS_PROFILE)"; \
+		npx tsx scripts/integration/deployment/webapp/verify-dynamodb-stack.ts \
+			--environment $(ENVIRONMENT) \
+			--region $(AWS_REGION) \
+			--profile $(AWS_PROFILE); \
+	else \
+		echo "AWS Profile: (using default credentials)"; \
+		npx tsx scripts/integration/deployment/webapp/verify-dynamodb-stack.ts \
+			--environment $(ENVIRONMENT) \
+			--region $(AWS_REGION); \
+	fi
+
+verify-webapp-api: ## Verify Webapp API Gateway and Lambda deployment
+	@echo "$(BLUE)Verifying Webapp API Stack...$(NC)"
+	@echo "Environment: $(ENVIRONMENT)"
+	@echo "AWS Region: $(AWS_REGION)"
+	@if [ -n "$(SKIP_SMOKE_TESTS)" ] && [ "$(SKIP_SMOKE_TESTS)" = "true" ]; then \
+		echo "Smoke Tests: Skipped"; \
+	else \
+		echo "Smoke Tests: Enabled"; \
+	fi
+	@if [ -n "$(AWS_PROFILE)" ]; then \
+		echo "AWS Profile: $(AWS_PROFILE)"; \
+		if [ -n "$(SKIP_SMOKE_TESTS)" ] && [ "$(SKIP_SMOKE_TESTS)" = "true" ]; then \
+			npx tsx scripts/integration/deployment/webapp/verify-api-stack.ts \
+				--environment $(ENVIRONMENT) \
+				--region $(AWS_REGION) \
+				--profile $(AWS_PROFILE) \
+				--skip-smoke-tests; \
+		else \
+			npx tsx scripts/integration/deployment/webapp/verify-api-stack.ts \
+				--environment $(ENVIRONMENT) \
+				--region $(AWS_REGION) \
+				--profile $(AWS_PROFILE); \
+		fi \
+	else \
+		echo "AWS Profile: (using default credentials)"; \
+		if [ -n "$(SKIP_SMOKE_TESTS)" ] && [ "$(SKIP_SMOKE_TESTS)" = "true" ]; then \
+			npx tsx scripts/integration/deployment/webapp/verify-api-stack.ts \
+				--environment $(ENVIRONMENT) \
+				--region $(AWS_REGION) \
+				--skip-smoke-tests; \
+		else \
+			npx tsx scripts/integration/deployment/webapp/verify-api-stack.ts \
+				--environment $(ENVIRONMENT) \
+				--region $(AWS_REGION); \
+		fi \
+	fi
+
+verify-webapp-all: verify-networking verify-webapp-ecr verify-webapp-dynamodb verify-webapp-api ## Verify all webapp stacks in order
+	@echo ""
+	@echo "$(GREEN)✓ All webapp verification checks completed$(NC)"
 
 # ============================================================================
 # DEPLOYMENT TARGETS
