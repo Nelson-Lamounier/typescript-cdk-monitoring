@@ -14,6 +14,7 @@ import { Construct } from "constructs";
 
 import { SuppressionManager } from "../../cdk-nag";
 import { UserDataConstruct } from "../../shared/helpers/user-data-construct";
+import { getInstanceTypeFromConfigWithEnvDefault } from "../../shared/helpers/instance-type-helper";
 import { EcsClusterConstruct } from "../../constructs/compute/ecs";
 import { LaunchTemplateConstruct } from "../../constructs/compute/launch-template";
 import { SsmStateManagerConstruct } from "../../constructs/compute/ssm";
@@ -39,6 +40,7 @@ import {
   validateCapacityOrder,
 } from "../../shared/utils/validation";
 import { isProductionEnvironment } from "../../shared/utils/environment";
+import { getProjectConfig } from "../../../config/projects";
 
 /**
  * MonitoringInfraStack - Layer 1: Long-lived Infrastructure
@@ -246,15 +248,15 @@ export class MonitoringInfraStack extends cdk.Stack {
 
     validateCapacityOrder(minCapacity, desiredCapacity, maxCapacity);
 
-    // Instance type selection based on environment capacity requirements
-    // Development/Staging: t3.small (2 GiB) - sufficient for reduced memory tasks
-    // Production: t3.medium (4 GiB) - provides buffer for full memory allocation
+    // Instance type selection from centralised configuration
+    // Reads from config/projects.ts with environment-specific overrides applied
+    // Development: t3.small (2 GiB) by default - sufficient for reduced memory tasks
+    // Production: t3.medium (4 GiB) by default - provides buffer for full memory allocation
     // See docs/CAPACITY_ANALYSIS.md for detailed memory planning
+    const projectConfig = getProjectConfig("monitoring", props.envName);
     const instanceType =
       props.instanceType ??
-      (isProduction
-        ? ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MEDIUM) // 4 GiB for production
-        : ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.SMALL)); // 2 GiB for dev/staging
+      getInstanceTypeFromConfigWithEnvDefault(projectConfig, isProduction);
 
     // ========================================================================
     // PRODUCTION WARNINGS

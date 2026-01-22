@@ -412,14 +412,18 @@ export class DynamoDbTableConstruct extends Construct {
       writeCapacity: props.writeCapacity,
       encryption,
       encryptionKey,
-      pointInTimeRecovery,
+      pointInTimeRecoverySpecification: pointInTimeRecovery
+        ? { pointInTimeRecoveryEnabled: true }
+        : undefined,
       removalPolicy,
       deletionProtection,
       stream: props.stream,
       timeToLiveAttribute: props.timeToLive?.enabled
         ? props.timeToLive.attributeName
         : undefined,
-      contributorInsightsEnabled: props.contributorInsights ?? false,
+      contributorInsightsSpecification: props.contributorInsights
+        ? { enabled: true }
+        : undefined,
     });
 
     this.tableArn = this.table.tableArn;

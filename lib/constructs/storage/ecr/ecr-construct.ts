@@ -161,6 +161,8 @@ export class EcrConstruct extends Construct {
     }
 
     if (principals.length > 0) {
+      // Repository policy is implicitly scoped to the repository
+      // Adding resources: [this.repository.repositoryArn] creates circular dependency
       this.repository.addToResourcePolicy(
         new iam.PolicyStatement({
           effect: iam.Effect.ALLOW,
@@ -174,7 +176,7 @@ export class EcrConstruct extends Construct {
             "ecr:PutImage",
             "ecr:UploadLayerPart",
           ],
-          resources: [this.repository.repositoryArn],
+          // resources field omitted - ECR repository policy is automatically scoped to this repository
         })
       );
     }

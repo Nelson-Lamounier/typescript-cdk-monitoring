@@ -16,6 +16,8 @@ import { EcsTaskExecutionRole } from "../../constructs/iam/ecs-task-execution-ro
 import { SuppressionManager } from "../../cdk-nag/suppression-manager";
 import { CrossAccountTarget } from "../../types";
 import { EcsApplicationConfig } from "../../types/ecs-service-config";
+import { getInstanceTypeFromConfig } from "../../shared/helpers/instance-type-helper";
+import { getProjectConfig } from "../../../config/projects";
 
 import { LaunchTemplateConstruct } from "./launch-template-stack";
 
@@ -675,16 +677,20 @@ export class EcsStack extends cdk.Stack {
 
     // Create launch template using LaunchTemplateConstruct
     // This ensures IMDSv2 is required and follows security best practices
+    // Instance type is read from centralised configuration (config/projects.ts)
+    const projectConfig = getProjectConfig(
+      props.applicationName || "webapp",
+      envName
+    );
+    const instanceType = getInstanceTypeFromConfig(projectConfig, "t3.small");
+
     const launchTemplateConstruct = new LaunchTemplateConstruct(
       this,
       "EcsLaunchTemplate",
       {
         vpc,
         envName,
-        instanceType: ec2.InstanceType.of(
-          ec2.InstanceClass.T3,
-          ec2.InstanceSize.SMALL
-        ),
+        instanceType,
         // Using Amazon Linux 2023 ECS-optimized AMI (Amazon Linux 2 reaches EOL June 30, 2026)
         machineImage: ecs.EcsOptimizedImage.amazonLinux2023(),
         userData: ecsUserData,
