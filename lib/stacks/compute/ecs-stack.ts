@@ -13,9 +13,9 @@ import { NagSuppressions } from "cdk-nag";
 import { Construct } from "constructs";
 
 import { EcsTaskExecutionRole } from "../../constructs/iam/ecs-task-execution-role";
-import { SuppressionManager } from "../../cdk-nag/suppression-manager";
-import { CrossAccountTarget } from "../../types";
-import { EcsApplicationConfig } from "../../types/ecs-service-config";
+import { SuppressionManager } from "../../cdk-nag";
+import { CrossAccountTarget } from "../../shared/types/monitoring-types";
+import { EcsApplicationConfig } from "../../shared/types/compute-types";
 import { getInstanceTypeFromConfig } from "../../shared/helpers/instance-type-helper";
 import { getProjectConfig } from "../../../config/projects";
 

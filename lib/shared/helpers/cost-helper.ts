@@ -410,5 +410,11 @@ export function getCostEstimate(
   }
   
   const envCost = estimate[envName as keyof CostEstimate];
-  return envCost || "Not specified for this environment";
+  
+  // Ensure we return a string (notes field is string[])
+  if (typeof envCost === "string") {
+    return envCost;
+  }
+  
+  return "Not specified for this environment";
 }

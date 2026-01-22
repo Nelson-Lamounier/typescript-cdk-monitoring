@@ -13,7 +13,7 @@ import { EcsTaskExecutionRole } from "../../constructs/iam/ecs-task-execution-ro
 import {
   EcsServiceConfig,
   VolumeMountConfig,
-} from "../../types/ecs-service-config";
+} from "../../shared/types/compute-types";
 
 import { EcsTaskDefinitionConstruct } from "./ecs-stack";
 

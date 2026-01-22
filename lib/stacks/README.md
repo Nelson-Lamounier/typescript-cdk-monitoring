@@ -81,7 +81,7 @@ interface NetworkingStackProps extends cdk.StackProps {
 #### Basic Usage
 
 ```typescript
-import { NetworkingStack } from './lib/stacks/networking-stack';
+import { NetworkingStack } from './lib/stacks/foundation/networking-stack';
 import { VpcConstruct, VpcFlowLogsConstruct } from './lib/constructs/networking/vpc';
 import { SubnetConfigurationHelper } from './lib/shared/helpers';
 import * as cdk from 'aws-cdk-lib';

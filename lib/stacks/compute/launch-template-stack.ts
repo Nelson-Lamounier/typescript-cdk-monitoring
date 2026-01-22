@@ -7,7 +7,7 @@ import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as iam from "aws-cdk-lib/aws-iam";
 import { Tags } from "aws-cdk-lib";
 
-import { SuppressionManager } from "../../cdk-nag/suppression-manager";
+import { SuppressionManager } from "../../cdk-nag";
 
 export interface LaunchTemplateConstructProps {
   vpc: ec2.IVpc;
