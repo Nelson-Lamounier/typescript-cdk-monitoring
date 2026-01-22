@@ -8,3 +8,6 @@ export * from "./efs";
 
 // S3 constructs
 export * from "./s3";
+
+// DynamoDB constructs
+export * from "./dynamodb";
