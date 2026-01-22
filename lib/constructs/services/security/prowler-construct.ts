@@ -415,6 +415,9 @@ export class ProwlerConstruct extends Construct {
    *
    * Use this method to trigger an ad-hoc scan outside the schedule.
    * Returns the command to run via AWS CLI.
+   *
+   * Note: EC2 launch type uses the cluster's capacity provider and does not
+   * require network configuration (uses BRIDGE networking mode).
    */
   public getManualRunCommand(): string {
     const stack = cdk.Stack.of(this);
@@ -422,8 +425,7 @@ export class ProwlerConstruct extends Construct {
       `aws ecs run-task \\
   --cluster ${this.taskDefinition.taskRole?.roleName?.replace("-task-role", "")} \\
   --task-definition ${this.taskDefinition.family} \\
-  --launch-type FARGATE \\
-  --network-configuration "awsvpcConfiguration={subnets=[SUBNET_ID],securityGroups=[SG_ID],assignPublicIp=ENABLED}" \\
+  --launch-type EC2 \\
   --region ${stack.region}`
     );
   }

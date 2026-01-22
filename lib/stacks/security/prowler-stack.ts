@@ -299,8 +299,8 @@ export class ProwlerStack extends cdk.Stack {
 
     // Manual run command for ad-hoc scans
     new cdk.CfnOutput(this, "ManualRunInfo", {
-      value: `aws ecs run-task --cluster ${this.cluster.clusterName} --task-definition ${this.prowler.taskDefinition.family} --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[SUBNET_ID],assignPublicIp=ENABLED}"`,
-      description: "Command template for manual Prowler scan (replace SUBNET_ID)",
+      value: `aws ecs run-task --cluster ${this.cluster.clusterName} --task-definition ${this.prowler.taskDefinition.family} --launch-type EC2`,
+      description: "Command to trigger manual Prowler scan (uses EC2 cluster capacity)",
     });
   }
 }
