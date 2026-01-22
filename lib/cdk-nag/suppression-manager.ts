@@ -4,6 +4,32 @@ import * as cdk from "aws-cdk-lib";
 import { NagPackSuppression } from "cdk-nag";
 
 /**
+ * Supported stack types for CDK Nag suppression management
+ * 
+ * Organised by domain:
+ * - Compute: ECS and compute-related stacks
+ * - Monitoring: Prometheus, Grafana, and observability stacks
+ * - Networking: VPC, ALB, and network infrastructure stacks
+ * - Webapp: Application-specific stacks (isolated domain)
+ */
+export type StackType =
+  // Compute Domain
+  | "ComputeStack"
+  // Monitoring Domain
+  | "MonitoringStack"
+  | "MonitoringInfraStack"
+  | "MonitoringEfsStack"
+  | "MonitoringServiceStack"
+  // Networking Domain
+  | "NetworkingStack"
+  | "LoadBalancerStack"
+  | "CertificateStack"
+  // Webapp Domain (Isolated)
+  | "WebappEcrStack"
+  | "WebappDynamoDbStack"
+  | "WebappApiStack";
+
+/**
  * Centralized CDK Nag Suppression Manager
  *
  * This file contains all CDK Nag suppressions organized by category.
@@ -580,18 +606,7 @@ export class SuppressionManager {
    */
   static applyToStack(
     stack: cdk.Stack,
-    stackType:
-      | "ComputeStack"
-      | "MonitoringStack"
-      | "MonitoringEfsStack"
-      | "MonitoringInfraStack"
-      | "MonitoringServiceStack"
-      | "NetworkingStack"
-      | "LoadBalancerStack"
-      | "CertificateStack"
-      | "WebappEcrStack" // Webapp domain - ECR repository
-      | "WebappDynamoDbStack" // Webapp domain - DynamoDB + S3
-      | "WebappApiStack", // Webapp domain - API Gateway + Lambda
+    stackType: StackType,
     envName?: string
   ): void {
     // eslint-disable-next-line @typescript-eslint/no-require-imports

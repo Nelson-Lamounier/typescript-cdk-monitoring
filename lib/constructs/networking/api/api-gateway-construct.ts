@@ -1,6 +1,7 @@
 /** @format */
 
 import * as cdk from "aws-cdk-lib";
+import * as acm from "aws-cdk-lib/aws-certificatemanager";
 import * as apigateway from "aws-cdk-lib/aws-apigateway";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as logs from "aws-cdk-lib/aws-logs";
@@ -383,7 +384,7 @@ export class ApiGatewayConstruct extends Construct {
       // Custom domain requires ACM certificate
       const domain = new apigateway.DomainName(this, "CustomDomain", {
         domainName: customDomain.domainName,
-        certificate: apigateway.Certificate.fromCertificateArn(
+        certificate: acm.Certificate.fromCertificateArn(
           this,
           "Certificate",
           customDomain.certificateArn
@@ -625,7 +626,7 @@ export class ApiGatewayConstruct extends Construct {
   public createApiKey(
     keyName: string,
     description?: string
-  ): apigateway.ApiKey {
+  ): apigateway.IApiKey {
     return this.api.addApiKey(`${keyName}Key`, {
       apiKeyName: `${this.api.restApiName}-${keyName}`,
       description: description || `API key for ${keyName}`,

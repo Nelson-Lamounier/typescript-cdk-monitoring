@@ -5,7 +5,7 @@ import * as cdk from "aws-cdk-lib";
 import * as iam from "aws-cdk-lib/aws-iam";
 import { NagSuppressions } from "cdk-nag";
 
-import { SuppressionManager } from "../../cdk-nag/suppression-manager";
+import { SuppressionManager } from "../../cdk-nag";
 
 export interface EcsTaskExecutionRoleProps {
   envName: string;

@@ -11,6 +11,3 @@ export * from "./api";
 
 // Security constructs
 export * from "./security";
-
-// VPC Peering constructs
-export * from "./vpc/vpc-peering-construct";

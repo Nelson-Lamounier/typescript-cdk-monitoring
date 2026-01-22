@@ -1,3 +1,3 @@
 /** @format */
 
-export { SuppressionManager } from "./suppression-manager";
+export { SuppressionManager, type StackType } from "./suppression-manager";

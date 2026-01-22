@@ -9,7 +9,7 @@ import { Construct } from "constructs";
 // Import types
 import type { LaunchTemplateConstructProps } from "../../../shared/types";
 // Import helpers
-import { UserDataConstruct } from "../../../shared/helpers/user-data-construct";
+import { UserDataConstruct } from "../ec2";
 import { Ec2InstanceRole } from "../../iam/ec2-instance-role";
 
 /**
