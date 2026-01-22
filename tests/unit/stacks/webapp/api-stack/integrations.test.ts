@@ -38,6 +38,8 @@ describe("WebappApiStack: API Gateway Integrations", () => {
   describe("REST API Resources", () => {
     let template: Template;
     let resources: Array<{ pathPart: string }>;
+    let tagResources: Array<{ pathPart: string }>;
+    let parameterResources: Array<{ pathPart: string }>;
 
     beforeAll(() => {
       const app = createTestApp();
@@ -53,6 +55,14 @@ describe("WebappApiStack: API Gateway Integrations", () => {
           pathPart: props.PathPart as string,
         };
       });
+
+      // Pre-compute tag-related resources
+      tagResources = resources.filter(
+        (r) => r.pathPart === "tag" || r.pathPart === "{tag}"
+      );
+
+      // Pre-compute parameter resources (those with curly braces)
+      parameterResources = resources.filter((r) => r.pathPart.includes("{"));
     });
 
     test("should create /articles resource", () => {
@@ -75,18 +85,10 @@ describe("WebappApiStack: API Gateway Integrations", () => {
 
     test("should create /articles/tag/{tag} resource", () => {
       // Should have both 'tag' path and '{tag}' parameter
-      const tagResources = resources.filter(
-        (r) => r.pathPart === "tag" || r.pathPart === "{tag}"
-      );
-
       expect(tagResources.length).toBeGreaterThanOrEqual(2);
     });
 
     test("should use curly braces for path parameters", () => {
-      const parameterResources = resources.filter((r) =>
-        r.pathPart.includes("{")
-      );
-
       // Guard assertion
       expect(parameterResources.length).toBeGreaterThan(0);
 
@@ -368,6 +370,10 @@ describe("WebappApiStack: API Gateway Integrations", () => {
       httpMethod: string;
       statusCode: string;
     }>;
+    let corsResponses: Array<{
+      httpMethod: string;
+      statusCode: string;
+    }>;
 
     beforeAll(() => {
       const app = createTestApp();
@@ -392,6 +398,11 @@ describe("WebappApiStack: API Gateway Integrations", () => {
         })
         .flat()
         .filter((r) => r.statusCode);
+
+      // Pre-compute CORS OPTIONS responses with 204 status
+      corsResponses = methodsWithIntegrationResponses.filter(
+        (r) => r.httpMethod === "OPTIONS" && r.statusCode === "204"
+      );
     });
 
     test("should configure CORS response headers in OPTIONS methods", () => {
@@ -417,10 +428,6 @@ describe("WebappApiStack: API Gateway Integrations", () => {
 
     test("should return 200 status code for successful CORS preflight", () => {
       // Actually returns 204 (No Content) which is correct for OPTIONS
-      const corsResponses = methodsWithIntegrationResponses.filter(
-        (r) => r.httpMethod === "OPTIONS" && r.statusCode === "204"
-      );
-
       // Guard assertion - CORS OPTIONS should exist
       expect(corsResponses.length).toBeGreaterThan(0);
     });
