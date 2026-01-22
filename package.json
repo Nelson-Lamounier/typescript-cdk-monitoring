@@ -58,6 +58,8 @@
     "verify:monitoring:infra": "npx tsx scripts/integration/deployment/monitoring/verify-infra-stack.ts",
     "lint": "eslint . --max-warnings 50",
     "lint:fix": "eslint . --fix",
+    "update-pricing": "ts-node scripts/update-pricing.ts",
+    "update-pricing:dry-run": "ts-node scripts/update-pricing.ts --dry-run",
     "lint:monitoring": "yarn lint:cdk",
     "lint:cdk": "tsc && ENABLE_CDK_NAG=false cdk ls > /dev/null && echo 'CDK validation successful'",
     "typecheck": "tsc --noEmit",

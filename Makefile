@@ -3,7 +3,7 @@
 # This Makefile provides convenient targets for common operations including:
 # - Stack verification
 # - CDK deployments
-# - Testing
+# - Testing (granular and domain-based for CI optimization)
 # - Linting
 #
 # Usage: make <target>
@@ -40,6 +40,9 @@ YELLOW := \033[0;33m
 RED := \033[0;31m
 NC := \033[0m # No Colour
 
+# Common test environment variables
+TEST_ENV := CDK_DOCKER_VERBOSE=false CDK_DEBUG=false CDK_ASSET_VERBOSE=false DOCKER_BUILDKIT=1 BUILDKIT_PROGRESS=quiet
+
 # ============================================================================
 # HELP
 # ============================================================================
@@ -49,19 +52,29 @@ help: ## Show this help message
 	@echo "$(BLUE)Monitoring Infrastructure - Available Targets$(NC)"
 	@echo ""
 	@echo "$(GREEN)Verification:$(NC)"
-	@grep -E '^verify-.*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-20s$(NC) %s\n", $$1, $$2}'
+	@grep -E '^verify-.*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-32s$(NC) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(GREEN)Deployment:$(NC)"
-	@grep -E '^deploy-.*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-20s$(NC) %s\n", $$1, $$2}'
+	@grep -E '^deploy-.*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-32s$(NC) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(GREEN)CDK Operations:$(NC)"
-	@grep -E '^(synth|diff|destroy|list):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-20s$(NC) %s\n", $$1, $$2}'
+	@grep -E '^(synth|diff|destroy|list):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-32s$(NC) %s\n", $$1, $$2}'
 	@echo ""
-	@echo "$(GREEN)Testing & Quality:$(NC)"
-	@grep -E '^(test|lint|build):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-20s$(NC) %s\n", $$1, $$2}'
+	@echo "$(GREEN)Testing - Domain (CI Optimized):$(NC)"
+	@grep -E '^test-domain-.*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-32s$(NC) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "$(GREEN)Testing - General:$(NC)"
+	@grep -E '^test(-coverage|-watch|-update-snapshots|-unit|-stacks)?:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-32s$(NC) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "$(GREEN)Testing - Security & Connectivity:$(NC)"
+	@grep -E '^test-(security|connectivity)[^-]*:.*?## .*$$' $(MAKEFILE_LIST) | head -5 | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-32s$(NC) %s\n", $$1, $$2}'
+	@echo "  ... (run 'make help-tests' for full list)"
+	@echo ""
+	@echo "$(GREEN)Linting & Build:$(NC)"
+	@grep -E '^(lint|build|typecheck)(-ci|-fix)?:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-32s$(NC) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(GREEN)Utilities:$(NC)"
-	@grep -E '^(clean|install|check-env):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-20s$(NC) %s\n", $$1, $$2}'
+	@grep -E '^(clean|install|check-env|tree|get-):.*?## .*$$' $(MAKEFILE_LIST) | head -8 | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-32s$(NC) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(YELLOW)Configuration:$(NC)"
 	@echo "  ENVIRONMENT  = $(ENVIRONMENT)"
@@ -69,11 +82,42 @@ help: ## Show this help message
 	@echo "  AWS_REGION   = $(AWS_REGION)"
 	@echo ""
 	@echo "$(YELLOW)Examples:$(NC)"
-	@echo "  make verify-efs                    # Verify EFS stack with defaults"
-	@echo "  make verify-infra                  # Verify Infrastructure stack"
-	@echo "  make verify-webapp-all             # Verify all webapp stacks"
-	@echo "  make deploy-all                    # Deploy all stacks in order"
+	@echo "  make test-domain-webapp              # Run only webapp tests (fast CI)"
+	@echo "  make test-domain-monitoring          # Run only monitoring tests (fast CI)"
+	@echo "  make test-networking                 # Run granular networking tests"
+	@echo "  make verify-webapp-all               # Verify all webapp stacks"
+	@echo "  make deploy-all                      # Deploy all stacks in order"
 	@echo "  make ENVIRONMENT=production deploy-efs  # Deploy to production"
+	@echo ""
+
+help-tests: ## Show all available test targets
+	@echo ""
+	@echo "$(BLUE)All Test Targets$(NC)"
+	@echo ""
+	@echo "$(GREEN)Domain Tests (CI Optimized):$(NC)"
+	@grep -E '^test-domain-.*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-40s$(NC) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "$(GREEN)General Tests:$(NC)"
+	@grep -E '^test(-coverage|-watch|-update-snapshots|-unit|-stacks)?:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-40s$(NC) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "$(GREEN)Security Tests:$(NC)"
+	@grep -E '^test-security.*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-40s$(NC) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "$(GREEN)Connectivity Tests:$(NC)"
+	@grep -E '^test-connectivity.*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-40s$(NC) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "$(GREEN)Networking Tests:$(NC)"
+	@grep -E '^test-networking.*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-40s$(NC) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "$(GREEN)Monitoring Tests:$(NC)"
+	@grep -E '^test-monitoring.*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-40s$(NC) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "$(GREEN)Construct Tests:$(NC)"
+	@grep -E '^test-constructs[^:]*:.*?## .*$$' $(MAKEFILE_LIST) | head -10 | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-40s$(NC) %s\n", $$1, $$2}'
+	@echo "  ... (more construct tests available)"
+	@echo ""
+	@echo "$(GREEN)Helper Tests:$(NC)"
+	@grep -E '^test-helpers.*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-40s$(NC) %s\n", $$1, $$2}'
 	@echo ""
 
 # ============================================================================
@@ -406,20 +450,54 @@ destroy-all: ## Destroy all stacks in reverse order (DANGEROUS)
 	fi
 
 # ============================================================================
-# TESTING & QUALITY
+# DOMAIN-SPECIFIC TEST TARGETS (CI OPTIMIZATION)
+# These targets aggregate tests by deployment domain for faster CI runs
+# ============================================================================
+
+test-domain-monitoring: ## Run monitoring domain tests only (CI optimized)
+	@echo "$(BLUE)Running monitoring domain tests...$(NC)"
+	@echo "Includes: stacks/monitoring, constructs/services/monitoring"
+	@$(TEST_ENV) yarn jest --testPathPattern="stacks/monitoring|constructs/services/monitoring" --passWithNoTests
+
+test-domain-webapp: ## Run webapp domain tests only (CI optimized)
+	@echo "$(BLUE)Running webapp domain tests...$(NC)"
+	@echo "Includes: stacks/webapp, stacks/docs"
+	@$(TEST_ENV) yarn jest --testPathPattern="stacks/webapp|stacks/docs" --passWithNoTests
+
+test-domain-foundation: ## Run foundation/infrastructure tests only (CI optimized)
+	@echo "$(BLUE)Running foundation domain tests...$(NC)"
+	@echo "Includes: stacks/foundation, stacks/networking, stacks/security, stacks/storage, stacks/compute"
+	@$(TEST_ENV) yarn jest --testPathPattern="stacks/foundation|stacks/networking|stacks/security|stacks/storage|stacks/compute" --passWithNoTests
+
+test-domain-constructs: ## Run all construct tests (CI optimized)
+	@echo "$(BLUE)Running construct domain tests...$(NC)"
+	@echo "Includes: all tests under constructs/"
+	@$(TEST_ENV) yarn jest --testPathPattern="constructs/" --passWithNoTests
+
+test-domain-shared: ## Run shared utilities and helpers tests (CI optimized)
+	@echo "$(BLUE)Running shared domain tests...$(NC)"
+	@echo "Includes: shared/, helpers/, utils/, types/"
+	@$(TEST_ENV) yarn jest --testPathPattern="shared/|helpers/|utils/|types/" --passWithNoTests
+
+test-domain-all: test-domain-monitoring test-domain-webapp test-domain-foundation test-domain-constructs test-domain-shared ## Run all domain tests sequentially
+	@echo ""
+	@echo "$(GREEN)✓ All domain tests completed$(NC)"
+
+# ============================================================================
+# GENERAL TESTING & QUALITY
 # ============================================================================
 
 test: ## Run all tests
 	@echo "$(BLUE)Running tests...$(NC)"
-	CDK_DOCKER_VERBOSE=false CDK_DEBUG=false CDK_ASSET_VERBOSE=false DOCKER_BUILDKIT=1 BUILDKIT_PROGRESS=quiet yarn test
+	@$(TEST_ENV) yarn test
 
 test-watch: ## Run tests in watch mode
 	@echo "$(BLUE)Running tests in watch mode...$(NC)"
-	CDK_DOCKER_VERBOSE=false CDK_DEBUG=false CDK_ASSET_VERBOSE=false DOCKER_BUILDKIT=1 BUILDKIT_PROGRESS=quiet yarn test:watch
+	@$(TEST_ENV) yarn test:watch
 
 test-coverage: ## Run tests with coverage report
 	@echo "$(BLUE)Running tests with coverage...$(NC)"
-	CDK_DOCKER_VERBOSE=false CDK_DEBUG=false CDK_ASSET_VERBOSE=false DOCKER_BUILDKIT=1 BUILDKIT_PROGRESS=quiet yarn test --coverage
+	@$(TEST_ENV) yarn test --coverage
 	@echo ""
 	@echo "$(GREEN)Coverage report generated!$(NC)"
 	@echo "$(YELLOW)To view HTML report:$(NC)"
@@ -430,7 +508,7 @@ test-coverage: ## Run tests with coverage report
 
 test-update-snapshots: ## Update Jest snapshots
 	@echo "$(BLUE)Updating Jest snapshots...$(NC)"
-	CDK_DOCKER_VERBOSE=false CDK_DEBUG=false CDK_ASSET_VERBOSE=false DOCKER_BUILDKIT=1 BUILDKIT_PROGRESS=quiet yarn test:update-snapshots
+	@$(TEST_ENV) yarn test:update-snapshots
 
 view-coverage: ## Open coverage HTML report in browser
 	@echo "$(BLUE)Opening coverage report in browser...$(NC)"
@@ -451,195 +529,219 @@ view-coverage: ## Open coverage HTML report in browser
 
 test-unit: ## Run unit tests only
 	@echo "$(BLUE)Running unit tests...$(NC)"
-	yarn test tests/unit
+	@$(TEST_ENV) yarn test tests/unit
+
+test-stacks: test-networking test-monitoring-efs test-monitoring-infra test-monitoring-service ## Run all stack tests
+	@echo "$(GREEN)All stack tests completed$(NC)"
+
+# ============================================================================
+# SECURITY TESTS
+# ============================================================================
 
 test-security: ## Run all security posture tests
 	@echo "$(BLUE)Running security posture tests...$(NC)"
-	yarn test:security
+	@$(TEST_ENV) yarn test:security
 
 test-security-network: ## Run network security tests
 	@echo "$(BLUE)Running network security tests...$(NC)"
-	yarn test:security:network
+	@$(TEST_ENV) yarn test:security:network
 
 test-security-instance: ## Run instance security tests
 	@echo "$(BLUE)Running instance security tests...$(NC)"
-	yarn test:security:instance
+	@$(TEST_ENV) yarn test:security:instance
 
 test-security-storage: ## Run storage security tests
 	@echo "$(BLUE)Running storage security tests...$(NC)"
-	yarn test:security:storage
+	@$(TEST_ENV) yarn test:security:storage
 
 test-security-iam: ## Run IAM security tests
 	@echo "$(BLUE)Running IAM security tests...$(NC)"
-	yarn test:security:iam
+	@$(TEST_ENV) yarn test:security:iam
 
 test-security-monitoring: ## Run monitoring & logging security tests
 	@echo "$(BLUE)Running monitoring & logging security tests...$(NC)"
-	yarn test:security:monitoring
+	@$(TEST_ENV) yarn test:security:monitoring
 
 test-security-application: ## Run application security tests
 	@echo "$(BLUE)Running application security tests...$(NC)"
-	yarn test:security:application
+	@$(TEST_ENV) yarn test:security:application
 
 test-security-compliance: ## Run compliance & governance tests
 	@echo "$(BLUE)Running compliance & governance tests...$(NC)"
-	yarn test:security:compliance
+	@$(TEST_ENV) yarn test:security:compliance
 
 test-security-posture: ## Run legacy security posture test file
 	@echo "$(BLUE)Running legacy security posture tests...$(NC)"
-	yarn test:security-posture
+	@$(TEST_ENV) yarn test:security-posture
+
+# ============================================================================
+# CONNECTIVITY TESTS
+# ============================================================================
 
 test-connectivity: ## Run connectivity integration tests
 	@echo "$(BLUE)Running connectivity tests...$(NC)"
-	yarn test:connectivity
+	@$(TEST_ENV) yarn test:connectivity
 
 test-connectivity-coverage: ## Run connectivity integration tests with coverage
 	@echo "$(BLUE)Running connectivity tests with coverage...$(NC)"
-	yarn test:connectivity:coverage
+	@$(TEST_ENV) yarn test:connectivity:coverage
 
 test-network-connectivity: ## Run network connectivity tests
 	@echo "$(BLUE)Running network connectivity tests...$(NC)"
-	yarn test:network-connectivity
+	@$(TEST_ENV) yarn test:network-connectivity
 
 test-service-connectivity: ## Run service connectivity tests
 	@echo "$(BLUE)Running service connectivity tests...$(NC)"
-	yarn test:service-connectivity
+	@$(TEST_ENV) yarn test:service-connectivity
 
 test-cross-stack-connectivity: ## Run cross-stack connectivity tests
 	@echo "$(BLUE)Running cross-stack connectivity tests...$(NC)"
-	yarn test:cross-stack-connectivity
+	@$(TEST_ENV) yarn test:cross-stack-connectivity
+
+# ============================================================================
+# NETWORKING TESTS
+# ============================================================================
 
 test-networking: ## Run networking stack tests
 	@echo "$(BLUE)Running networking stack tests...$(NC)"
-	yarn test tests/unit/stacks/foundation/networking/
+	@$(TEST_ENV) yarn test tests/unit/stacks/foundation/networking/
 
 test-networking-creation: ## Run networking stack creation tests
 	@echo "$(BLUE)Running networking stack creation tests...$(NC)"
-	yarn test tests/unit/stacks/foundation/networking/networking-stack.creation.test.ts
+	@$(TEST_ENV) yarn test tests/unit/stacks/foundation/networking/networking-stack.creation.test.ts
 
 test-networking-vpc: ## Run networking stack VPC tests
 	@echo "$(BLUE)Running networking stack VPC tests...$(NC)"
-	yarn test tests/unit/stacks/foundation/networking/networking-stack.vpc.test.ts
+	@$(TEST_ENV) yarn test tests/unit/stacks/foundation/networking/networking-stack.vpc.test.ts
 
 test-networking-subnets: ## Run networking stack subnet tests
 	@echo "$(BLUE)Running networking stack subnet tests...$(NC)"
-	yarn test tests/unit/stacks/foundation/networking/networking-stack.subnets.test.ts
+	@$(TEST_ENV) yarn test tests/unit/stacks/foundation/networking/networking-stack.subnets.test.ts
 
 test-networking-nat: ## Run networking stack NAT gateway tests
 	@echo "$(BLUE)Running networking stack NAT gateway tests...$(NC)"
-	yarn test tests/unit/stacks/foundation/networking/networking-stack.nat.test.ts
+	@$(TEST_ENV) yarn test tests/unit/stacks/foundation/networking/networking-stack.nat.test.ts
 
 test-networking-flow-logs: ## Run networking stack flow logs tests
 	@echo "$(BLUE)Running networking stack flow logs tests...$(NC)"
-	yarn test tests/unit/stacks/foundation/networking/networking-stack.flow-logs.test.ts
+	@$(TEST_ENV) yarn test tests/unit/stacks/foundation/networking/networking-stack.flow-logs.test.ts
 
 test-networking-endpoints: ## Run networking stack VPC endpoints tests
 	@echo "$(BLUE)Running networking stack VPC endpoints tests...$(NC)"
-	yarn test tests/unit/stacks/foundation/networking/networking-stack.endpoints.test.ts
+	@$(TEST_ENV) yarn test tests/unit/stacks/foundation/networking/networking-stack.endpoints.test.ts
 
 test-networking-ssm: ## Run networking stack SSM parameters tests
 	@echo "$(BLUE)Running networking stack SSM parameters tests...$(NC)"
-	yarn test tests/unit/stacks/foundation/networking/networking-stack.ssm.test.ts
+	@$(TEST_ENV) yarn test tests/unit/stacks/foundation/networking/networking-stack.ssm.test.ts
 
 test-networking-validation: ## Run networking stack validation tests
 	@echo "$(BLUE)Running networking stack validation tests...$(NC)"
-	yarn test tests/unit/stacks/foundation/networking/networking-stack.validation.test.ts
+	@$(TEST_ENV) yarn test tests/unit/stacks/foundation/networking/networking-stack.validation.test.ts
 
 test-networking-advanced: ## Run networking stack advanced tests
 	@echo "$(BLUE)Running networking stack advanced tests...$(NC)"
-	yarn test tests/unit/stacks/foundation/networking/networking-stack.advanced.test.ts
+	@$(TEST_ENV) yarn test tests/unit/stacks/foundation/networking/networking-stack.advanced.test.ts
+
+# ============================================================================
+# MONITORING TESTS
+# ============================================================================
 
 test-monitoring-efs: ## Run monitoring EFS stack tests
 	@echo "$(BLUE)Running monitoring EFS stack tests...$(NC)"
-	yarn test tests/unit/stacks/monitoring/monitoring-efs-stack.test.ts
+	@$(TEST_ENV) yarn test tests/unit/stacks/monitoring/monitoring-efs-stack.test.ts
 
 test-monitoring-infra: ## Run monitoring infrastructure stack tests
 	@echo "$(BLUE)Running monitoring infrastructure stack tests...$(NC)"
-	yarn test tests/unit/stacks/monitoring/infra/
+	@$(TEST_ENV) yarn test tests/unit/stacks/monitoring/infra/
 
 test-monitoring-service: ## Run monitoring service stack tests
 	@echo "$(BLUE)Running monitoring service stack tests...$(NC)"
-	yarn test tests/unit/stacks/monitoring/monitoring-service-stack.test.ts
-
-test-stacks: test-networking test-monitoring-efs test-monitoring-infra test-monitoring-service ## Run all stack tests
-	@echo "$(BLUE)All stack tests completed$(NC)"
+	@$(TEST_ENV) yarn test tests/unit/stacks/monitoring/monitoring-service-stack.test.ts
 
 # ============================================================================
-# CONSTRUCT TESTS
+# CONSTRUCT TESTS - ECS
 # ============================================================================
 
 test-constructs-ecs-asg: ## Run ECS AutoScalingGroup construct tests
 	@echo "$(BLUE)Running ECS AutoScalingGroup construct tests...$(NC)"
-	yarn test tests/unit/constructs/compute/ecs/auto-scaling-group-construct.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/compute/ecs/auto-scaling-group-construct.test.ts
 
 test-constructs-ecs-cluster: ## Run ECS Cluster construct tests
 	@echo "$(BLUE)Running ECS Cluster construct tests...$(NC)"
-	yarn test tests/unit/constructs/compute/ecs/ecs-cluster-construct.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/compute/ecs/ecs-cluster-construct.test.ts
 
 test-constructs-ecs-service: ## Run ECS Service construct tests
 	@echo "$(BLUE)Running ECS Service construct tests...$(NC)"
-	yarn test tests/unit/constructs/compute/ecs/ecs-service-construct.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/compute/ecs/ecs-service-construct.test.ts
 
 test-constructs-ecs-task-definition: ## Run ECS TaskDefinition construct tests
 	@echo "$(BLUE)Running ECS TaskDefinition construct tests...$(NC)"
-	yarn test tests/unit/constructs/compute/ecs/ecs-task-definition-construct.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/compute/ecs/ecs-task-definition-construct.test.ts
 
 test-constructs-ecs: test-constructs-ecs-asg test-constructs-ecs-cluster test-constructs-ecs-service test-constructs-ecs-task-definition ## Run all ECS construct tests
 	@echo "$(GREEN)All ECS construct tests completed$(NC)"
 
+# ============================================================================
+# CONSTRUCT TESTS - STORAGE
+# ============================================================================
+
 test-constructs-ecr: ## Run ECR construct tests
 	@echo "$(BLUE)Running ECR construct tests...$(NC)"
-	yarn test tests/unit/constructs/storage/ecr-construct.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/storage/ecr-construct.test.ts
 
 test-constructs-efs-access-point: ## Run EFS Access Point construct tests
 	@echo "$(BLUE)Running EFS Access Point construct tests...$(NC)"
-	yarn test tests/unit/constructs/storage/efs-access-point-construct.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/storage/efs-access-point-construct.test.ts
 
 test-constructs-efs-file-system: ## Run EFS File System construct tests
 	@echo "$(BLUE)Running EFS File System construct tests...$(NC)"
-	yarn test tests/unit/constructs/storage/efs-file-system-construct.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/storage/efs-file-system-construct.test.ts
 
 test-constructs-storage: test-constructs-ecr test-constructs-efs-access-point test-constructs-efs-file-system ## Run all storage construct tests
 	@echo "$(GREEN)All storage construct tests completed$(NC)"
 
+# ============================================================================
+# CONSTRUCT TESTS - NETWORKING
+# ============================================================================
+
 test-constructs-alb-listener: ## Run ALB Listener construct tests
 	@echo "$(BLUE)Running ALB Listener construct tests...$(NC)"
-	yarn test tests/unit/constructs/networking/alb-listener-construct.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/networking/alb-listener-construct.test.ts
 
 test-constructs-alb-target-group: ## Run ALB Target Group construct tests
 	@echo "$(BLUE)Running ALB Target Group construct tests...$(NC)"
-	yarn test tests/unit/constructs/networking/alb-target-group-construct.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/networking/alb-target-group-construct.test.ts
 
 test-constructs-security-group: ## Run Security Group construct tests
 	@echo "$(BLUE)Running Security Group construct tests...$(NC)"
-	yarn test tests/unit/constructs/networking/security-group-construct.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/networking/security-group-construct.test.ts
 
 test-constructs-vpc-peering-creation: ## Run VPC Peering creation tests
 	@echo "$(BLUE)Running VPC Peering creation tests...$(NC)"
-	yarn test tests/unit/constructs/networking/vpc-peering/vpc-peering-construct.creation.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/networking/vpc-peering/vpc-peering-construct.creation.test.ts
 
 test-constructs-vpc-peering-configuration: ## Run VPC Peering configuration tests
 	@echo "$(BLUE)Running VPC Peering configuration tests...$(NC)"
-	yarn test tests/unit/constructs/networking/vpc-peering/vpc-peering-construct.configuration.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/networking/vpc-peering/vpc-peering-construct.configuration.test.ts
 
 test-constructs-vpc-peering-resources: ## Run VPC Peering resources tests
 	@echo "$(BLUE)Running VPC Peering resources tests...$(NC)"
-	yarn test tests/unit/constructs/networking/vpc-peering/vpc-peering-construct.resources.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/networking/vpc-peering/vpc-peering-construct.resources.test.ts
 
 test-constructs-vpc-peering: test-constructs-vpc-peering-creation test-constructs-vpc-peering-configuration test-constructs-vpc-peering-resources ## Run all VPC Peering construct tests
 	@echo "$(GREEN)All VPC Peering construct tests completed$(NC)"
 
 test-constructs-vpc-flow-logs-creation: ## Run VPC Flow Logs creation tests
 	@echo "$(BLUE)Running VPC Flow Logs creation tests...$(NC)"
-	yarn test tests/unit/constructs/networking/vpc-flow-logs/vpc-flow-logs-construct.creation.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/networking/vpc-flow-logs/vpc-flow-logs-construct.creation.test.ts
 
 test-constructs-vpc-flow-logs-configuration: ## Run VPC Flow Logs configuration tests
 	@echo "$(BLUE)Running VPC Flow Logs configuration tests...$(NC)"
-	yarn test tests/unit/constructs/networking/vpc-flow-logs/vpc-flow-logs-construct.configuration.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/networking/vpc-flow-logs/vpc-flow-logs-construct.configuration.test.ts
 
 test-constructs-vpc-flow-logs-removal-policy: ## Run VPC Flow Logs removal policy tests
 	@echo "$(BLUE)Running VPC Flow Logs removal policy tests...$(NC)"
-	yarn test tests/unit/constructs/networking/vpc-flow-logs/vpc-flow-logs-construct.removal-policy.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/networking/vpc-flow-logs/vpc-flow-logs-construct.removal-policy.test.ts
 
 test-constructs-vpc-flow-logs: test-constructs-vpc-flow-logs-creation test-constructs-vpc-flow-logs-configuration test-constructs-vpc-flow-logs-removal-policy ## Run all VPC Flow Logs construct tests
 	@echo "$(GREEN)All VPC Flow Logs construct tests completed$(NC)"
@@ -647,56 +749,60 @@ test-constructs-vpc-flow-logs: test-constructs-vpc-flow-logs-creation test-const
 test-constructs-networking: test-constructs-alb-listener test-constructs-alb-target-group test-constructs-security-group test-constructs-vpc-flow-logs test-constructs-vpc-peering ## Run all networking construct tests
 	@echo "$(GREEN)All networking construct tests completed$(NC)"
 
+# ============================================================================
+# CONSTRUCT TESTS - MONITORING SERVICES
+# ============================================================================
+
 test-constructs-grafana-creation: ## Run Grafana creation tests
 	@echo "$(BLUE)Running Grafana creation tests...$(NC)"
-	yarn test tests/unit/constructs/services/monitoring/grafana/grafana-construct.creation.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/services/monitoring/grafana/grafana-construct.creation.test.ts
 
 test-constructs-grafana-launch-type: ## Run Grafana launch type tests
 	@echo "$(BLUE)Running Grafana launch type tests...$(NC)"
-	yarn test tests/unit/constructs/services/monitoring/grafana/grafana-construct.launch-type.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/services/monitoring/grafana/grafana-construct.launch-type.test.ts
 
 test-constructs-grafana-service: ## Run Grafana service configuration tests
 	@echo "$(BLUE)Running Grafana service configuration tests...$(NC)"
-	yarn test tests/unit/constructs/services/monitoring/grafana/grafana-construct.service.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/services/monitoring/grafana/grafana-construct.service.test.ts
 
 test-constructs-grafana-datasource: ## Run Grafana datasource tests
 	@echo "$(BLUE)Running Grafana datasource tests...$(NC)"
-	yarn test tests/unit/constructs/services/monitoring/grafana/grafana-construct.datasource.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/services/monitoring/grafana/grafana-construct.datasource.test.ts
 
 test-constructs-grafana: test-constructs-grafana-creation test-constructs-grafana-launch-type test-constructs-grafana-service test-constructs-grafana-datasource ## Run all Grafana construct tests
 	@echo "$(GREEN)All Grafana construct tests completed$(NC)"
 
 test-constructs-prometheus-creation: ## Run Prometheus creation tests
 	@echo "$(BLUE)Running Prometheus creation tests...$(NC)"
-	yarn test tests/unit/constructs/services/monitoring/prometheus/prometheus-construct.creation.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/services/monitoring/prometheus/prometheus-construct.creation.test.ts
 
 test-constructs-prometheus-launch-type: ## Run Prometheus launch type tests
 	@echo "$(BLUE)Running Prometheus launch type tests...$(NC)"
-	yarn test tests/unit/constructs/services/monitoring/prometheus/prometheus-construct.launch-type.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/services/monitoring/prometheus/prometheus-construct.launch-type.test.ts
 
 test-constructs-prometheus-volumes: ## Run Prometheus volumes tests
 	@echo "$(BLUE)Running Prometheus volumes tests...$(NC)"
-	yarn test tests/unit/constructs/services/monitoring/prometheus/prometheus-construct.volumes.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/services/monitoring/prometheus/prometheus-construct.volumes.test.ts
 
 test-constructs-prometheus-service: ## Run Prometheus service configuration tests
 	@echo "$(BLUE)Running Prometheus service configuration tests...$(NC)"
-	yarn test tests/unit/constructs/services/monitoring/prometheus/prometheus-construct.service.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/services/monitoring/prometheus/prometheus-construct.service.test.ts
 
 test-constructs-prometheus-container: ## Run Prometheus container tests
 	@echo "$(BLUE)Running Prometheus container tests...$(NC)"
-	yarn test tests/unit/constructs/services/monitoring/prometheus/prometheus-construct.container.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/services/monitoring/prometheus/prometheus-construct.container.test.ts
 
 test-constructs-prometheus-alertmanager: ## Run Prometheus Alertmanager tests
 	@echo "$(BLUE)Running Prometheus Alertmanager tests...$(NC)"
-	yarn test tests/unit/constructs/services/monitoring/prometheus/prometheus-construct.alertmanager.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/services/monitoring/prometheus/prometheus-construct.alertmanager.test.ts
 
 test-constructs-prometheus-config: ## Run Prometheus configuration tests
 	@echo "$(BLUE)Running Prometheus configuration tests...$(NC)"
-	yarn test tests/unit/constructs/services/monitoring/prometheus/prometheus-construct.config.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/services/monitoring/prometheus/prometheus-construct.config.test.ts
 
 test-constructs-prometheus-validation: ## Run Prometheus validation tests
 	@echo "$(BLUE)Running Prometheus validation tests...$(NC)"
-	yarn test tests/unit/constructs/services/monitoring/prometheus/prometheus-construct.validation.test.ts
+	@$(TEST_ENV) yarn test tests/unit/constructs/services/monitoring/prometheus/prometheus-construct.validation.test.ts
 
 test-constructs-prometheus: test-constructs-prometheus-creation test-constructs-prometheus-launch-type test-constructs-prometheus-volumes test-constructs-prometheus-service test-constructs-prometheus-container test-constructs-prometheus-alertmanager test-constructs-prometheus-config test-constructs-prometheus-validation ## Run all Prometheus construct tests
 	@echo "$(GREEN)All Prometheus construct tests completed$(NC)"
@@ -710,19 +816,19 @@ test-constructs: test-constructs-ecs test-constructs-storage test-constructs-net
 
 test-helpers-subnet-config-basic: ## Run subnet configuration helper basic tests
 	@echo "$(BLUE)Running subnet configuration helper basic tests...$(NC)"
-	yarn test tests/unit/helpers/subnet-configuration/subnet-configuration-helper.basic.test.ts
+	@$(TEST_ENV) yarn test tests/unit/helpers/subnet-configuration/subnet-configuration-helper.basic.test.ts
 
 test-helpers-subnet-config-tiers: ## Run subnet configuration helper tier tests
 	@echo "$(BLUE)Running subnet configuration helper tier tests...$(NC)"
-	yarn test tests/unit/helpers/subnet-configuration/subnet-configuration-helper.tiers.test.ts
+	@$(TEST_ENV) yarn test tests/unit/helpers/subnet-configuration/subnet-configuration-helper.tiers.test.ts
 
 test-helpers-subnet-config-eks: ## Run subnet configuration helper EKS tests
 	@echo "$(BLUE)Running subnet configuration helper EKS tests...$(NC)"
-	yarn test tests/unit/helpers/subnet-configuration/subnet-configuration-helper.eks.test.ts
+	@$(TEST_ENV) yarn test tests/unit/helpers/subnet-configuration/subnet-configuration-helper.eks.test.ts
 
 test-helpers-subnet-config-specialized: ## Run subnet configuration helper specialized tests
 	@echo "$(BLUE)Running subnet configuration helper specialized tests...$(NC)"
-	yarn test tests/unit/helpers/subnet-configuration/subnet-configuration-helper.specialized.test.ts
+	@$(TEST_ENV) yarn test tests/unit/helpers/subnet-configuration/subnet-configuration-helper.specialized.test.ts
 
 test-helpers-subnet-config: test-helpers-subnet-config-basic test-helpers-subnet-config-tiers test-helpers-subnet-config-eks test-helpers-subnet-config-specialized ## Run all subnet configuration helper tests
 	@echo "$(GREEN)All subnet configuration helper tests completed$(NC)"
@@ -872,7 +978,6 @@ quick-verify: verify-all get-alb-dns ## Quick verification of all stacks
 	@echo ""
 	@echo "$(GREEN)✓ Verification complete$(NC)"
 
-
 # ============================================================================
 # PROJECT STRUCTURE VISUALIZATION
 # ============================================================================
@@ -885,6 +990,10 @@ tree-source: ## Show TypeScript source code structure only
 	@echo "$(BLUE)Checking source code structure...$(NC)"
 	@tree -I 'node_modules|cdk.out|dist|build|coverage|.git' -P '*.ts|*.tsx' --prune
 
+tree-github: ## Show GitHub Actions structure
+	@echo "$(BLUE)Checking GitHub Actions structure... $(NC)"
+	@find .github -type f -name "*.yml" -o -name "*.yaml"
+
 tree-dirs: ## Show folder organisation without files
 	@echo "$(BLUE)Checking folder organisation (directories only)...$(NC)"
 	@tree -I 'node_modules|cdk.out|dist|build|coverage|.git' -d -L 3
@@ -896,3 +1005,11 @@ tree-save: ## Save project structure to file for analysis
 		--dirsfirst \
 		> project-structure.txt
 	@echo "$(GREEN)✓ Project structure saved to project-structure.txt$(NC)"
+
+tree-lib: ## Show lib/ and tests/ structure for CI planning
+	@echo "$(BLUE)Checking lib/ and tests/ structure...$(NC)"
+	@echo "=== CDK Lib Structure ===" && \
+	find lib -type d -maxdepth 3 2>/dev/null && \
+	echo "" && \
+	echo "=== Test Structure ===" && \
+	find tests -type d -maxdepth 3 2>/dev/null

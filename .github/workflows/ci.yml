@@ -1,6 +1,7 @@
-# @format
-
 # .github/workflows/ci.yml
+# Optimized CI with path-based filtering
+# Only runs tests relevant to changed code
+
 name: Continuous Integration
 
 on:
@@ -17,13 +18,114 @@ permissions:
 
 jobs:
   # ============================================================================
-  # Dependency Installation & Caching (Required by all other jobs)
+  # Change Detection (Runs First - ~10 seconds)
+  # ============================================================================
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      monitoring: ${{ steps.filter.outputs.monitoring }}
+      webapp: ${{ steps.filter.outputs.webapp }}
+      foundation: ${{ steps.filter.outputs.foundation }}
+      constructs: ${{ steps.filter.outputs.constructs }}
+      shared: ${{ steps.filter.outputs.shared }}
+      security-tests: ${{ steps.filter.outputs.security-tests }}
+      connectivity-tests: ${{ steps.filter.outputs.connectivity-tests }}
+      ci-config: ${{ steps.filter.outputs.ci-config }}
+      any-src: ${{ steps.filter.outputs.any-src }}
+      any-tests: ${{ steps.filter.outputs.any-tests }}
+      # Computed: should we run all tests?
+      run-all: ${{ steps.compute.outputs.run-all }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect Changed Paths
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            monitoring:
+              - 'lib/stacks/monitoring/**'
+              - 'lib/constructs/services/monitoring/**'
+              - 'tests/unit/stacks/monitoring/**'
+            webapp:
+              - 'lib/stacks/webapp/**'
+              - 'lib/stacks/docs/**'
+              - 'tests/unit/stacks/webapp/**'
+            foundation:
+              - 'lib/stacks/foundation/**'
+              - 'lib/stacks/networking/**'
+              - 'lib/stacks/security/**'
+              - 'lib/stacks/storage/**'
+              - 'lib/stacks/compute/**'
+              - 'tests/unit/stacks/foundation/**'
+              - 'tests/unit/stacks/security/**'
+            constructs:
+              - 'lib/constructs/**'
+              - 'tests/unit/constructs/**'
+            shared:
+              - 'lib/shared/**'
+              - 'lib/types/**'
+              - 'lib/config/**'
+              - 'lib/cdk-nag/**'
+              - 'tests/unit/shared/**'
+              - 'tests/unit/helpers/**'
+              - 'tests/unit/utils/**'
+              - 'tests/unit/types/**'
+            security-tests:
+              - 'tests/unit/security/**'
+            connectivity-tests:
+              - 'tests/unit/connectivity/**'
+            ci-config:
+              - '.github/**'
+              - 'package.json'
+              - 'yarn.lock'
+              - 'tsconfig*.json'
+              - 'jest.config.*'
+              - 'Makefile'
+            any-src:
+              - 'lib/**/*.ts'
+            any-tests:
+              - 'tests/**/*.ts'
+
+      - name: Compute Run Flags
+        id: compute
+        run: |
+          # Run all tests if shared code, constructs, or CI config changed
+          if [[ "${{ steps.filter.outputs.shared }}" == "true" ]] || \
+             [[ "${{ steps.filter.outputs.constructs }}" == "true" ]] || \
+             [[ "${{ steps.filter.outputs.ci-config }}" == "true" ]]; then
+            echo "run-all=true" >> $GITHUB_OUTPUT
+            echo "Shared/constructs/CI changed - will run all tests"
+          else
+            echo "run-all=false" >> $GITHUB_OUTPUT
+            echo "Domain-specific change - will run targeted tests"
+          fi
+
+      - name: Summary
+        run: |
+          echo "## Change Detection Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Domain | Changed |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Monitoring | ${{ steps.filter.outputs.monitoring }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Webapp | ${{ steps.filter.outputs.webapp }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Foundation | ${{ steps.filter.outputs.foundation }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Constructs | ${{ steps.filter.outputs.constructs }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Shared | ${{ steps.filter.outputs.shared }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| CI Config | ${{ steps.filter.outputs.ci-config }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Run All Tests:** ${{ steps.compute.outputs.run-all }}" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # Dependency Installation & Caching
   # ============================================================================
   setup:
     name: Setup Dependencies
     runs-on: ubuntu-latest
     outputs:
-      cache-key: ${{ steps.setup-node.outputs.cache-key }}
       node-version: ${{ env.NODE_VERSION }}
 
     steps:
@@ -31,18 +133,18 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Node.js and Yarn
-        id: setup-node
         uses: ./.github/actions/setup-node-yarn
         with:
           node-version: ${{ env.NODE_VERSION }}
 
   # ============================================================================
-  # Code Quality Jobs (Run in Parallel - Non-blocking)
+  # Code Quality (Always Run - Fast)
   # ============================================================================
   lint:
     name: Lint Code
-    needs: setup
+    needs: [setup, detect-changes]
     runs-on: ubuntu-latest
+    if: needs.detect-changes.outputs.any-src == 'true' || needs.detect-changes.outputs.any-tests == 'true'
 
     steps:
       - name: Checkout
@@ -58,9 +160,10 @@ jobs:
 
   typecheck:
     name: Type Check
-    needs: setup
+    needs: [setup, detect-changes]
     runs-on: ubuntu-latest
     continue-on-error: true
+    if: needs.detect-changes.outputs.any-src == 'true' || needs.detect-changes.outputs.any-tests == 'true'
 
     steps:
       - name: Checkout
@@ -75,63 +178,153 @@ jobs:
         run: make typecheck
 
   # ============================================================================
-  # Test Jobs (Run in Parallel for Faster Execution)
+  # Build (Always Run - Required for CDK Validation)
   # ============================================================================
-  test-unit:
-    name: Test Unit
-    needs: setup
+  build:
+    name: Build TypeScript
+    needs: [setup, detect-changes]
     runs-on: ubuntu-latest
-    continue-on-error: true
-    if: |
-      github.event_name == 'pull_request' || 
-      (github.event_name == 'push' && 
-       !contains(github.event.head_commit.message, '[skip ci]') && 
-       !contains(github.event.head_commit.message, '[ci skip]'))
-    env:
-      CDK_DOCKER_VERBOSE: "false"
-      CDK_DEBUG: "false"
-      CDK_ASSET_VERBOSE: "false"
-      DOCKER_BUILDKIT: "1"
-      BUILDKIT_PROGRESS: "quiet"
+    if: needs.detect-changes.outputs.any-src == 'true'
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
 
       - name: Setup Node.js and Yarn
         uses: ./.github/actions/setup-node-yarn
         with:
           node-version: ${{ needs.setup.outputs.node-version }}
 
-      - name: Run Unit Tests
-        run: make test-unit
+      - name: Build TypeScript
+        run: make build
 
-      - name: Upload Unit Test Coverage
+  # ============================================================================
+  # Domain-Specific Tests (Conditional)
+  # ============================================================================
+  test-monitoring:
+    name: Test Monitoring
+    needs: [setup, detect-changes]
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    if: |
+      (github.event_name == 'pull_request' || 
+       (github.event_name == 'push' && 
+        !contains(github.event.head_commit.message, '[skip ci]'))) &&
+      (needs.detect-changes.outputs.monitoring == 'true' || 
+       needs.detect-changes.outputs.run-all == 'true')
+    env:
+      CDK_DOCKER_VERBOSE: "false"
+      DOCKER_BUILDKIT: "1"
+      BUILDKIT_PROGRESS: "quiet"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ needs.setup.outputs.node-version }}
+
+      - name: Run Monitoring Tests
+        run: make test-domain-monitoring
+
+      - name: Upload Coverage
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-unit
+          name: coverage-monitoring
+          path: coverage/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  test-webapp:
+    name: Test Webapp
+    needs: [setup, detect-changes]
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    if: |
+      (github.event_name == 'pull_request' || 
+       (github.event_name == 'push' && 
+        !contains(github.event.head_commit.message, '[skip ci]'))) &&
+      (needs.detect-changes.outputs.webapp == 'true' || 
+       needs.detect-changes.outputs.run-all == 'true')
+    env:
+      CDK_DOCKER_VERBOSE: "false"
+      DOCKER_BUILDKIT: "1"
+      BUILDKIT_PROGRESS: "quiet"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ needs.setup.outputs.node-version }}
+
+      - name: Run Webapp Tests
+        run: make test-domain-webapp
+
+      - name: Upload Coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-webapp
+          path: coverage/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  test-foundation:
+    name: Test Foundation
+    needs: [setup, detect-changes]
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    if: |
+      (github.event_name == 'pull_request' || 
+       (github.event_name == 'push' && 
+        !contains(github.event.head_commit.message, '[skip ci]'))) &&
+      (needs.detect-changes.outputs.foundation == 'true' || 
+       needs.detect-changes.outputs.run-all == 'true')
+    env:
+      CDK_DOCKER_VERBOSE: "false"
+      DOCKER_BUILDKIT: "1"
+      BUILDKIT_PROGRESS: "quiet"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ needs.setup.outputs.node-version }}
+
+      - name: Run Foundation Tests
+        run: make test-domain-foundation
+
+      - name: Upload Coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-foundation
           path: coverage/
           retention-days: 7
           if-no-files-found: ignore
 
   test-constructs:
     name: Test Constructs
-    needs: setup
+    needs: [setup, detect-changes]
     runs-on: ubuntu-latest
     continue-on-error: true
     if: |
-      github.event_name == 'pull_request' || 
-      (github.event_name == 'push' && 
-       !contains(github.event.head_commit.message, '[skip ci]') && 
-       !contains(github.event.head_commit.message, '[ci skip]'))
+      (github.event_name == 'pull_request' || 
+       (github.event_name == 'push' && 
+        !contains(github.event.head_commit.message, '[skip ci]'))) &&
+      (needs.detect-changes.outputs.constructs == 'true' || 
+       needs.detect-changes.outputs.run-all == 'true')
     env:
       CDK_DOCKER_VERBOSE: "false"
-      CDK_DEBUG: "false"
-      CDK_ASSET_VERBOSE: "false"
       DOCKER_BUILDKIT: "1"
       BUILDKIT_PROGRESS: "quiet"
 
@@ -145,9 +338,9 @@ jobs:
           node-version: ${{ needs.setup.outputs.node-version }}
 
       - name: Run Construct Tests
-        run: make test-constructs
+        run: make test-domain-constructs
 
-      - name: Upload Construct Test Coverage
+      - name: Upload Coverage
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -156,20 +349,19 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  test-stacks:
-    name: Test Stacks
-    needs: setup
+  test-shared:
+    name: Test Shared/Helpers
+    needs: [setup, detect-changes]
     runs-on: ubuntu-latest
     continue-on-error: true
     if: |
-      github.event_name == 'pull_request' || 
-      (github.event_name == 'push' && 
-       !contains(github.event.head_commit.message, '[skip ci]') && 
-       !contains(github.event.head_commit.message, '[ci skip]'))
+      (github.event_name == 'pull_request' || 
+       (github.event_name == 'push' && 
+        !contains(github.event.head_commit.message, '[skip ci]'))) &&
+      (needs.detect-changes.outputs.shared == 'true' || 
+       needs.detect-changes.outputs.run-all == 'true')
     env:
       CDK_DOCKER_VERBOSE: "false"
-      CDK_DEBUG: "false"
-      CDK_ASSET_VERBOSE: "false"
       DOCKER_BUILDKIT: "1"
       BUILDKIT_PROGRESS: "quiet"
 
@@ -182,72 +374,32 @@ jobs:
         with:
           node-version: ${{ needs.setup.outputs.node-version }}
 
-      - name: Run Stack Tests
-        run: make test-stacks
+      - name: Run Shared Tests
+        run: make test-domain-shared
 
-      - name: Upload Stack Test Coverage
+      - name: Upload Coverage
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-stacks
+          name: coverage-shared
           path: coverage/
           retention-days: 7
           if-no-files-found: ignore
 
-  test-helpers:
-    name: Test Helpers
-    needs: setup
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    if: |
-      github.event_name == 'pull_request' || 
-      (github.event_name == 'push' && 
-       !contains(github.event.head_commit.message, '[skip ci]') && 
-       !contains(github.event.head_commit.message, '[ci skip]'))
-    env:
-      CDK_DOCKER_VERBOSE: "false"
-      CDK_DEBUG: "false"
-      CDK_ASSET_VERBOSE: "false"
-      DOCKER_BUILDKIT: "1"
-      BUILDKIT_PROGRESS: "quiet"
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js and Yarn
-        uses: ./.github/actions/setup-node-yarn
-        with:
-          node-version: ${{ needs.setup.outputs.node-version }}
-
-      - name: Run Helper Tests
-        run: make test-helpers
-
-      - name: Upload Helper Test Coverage
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-helpers
-          path: coverage/
-          retention-days: 7
-          if-no-files-found: ignore
-
+  # ============================================================================
+  # Cross-Cutting Tests (Security & Connectivity)
+  # ============================================================================
   test-security:
     name: Test Security
-    needs: setup
+    needs: [setup, detect-changes]
     runs-on: ubuntu-latest
     continue-on-error: true
     if: |
-      github.event_name == 'pull_request' || 
-      (github.event_name == 'push' && 
-       !contains(github.event.head_commit.message, '[skip ci]') && 
-       !contains(github.event.head_commit.message, '[ci skip]'))
-    env:
-      CDK_DOCKER_VERBOSE: "false"
-      CDK_DEBUG: "false"
-      CDK_ASSET_VERBOSE: "false"
-      DOCKER_BUILDKIT: "1"
-      BUILDKIT_PROGRESS: "quiet"
+      (github.event_name == 'pull_request' || 
+       (github.event_name == 'push' && 
+        !contains(github.event.head_commit.message, '[skip ci]'))) &&
+      (needs.detect-changes.outputs.security-tests == 'true' || 
+       needs.detect-changes.outputs.run-all == 'true')
 
     steps:
       - name: Checkout
@@ -263,20 +415,16 @@ jobs:
 
   test-connectivity:
     name: Test Connectivity
-    needs: setup
+    needs: [setup, detect-changes]
     runs-on: ubuntu-latest
     continue-on-error: true
     if: |
-      github.event_name == 'pull_request' || 
-      (github.event_name == 'push' && 
-       !contains(github.event.head_commit.message, '[skip ci]') && 
-       !contains(github.event.head_commit.message, '[ci skip]'))
-    env:
-      CDK_DOCKER_VERBOSE: "false"
-      CDK_DEBUG: "false"
-      CDK_ASSET_VERBOSE: "false"
-      DOCKER_BUILDKIT: "1"
-      BUILDKIT_PROGRESS: "quiet"
+      (github.event_name == 'pull_request' || 
+       (github.event_name == 'push' && 
+        !contains(github.event.head_commit.message, '[skip ci]'))) &&
+      (needs.detect-changes.outputs.connectivity-tests == 'true' || 
+       needs.detect-changes.outputs.foundation == 'true' ||
+       needs.detect-changes.outputs.run-all == 'true')
 
     steps:
       - name: Checkout
@@ -290,20 +438,22 @@ jobs:
       - name: Run Connectivity Tests
         run: make test-connectivity
 
+  # ============================================================================
+  # Snapshot Tests (Always run when any test changes)
+  # ============================================================================
   test-snapshots:
     name: Test Snapshots
-    needs: setup
+    needs: [setup, detect-changes]
     runs-on: ubuntu-latest
     continue-on-error: true
     if: |
-      github.event_name == 'pull_request' || 
-      (github.event_name == 'push' && 
-       !contains(github.event.head_commit.message, '[skip ci]') && 
-       !contains(github.event.head_commit.message, '[ci skip]'))
+      (github.event_name == 'pull_request' || 
+       (github.event_name == 'push' && 
+        !contains(github.event.head_commit.message, '[skip ci]'))) &&
+      (needs.detect-changes.outputs.any-src == 'true' ||
+       needs.detect-changes.outputs.any-tests == 'true')
     env:
       CDK_DOCKER_VERBOSE: "false"
-      CDK_DEBUG: "false"
-      CDK_ASSET_VERBOSE: "false"
       DOCKER_BUILDKIT: "1"
       BUILDKIT_PROGRESS: "quiet"
 
@@ -339,7 +489,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Committing updated snapshots..."
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add tests/unit/**/__snapshots__/*.snap
@@ -347,51 +496,17 @@ jobs:
 
           if [[ "${{ github.ref }}" == "refs/heads/main" ]] || [[ "${{ github.ref }}" == "refs/heads/master" ]]; then
             git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git
-            git push origin HEAD:${{ github.ref_name }} || echo "Push failed - may need manual intervention"
-          else
-            echo "Skipping push on branch ${{ github.ref }}"
-            echo "Snapshots updated but not pushed. Please commit manually or merge to main."
+            git push origin HEAD:${{ github.ref_name }} || echo "Push failed"
           fi
-
-      - name: Run Snapshot Tests
-        run: make test-coverage
-
-      - name: Upload Snapshot Test Coverage
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-snapshots
-          path: coverage/
-          retention-days: 7
-          if-no-files-found: ignore
-
-  # ============================================================================
-  # Build Job (Can Run in Parallel with Tests)
-  # ============================================================================
-  build:
-    name: Build TypeScript
-    needs: setup
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js and Yarn
-        uses: ./.github/actions/setup-node-yarn
-        with:
-          node-version: ${{ needs.setup.outputs.node-version }}
-
-      - name: Build TypeScript
-        run: make build
 
   # ============================================================================
   # CDK Validation (Depends on Build)
   # ============================================================================
   validate-cdk:
     name: Validate CDK Stacks
-    needs: [setup, build]
+    needs: [setup, build, detect-changes]
     runs-on: ubuntu-latest
+    if: needs.detect-changes.outputs.any-src == 'true'
 
     steps:
       - name: Checkout
@@ -420,309 +535,84 @@ jobs:
           if-no-files-found: ignore
 
   # ============================================================================
-  # IaC Security Scan (Checkov - Non-blocking for CI)
+  # IaC Security Scan
   # ============================================================================
   iac-security-scan:
     name: IaC Security Scan
-    needs: [setup, validate-cdk]
+    needs: [setup, validate-cdk, detect-changes]
+    if: needs.detect-changes.outputs.any-src == 'true'
     uses: ./.github/workflows/_iac-security-scan.yml
     with:
       environment: "development"
       enforce-blocking: false
       cdk-output-path: "cdk.out"
-      # Skip checks that are intentionally configured differently for development
       skip-checks: ""
       soft-fail-on: "LOW,MEDIUM"
 
   # ============================================================================
-  # Coverage Aggregation & Publishing (Runs After All Tests)
-  # ============================================================================
-  coverage-summary:
-    name: Coverage Summary & Report
-    needs: [test-unit, test-constructs, test-stacks, test-helpers, test-security, test-connectivity, test-snapshots]
-    runs-on: ubuntu-latest
-    if: always()
-    continue-on-error: true
-    permissions:
-      contents: write
-      pages: write
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js and Yarn
-        uses: ./.github/actions/setup-node-yarn
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Download All Coverage Reports
-        uses: actions/download-artifact@v4
-        with:
-          pattern: coverage-*
-          merge-multiple: true
-          path: coverage/
-
-      - name: Generate Comprehensive Coverage Report
-        id: coverage-report
-        run: |
-          echo "Generating comprehensive coverage report..."
-          
-          # Run tests with coverage to consolidate all reports
-          yarn test --coverage --silent || true
-          
-          # Check if coverage files exist
-          if [ ! -f "coverage/index.html" ]; then
-            echo "Coverage HTML report not found. Generating fresh coverage..."
-            yarn test:coverage
-          fi
-          
-          echo "coverage_generated=true" >> $GITHUB_OUTPUT
-          
-          # Extract coverage metrics
-          if [ -f "coverage/coverage-summary.json" ]; then
-            STATEMENTS=$(jq -r '.total.statements.pct' coverage/coverage-summary.json)
-            BRANCHES=$(jq -r '.total.branches.pct' coverage/coverage-summary.json)
-            FUNCTIONS=$(jq -r '.total.functions.pct' coverage/coverage-summary.json)
-            LINES=$(jq -r '.total.lines.pct' coverage/coverage-summary.json)
-            
-            echo "statements_pct=$STATEMENTS" >> $GITHUB_OUTPUT
-            echo "branches_pct=$BRANCHES" >> $GITHUB_OUTPUT
-            echo "functions_pct=$FUNCTIONS" >> $GITHUB_OUTPUT
-            echo "lines_pct=$LINES" >> $GITHUB_OUTPUT
-            
-            echo "Coverage Metrics:"
-            echo "  Statements: ${STATEMENTS}%"
-            echo "  Branches: ${BRANCHES}%"
-            echo "  Functions: ${FUNCTIONS}%"
-            echo "  Lines: ${LINES}%"
-          else
-            echo "Coverage summary not found"
-            echo "statements_pct=0" >> $GITHUB_OUTPUT
-            echo "branches_pct=0" >> $GITHUB_OUTPUT
-            echo "functions_pct=0" >> $GITHUB_OUTPUT
-            echo "lines_pct=0" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Generate Coverage Badge Data
-        if: steps.coverage-report.outputs.coverage_generated == 'true'
-        run: |
-          LINES_PCT="${{ steps.coverage-report.outputs.lines_pct }}"
-          
-          # Determine badge colour based on coverage
-          if (( $(echo "$LINES_PCT >= 80" | bc -l) )); then
-            BADGE_COLOR="brightgreen"
-          elif (( $(echo "$LINES_PCT >= 70" | bc -l) )); then
-            BADGE_COLOR="green"
-          elif (( $(echo "$LINES_PCT >= 60" | bc -l) )); then
-            BADGE_COLOR="yellow"
-          elif (( $(echo "$LINES_PCT >= 50" | bc -l) )); then
-            BADGE_COLOR="orange"
-          else
-            BADGE_COLOR="red"
-          fi
-          
-          echo "Badge colour: $BADGE_COLOR (${LINES_PCT}%)"
-          echo "BADGE_COLOR=$BADGE_COLOR" >> $GITHUB_ENV
-          echo "LINES_PCT=$LINES_PCT" >> $GITHUB_ENV
-
-      - name: Upload Combined Coverage Report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report-html
-          path: coverage/
-          retention-days: 30
-          if-no-files-found: ignore
-
-      - name: Generate Coverage Summary for PR/Commit
-        if: steps.coverage-report.outputs.coverage_generated == 'true'
-        run: |
-          cat >> $GITHUB_STEP_SUMMARY << EOF
-          ## Test Coverage Report
-          
-          ### Coverage Metrics
-          
-          | Metric | Coverage | Status |
-          |--------|----------|--------|
-          | **Statements** | ${{ steps.coverage-report.outputs.statements_pct }}% | $([ $(echo "${{ steps.coverage-report.outputs.statements_pct }} >= 70" | bc -l) -eq 1 ] && echo "✅" || echo "⚠️") |
-          | **Branches** | ${{ steps.coverage-report.outputs.branches_pct }}% | $([ $(echo "${{ steps.coverage-report.outputs.branches_pct }} >= 70" | bc -l) -eq 1 ] && echo "✅" || echo "⚠️") |
-          | **Functions** | ${{ steps.coverage-report.outputs.functions_pct }}% | $([ $(echo "${{ steps.coverage-report.outputs.functions_pct }} >= 70" | bc -l) -eq 1 ] && echo "✅" || echo "⚠️") |
-          | **Lines** | ${{ steps.coverage-report.outputs.lines_pct }}% | $([ $(echo "${{ steps.coverage-report.outputs.lines_pct }} >= 70" | bc -l) -eq 1 ] && echo "✅" || echo "⚠️") |
-          
-          ### Coverage Thresholds
-          
-          - 🎯 **Target**: 70% minimum coverage
-          - ✅ **Pass**: ≥70%
-          - ⚠️ **Warning**: 50-69%
-          - ❌ **Fail**: <50%
-          
-          ### HTML Coverage Report
-          
-          📊 **Interactive Coverage Report**: Download the \`coverage-report-html\` artifact from this workflow run to view the detailed HTML report.
-          
-          To view locally:
-          1. Download the \`coverage-report-html\` artifact
-          2. Extract the archive
-          3. Open \`index.html\` in your browser
-          
-          ### Coverage by Module
-          
-          EOF
-          
-          # Add top uncovered files
-          if [ -f "coverage/coverage-summary.json" ]; then
-            echo "#### Files Needing Attention (Lowest Coverage)" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            
-            jq -r '
-              to_entries | 
-              map(select(.key != "total")) | 
-              sort_by(.value.lines.pct) | 
-              limit(10; .[]) | 
-              "| \(.key | split("/") | .[-1]) | \(.value.lines.pct)% | \(.value.lines.covered)/\(.value.lines.total) |"
-            ' coverage/coverage-summary.json | sed '1i| File | Coverage | Lines |' | sed '2i|------|----------|-------|' >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          cat >> $GITHUB_STEP_SUMMARY << EOF
-          
-          ### Quick Actions
-          
-          - **Run locally**: \`make test-coverage\`
-          - **View report**: \`open coverage/index.html\`
-          - **Update snapshots**: \`make test-update-snapshots\`
-          
-          EOF
-
-      - name: Check Coverage Thresholds
-        if: steps.coverage-report.outputs.coverage_generated == 'true'
-        run: |
-          LINES_PCT="${{ steps.coverage-report.outputs.lines_pct }}"
-          BRANCHES_PCT="${{ steps.coverage-report.outputs.branches_pct }}"
-          FUNCTIONS_PCT="${{ steps.coverage-report.outputs.functions_pct }}"
-          STATEMENTS_PCT="${{ steps.coverage-report.outputs.statements_pct }}"
-          
-          echo "Checking coverage thresholds..."
-          echo "  Lines: ${LINES_PCT}% (minimum: 50%)"
-          echo "  Branches: ${BRANCHES_PCT}% (minimum: 50%)"
-          echo "  Functions: ${FUNCTIONS_PCT}% (minimum: 50%)"
-          echo "  Statements: ${STATEMENTS_PCT}% (minimum: 50%)"
-          
-          THRESHOLD_FAILED=false
-          
-          # Minimum thresholds (non-blocking, warning only)
-          if (( $(echo "$LINES_PCT < 50" | bc -l) )); then
-            echo "::warning::Lines coverage (${LINES_PCT}%) is below 50% threshold"
-            THRESHOLD_FAILED=true
-          fi
-          
-          if (( $(echo "$BRANCHES_PCT < 50" | bc -l) )); then
-            echo "::warning::Branches coverage (${BRANCHES_PCT}%) is below 50% threshold"
-            THRESHOLD_FAILED=true
-          fi
-          
-          if (( $(echo "$FUNCTIONS_PCT < 50" | bc -l) )); then
-            echo "::warning::Functions coverage (${FUNCTIONS_PCT}%) is below 50% threshold"
-            THRESHOLD_FAILED=true
-          fi
-          
-          if (( $(echo "$STATEMENTS_PCT < 50" | bc -l) )); then
-            echo "::warning::Statements coverage (${STATEMENTS_PCT}%) is below 50% threshold"
-            THRESHOLD_FAILED=true
-          fi
-          
-          if [ "$THRESHOLD_FAILED" = true ]; then
-            echo ""
-            echo "::warning::Coverage is below recommended thresholds. Consider adding more tests."
-            echo "This is a warning only - CI will not fail."
-          else
-            echo ""
-            echo "✅ All coverage thresholds met!"
-          fi
-
-  # ============================================================================
-  # Summary Job (Shows Overall Status)
+  # CI Summary
   # ============================================================================
   ci-success:
     name: CI Complete
     needs:
-      [
-        lint,
-        typecheck,
-        test-unit,
-        test-constructs,
-        test-stacks,
-        test-helpers,
-        test-security,
-        test-connectivity,
-        test-snapshots,
-        build,
-        validate-cdk,
-        iac-security-scan,
-      ]
+      - detect-changes
+      - lint
+      - typecheck
+      - test-monitoring
+      - test-webapp
+      - test-foundation
+      - test-constructs
+      - test-shared
+      - test-security
+      - test-connectivity
+      - test-snapshots
+      - build
+      - validate-cdk
+      - iac-security-scan
     runs-on: ubuntu-latest
     if: always()
 
     steps:
-      - name: Check All Jobs Passed
+      - name: Check Results
         run: |
           echo "## CI Pipeline Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Change Detection" >> $GITHUB_STEP_SUMMARY
+          echo "- Run All Tests: ${{ needs.detect-changes.outputs.run-all }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
           echo "### Code Quality" >> $GITHUB_STEP_SUMMARY
           echo "- Lint: ${{ needs.lint.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Type Check: ${{ needs.typecheck.result }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Tests" >> $GITHUB_STEP_SUMMARY
-          echo "- Unit Tests: ${{ needs.test-unit.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Construct Tests: ${{ needs.test-constructs.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Stack Tests: ${{ needs.test-stacks.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Helper Tests: ${{ needs.test-helpers.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Security Tests: ${{ needs.test-security.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Connectivity Tests: ${{ needs.test-connectivity.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Snapshot Tests: ${{ needs.test-snapshots.result }}" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Domain Tests" >> $GITHUB_STEP_SUMMARY
+          echo "- Monitoring: ${{ needs.test-monitoring.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Webapp: ${{ needs.test-webapp.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Foundation: ${{ needs.test-foundation.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Constructs: ${{ needs.test-constructs.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Shared: ${{ needs.test-shared.result }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Cross-Cutting Tests" >> $GITHUB_STEP_SUMMARY
+          echo "- Security: ${{ needs.test-security.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Connectivity: ${{ needs.test-connectivity.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Snapshots: ${{ needs.test-snapshots.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
           echo "### Build & Validation" >> $GITHUB_STEP_SUMMARY
           echo "- Build: ${{ needs.build.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- CDK Validation: ${{ needs.validate-cdk.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Security" >> $GITHUB_STEP_SUMMARY
-          echo "- IaC Security Scan: ${{ needs.iac-security-scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- IaC Security: ${{ needs.iac-security-scan.result }}" >> $GITHUB_STEP_SUMMARY
 
-          CRITICAL_FAILED=false
-          if [[ "${{ needs.build.result }}" == "failure" ]]; then
+          # Critical failures
+          if [[ "${{ needs.build.result }}" == "failure" ]] || \
+             [[ "${{ needs.validate-cdk.result }}" == "failure" ]]; then
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Build failed" >> $GITHUB_STEP_SUMMARY
-            CRITICAL_FAILED=true
-          fi
-          if [[ "${{ needs.validate-cdk.result }}" == "failure" ]]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "CDK Validation failed" >> $GITHUB_STEP_SUMMARY
-            CRITICAL_FAILED=true
-          fi
-
-          if [[ "$CRITICAL_FAILED" == "true" ]]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "CI pipeline failed due to critical job failures" >> $GITHUB_STEP_SUMMARY
+            echo "❌ CI failed due to critical job failures" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
 
-          NON_CRITICAL_FAILED=false
-          if [[ "${{ needs.lint.result }}" == "failure" ]] || \
-             [[ "${{ needs.typecheck.result }}" == "failure" ]] || \
-             [[ "${{ needs.test-unit.result }}" == "failure" ]] || \
-             [[ "${{ needs.test-constructs.result }}" == "failure" ]] || \
-             [[ "${{ needs.test-stacks.result }}" == "failure" ]] || \
-             [[ "${{ needs.test-helpers.result }}" == "failure" ]] || \
-             [[ "${{ needs.test-security.result }}" == "failure" ]] || \
-             [[ "${{ needs.test-connectivity.result }}" == "failure" ]] || \
-             [[ "${{ needs.test-snapshots.result }}" == "failure" ]]; then
-            NON_CRITICAL_FAILED=true
-          fi
-
-          if [[ "$NON_CRITICAL_FAILED" == "true" ]]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Some non-critical checks failed (see individual job results)" >> $GITHUB_STEP_SUMMARY
-          fi
-
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "All critical CI checks passed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ All critical CI checks passed" >> $GITHUB_STEP_SUMMARY
