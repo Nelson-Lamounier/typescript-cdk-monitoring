@@ -37,8 +37,19 @@ export function parseInstanceType(instanceTypeStr: string): ec2.InstanceType {
   // Convert family to InstanceClass enum key (e.g., "t3" -> "T3")
   const instanceClassKey = family.toUpperCase();
   
-  // Convert size to InstanceSize enum key (e.g., "small" -> "SMALL")
-  const instanceSizeKey = size.toUpperCase();
+  // Convert size to InstanceSize enum key
+  // Handle sizes with numbers: "2xlarge" -> "XLARGE2", "4xlarge" -> "XLARGE4"
+  // Regular sizes: "small" -> "SMALL", "xlarge" -> "XLARGE"
+  let instanceSizeKey: string;
+  const match = size.match(/^(\d+)(.+)$/);
+  if (match) {
+    // Size starts with a number (e.g., "2xlarge")
+    const [, number, sizeName] = match;
+    instanceSizeKey = `${sizeName.toUpperCase()}${number}`;
+  } else {
+    // Regular size (e.g., "small", "xlarge")
+    instanceSizeKey = size.toUpperCase();
+  }
 
   // Validate that the instance class exists
   if (!(instanceClassKey in ec2.InstanceClass)) {
