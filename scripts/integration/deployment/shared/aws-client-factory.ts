@@ -13,6 +13,10 @@ import { ElasticLoadBalancingV2Client } from "@aws-sdk/client-elastic-load-balan
 import { CloudWatchLogsClient } from "@aws-sdk/client-cloudwatch-logs";
 import { EventBridgeClient } from "@aws-sdk/client-eventbridge";
 import { S3Client } from "@aws-sdk/client-s3";
+import { ECRClient } from "@aws-sdk/client-ecr";
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { LambdaClient } from "@aws-sdk/client-lambda";
+import { APIGatewayClient } from "@aws-sdk/client-api-gateway";
 
 import { Logger } from "../utils/logger";
 
@@ -130,6 +134,18 @@ export class AwsClientFactory {
             break;
           case "s3":
             clients.s3 = new S3Client(baseConfig);
+            break;
+          case "ecr":
+            clients.ecr = new ECRClient(baseConfig);
+            break;
+          case "dynamodb":
+            clients.dynamodb = new DynamoDBClient(baseConfig);
+            break;
+          case "lambda":
+            clients.lambda = new LambdaClient(baseConfig);
+            break;
+          case "apigateway":
+            clients.apigateway = new APIGatewayClient(baseConfig);
             break;
         }
       });
