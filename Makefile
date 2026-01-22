@@ -582,27 +582,27 @@ destroy-all: ## Destroy all stacks in reverse order (DANGEROUS)
 test-domain-monitoring: ## Run monitoring domain tests only (CI optimized)
 	@echo "$(BLUE)Running monitoring domain tests...$(NC)"
 	@echo "Includes: stacks/monitoring, constructs/services/monitoring"
-	@$(TEST_ENV) yarn jest --testPathPattern="stacks/monitoring|constructs/services/monitoring" --passWithNoTests
+	@$(TEST_ENV) yarn jest --testPathPatterns="stacks/monitoring|constructs/services/monitoring" --passWithNoTests
 
 test-domain-webapp: ## Run webapp domain tests only (CI optimized)
 	@echo "$(BLUE)Running webapp domain tests...$(NC)"
 	@echo "Includes: stacks/webapp, stacks/docs"
-	@$(TEST_ENV) yarn jest --testPathPattern="stacks/webapp|stacks/docs" --passWithNoTests
+	@$(TEST_ENV) yarn jest --testPathPatterns="stacks/webapp|stacks/docs" --passWithNoTests
 
 test-domain-foundation: ## Run foundation/infrastructure tests only (CI optimized)
 	@echo "$(BLUE)Running foundation domain tests...$(NC)"
 	@echo "Includes: stacks/foundation, stacks/networking, stacks/security, stacks/storage, stacks/compute"
-	@$(TEST_ENV) yarn jest --testPathPattern="stacks/foundation|stacks/networking|stacks/security|stacks/storage|stacks/compute" --passWithNoTests
+	@$(TEST_ENV) yarn jest --testPathPatterns="stacks/foundation|stacks/networking|stacks/security|stacks/storage|stacks/compute" --passWithNoTests
 
 test-domain-constructs: ## Run all construct tests (CI optimized)
 	@echo "$(BLUE)Running construct domain tests...$(NC)"
 	@echo "Includes: all tests under constructs/"
-	@$(TEST_ENV) yarn jest --testPathPattern="constructs/" --passWithNoTests
+	@$(TEST_ENV) yarn jest --testPathPatterns="constructs/" --passWithNoTests
 
 test-domain-shared: ## Run shared utilities and helpers tests (CI optimized)
 	@echo "$(BLUE)Running shared domain tests...$(NC)"
 	@echo "Includes: shared/, helpers/, utils/, types/"
-	@$(TEST_ENV) yarn jest --testPathPattern="shared/|helpers/|utils/|types/" --passWithNoTests
+	@$(TEST_ENV) yarn jest --testPathPatterns="shared/|helpers/|utils/|types/" --passWithNoTests
 
 test-domain-all: test-domain-monitoring test-domain-webapp test-domain-foundation test-domain-constructs test-domain-shared ## Run all domain tests sequentially
 	@echo ""
