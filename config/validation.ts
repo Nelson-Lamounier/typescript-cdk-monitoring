@@ -18,8 +18,8 @@
 
 import { environments, EnvironmentConfig } from "./environments";
 import { getProjectConfig, ProjectConfig } from "./projects";
-import { getSecurityBaseline, getEncryptionConfig, validateTags as validateTagConfig } from "./security-baseline";
-import { getDefaultTags } from "./tagging";
+import { getSecurityBaseline, getEncryptionConfig } from "./security-baseline";
+import { getDefaultTags, validateTags as validateTagConfig } from "./tagging";
 import { validateInstanceType } from "../lib/shared/helpers/instance-type-helper";
 import { validateKmsKeyArn } from "../lib/shared/helpers/kms-key-helper";
 
@@ -198,7 +198,7 @@ function validateMemoryCapacity(ctx: ValidationContext): ValidationResult {
   let totalMemoryMiB = 0;
   const services = ctx.projectConfig.compute.services;
   
-  Object.entries(services).forEach(([serviceName, config]) => {
+  Object.entries(services).forEach(([_serviceName, config]) => {
     if (config.memoryMiB) {
       totalMemoryMiB += config.memoryMiB;
     }
@@ -370,7 +370,7 @@ function validateTagConfiguration(ctx: ValidationContext): ValidationResult {
   const tagValidation = validateTagConfig(tags);
 
   if (!tagValidation.isValid) {
-    tagValidation.errors.forEach((error) => {
+    tagValidation.errors.forEach((error: string) => {
       errors.push(`Tag validation failed: ${error}`);
     });
   }

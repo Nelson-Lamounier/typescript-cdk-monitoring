@@ -93,7 +93,7 @@ export function createWebappStacks(
     projectName,
     envConfig,
     articlesTable: dynamoDbStack.articlesTable,
-    assetsS3Bucket: dynamoDbStack.assetsS3Bucket,
+    assetsS3Bucket: dynamoDbStack.assetsBucket,
     // Configure CORS origins per environment
     corsOrigins: envConfig.isProduction
       ? [] // Add production domain here
