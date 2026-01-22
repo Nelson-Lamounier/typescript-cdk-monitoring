@@ -80,7 +80,7 @@ describe("Environment Configuration Integration", () => {
     test("all environments have valid VPC CIDR format", () => {
       const cidrPattern = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/;
 
-      Object.entries(environments).forEach(([name, config]) => {
+      Object.entries(environments).forEach(([_name, config]) => {
         expect(config.vpcCidr).toMatch(cidrPattern);
       });
     });
@@ -92,7 +92,7 @@ describe("Environment Configuration Integration", () => {
     });
 
     test("NAT gateway counts are non-negative", () => {
-      Object.entries(environments).forEach(([name, config]) => {
+      Object.entries(environments).forEach(([_name, config]) => {
         const natGateways = config.natGateways ?? 0;
         expect(natGateways).toBeGreaterThanOrEqual(0);
       });
@@ -182,7 +182,7 @@ describe("Project Configuration Integration", () => {
     });
 
     test("capacity settings are valid", () => {
-      Object.entries(projects).forEach(([name, project]) => {
+      Object.entries(projects).forEach(([_name, project]) => {
         if (project.compute) {
           const min = project.compute.minCapacity ?? 0;
           const max = project.compute.maxCapacity ?? 0;
@@ -376,7 +376,7 @@ describe("Cross-Configuration Consistency", () => {
 
       expect(results.size).toBe(projectNames.length);
 
-      results.forEach((result, projectName) => {
+      results.forEach((result, _projectName) => {
         expect(result.valid).toBe(true);
       });
     });
@@ -384,7 +384,7 @@ describe("Cross-Configuration Consistency", () => {
 
   describe("Configuration completeness", () => {
     test("every environment has all required fields", () => {
-      Object.entries(environments).forEach(([name, config]) => {
+      Object.entries(environments).forEach(([_name, config]) => {
         expect(config.envName).toBeDefined();
         expect(config.vpcCidr).toBeDefined();
         expect(typeof config.isProduction).toBe("boolean");
@@ -392,7 +392,7 @@ describe("Cross-Configuration Consistency", () => {
     });
 
     test("every project has required fields", () => {
-      Object.entries(projects).forEach(([name, config]) => {
+      Object.entries(projects).forEach(([_name, config]) => {
         expect(config.name).toBeDefined();
         expect(config.type).toBeDefined();
       });

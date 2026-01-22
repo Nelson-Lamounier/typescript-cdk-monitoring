@@ -23,18 +23,6 @@
  */
 
 import { PricingClient, GetProductsCommand } from "@aws-sdk/client-pricing";
-import * as fs from "fs";
-import * as path from "path";
-
-interface PricingData {
-  instances: Record<string, number>;
-  ebs: Record<string, number>;
-  natGateway: number;
-  alb: {
-    base: number;
-    lcu: number;
-  };
-}
 
 // Parse command line arguments
 const args = process.argv.slice(2);

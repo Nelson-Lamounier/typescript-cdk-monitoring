@@ -18,7 +18,7 @@ import * as cdk from "aws-cdk-lib";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as s3 from "aws-cdk-lib/aws-s3";
 
-import { WebappApiStack } from "../../../../../lib/stacks/webapp/api-stack";
+import { WebappApiStack, WebappApiStackProps } from "../../../../../lib/stacks/webapp/api-stack";
 import { EnvironmentConfig } from "../../../../../config/environments";
 import {
   TEST_CONFIG,
@@ -197,9 +197,9 @@ export class ApiStackTestFixtures {
   private _mockTable: dynamodb.ITable | null = null;
   private _mockBucket: s3.IBucket | null = null;
 
-  constructor(private app: cdk.App) {
+  constructor(_app: cdk.App) {
     // Create a temporary stack for mock resources
-    this.mockStack = new cdk.Stack(app, "MockResourceStack", {
+    this.mockStack = new cdk.Stack(_app, "MockResourceStack", {
       env: createTestEnv(),
     });
   }
@@ -248,7 +248,7 @@ export class ApiStackTestFixtures {
   getMinimalProps(
     envName: string = BASE_TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
     isProduction: boolean = false
-  ) {
+  ): WebappApiStackProps {
     return {
       env: createTestEnv(),
       envName,
@@ -287,7 +287,7 @@ export class ApiStackTestFixtures {
 export function createTestApiStack(
   app: cdk.App,
   id: string = API_TEST_CONSTANTS.STACK_IDS.API,
-  props?: Partial<Parameters<typeof WebappApiStack>[2]>
+  props?: Partial<WebappApiStackProps>
 ): WebappApiStack {
   if (!app) {
     throw new Error("CDK App instance is required to create test stack");

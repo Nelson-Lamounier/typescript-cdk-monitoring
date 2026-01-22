@@ -156,15 +156,15 @@ function setupVerificationChecks(
           context.stackStatus = stack.StackStatus;
 
           const validStatuses = ["CREATE_COMPLETE", "UPDATE_COMPLETE"];
-          if (!validStatuses.includes(context.stackStatus)) {
+          if (!context.stackStatus || !validStatuses.includes(context.stackStatus)) {
             context.criticalIssues.push(
-              `Stack in invalid state: ${context.stackStatus}`
+              `Stack in invalid state: ${context.stackStatus || "UNKNOWN"}`
             );
             return {
               passed: false,
-              message: `Stack status: ${context.stackStatus}`,
+              message: `Stack status: ${context.stackStatus || "UNKNOWN"}`,
               details: {
-                "Stack Status": context.stackStatus,
+                "Stack Status": context.stackStatus || "UNKNOWN",
               },
             };
           }
@@ -494,7 +494,7 @@ if (require.main === module) {
   const options = cli.opts() as VerifyEcrConfig;
 
   verifyEcrStack(options)
-    .then(({ isHealthy, criticalIssues }) => {
+    .then(({ isHealthy }) => {
       if (!isHealthy) {
         Logger.error("\nVerification failed");
         process.exit(1);

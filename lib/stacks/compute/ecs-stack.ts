@@ -679,7 +679,7 @@ export class EcsStack extends cdk.Stack {
     // This ensures IMDSv2 is required and follows security best practices
     // Instance type is read from centralised configuration (config/projects.ts)
     const projectConfig = getProjectConfig(
-      props.applicationName || "webapp",
+      applicationName || "webapp",
       envName
     );
     const instanceType = getInstanceTypeFromConfig(projectConfig, "t3.small");

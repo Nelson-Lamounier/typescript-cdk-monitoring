@@ -5,7 +5,6 @@ import * as ecs from "aws-cdk-lib/aws-ecs";
 import {
   EcsApplicationConfig,
   EcsServiceConfig,
-  EcsContainerConfig,
 } from "../lib/shared/types/compute-types";
 import { CrossAccountTarget } from "../lib/shared/types/monitoring-types";
 
