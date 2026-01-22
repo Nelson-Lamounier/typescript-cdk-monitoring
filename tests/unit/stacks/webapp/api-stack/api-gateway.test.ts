@@ -144,11 +144,12 @@ describe("WebappApiStack: API Gateway Creation", () => {
     });
 
     // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
-    test("should enable data trace logging in development", () => {
+    test("should disable data trace logging in development", () => {
+      // Data trace is disabled in development for cost optimization
       devTemplate.hasResourceProperties("AWS::ApiGateway::Stage", {
         MethodSettings: [
           Match.objectLike({
-            DataTraceEnabled: true,
+            DataTraceEnabled: false,
           }),
         ],
       });
@@ -270,30 +271,42 @@ describe("WebappApiStack: API Gateway Creation", () => {
   // ============================================================================
 
   describe("API Deployment", () => {
-    let template: Template;
+    let devTemplate: Template;
+    let prodTemplate: Template;
 
     beforeAll(() => {
-      const app = createTestApp();
-      const stack = createTestApiStack(app);
-      template = Template.fromStack(stack);
+      const devApp = createTestApp();
+      const devStack = createTestApiStack(devApp);
+      devTemplate = Template.fromStack(devStack);
+      
+      const prodApp = createTestApp();
+      const prodStack = createTestApiStack(prodApp, API_TEST_CONSTANTS.STACK_IDS.API_PROD);
+      prodTemplate = Template.fromStack(prodStack);
     });
 
     // eslint-disable-next-line jest/expect-expect -- template.resourceCountIs throws on failure
     test("should create API deployment", () => {
-      template.resourceCountIs("AWS::ApiGateway::Deployment", 1);
+      devTemplate.resourceCountIs("AWS::ApiGateway::Deployment", 1);
     });
 
     // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
     test("should create API stage with correct name", () => {
-      template.hasResourceProperties("AWS::ApiGateway::Stage", {
+      devTemplate.hasResourceProperties("AWS::ApiGateway::Stage", {
         StageName: "api",
       });
     });
 
     // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
-    test("should enable tracing in API stage", () => {
-      template.hasResourceProperties("AWS::ApiGateway::Stage", {
+    test("should enable tracing in API stage for production", () => {
+      prodTemplate.hasResourceProperties("AWS::ApiGateway::Stage", {
         TracingEnabled: true,
+      });
+    });
+    
+    // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
+    test("should disable tracing in API stage for development", () => {
+      devTemplate.hasResourceProperties("AWS::ApiGateway::Stage", {
+        TracingEnabled: false,
       });
     });
   });

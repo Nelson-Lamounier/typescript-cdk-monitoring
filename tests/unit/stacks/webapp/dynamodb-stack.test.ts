@@ -202,13 +202,13 @@ describe("WebappDynamoDbStack", () => {
       prodTemplate = Template.fromStack(prodStack);
     });
 
-    // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
     test("should disable point-in-time recovery in development", () => {
-      devTemplate.hasResourceProperties("AWS::DynamoDB::Table", {
-        PointInTimeRecoverySpecification: {
-          PointInTimeRecoveryEnabled: false,
-        },
-      });
+      const resources = devTemplate.findResources("AWS::DynamoDB::Table");
+      const tableResource = Object.values(resources)[0] as any;
+      
+      // When PITR is disabled, the property is undefined (not present in template)
+      // CloudFormation treats undefined as false (disabled)
+      expect(tableResource.Properties.PointInTimeRecoverySpecification).toBeUndefined();
     });
 
     // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
@@ -343,52 +343,29 @@ describe("WebappDynamoDbStack", () => {
       template = Template.fromStack(stack);
     });
 
-    // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
     test("should apply standard tags to DynamoDB table", () => {
-      template.hasResourceProperties("AWS::DynamoDB::Table", {
-        Tags: Match.arrayWith([
-          {
-            Key: "Environment",
-            Value: DYNAMODB_TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
-          },
-          {
-            Key: "Project",
-            Value: DYNAMODB_TEST_CONSTANTS.PROJECT_NAMES.WEBAPP,
-          },
-          {
-            Key: "Stack",
-            Value: DYNAMODB_TEST_CONSTANTS.TAGS.STANDARD.STACK,
-          },
-          {
-            Key: "Layer",
-            Value: DYNAMODB_TEST_CONSTANTS.TAGS.STANDARD.LAYER,
-          },
-          {
-            Key: "ManagedBy",
-            Value: DYNAMODB_TEST_CONSTANTS.TAGS.STANDARD.MANAGED_BY,
-          },
-        ]),
-      });
+      const resources = template.findResources("AWS::DynamoDB::Table");
+      const tableResource = Object.values(resources)[0] as any;
+      const tags = tableResource.Properties.Tags;
+      
+      // Verify each required tag is present
+      expect(tags).toContainEqual({ Key: "Environment", Value: DYNAMODB_TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT });
+      expect(tags).toContainEqual({ Key: "Project", Value: DYNAMODB_TEST_CONSTANTS.PROJECT_NAMES.WEBAPP });
+      expect(tags).toContainEqual({ Key: "Stack", Value: DYNAMODB_TEST_CONSTANTS.TAGS.STANDARD.STACK });
+      expect(tags).toContainEqual({ Key: "Layer", Value: DYNAMODB_TEST_CONSTANTS.TAGS.STANDARD.LAYER });
+      expect(tags).toContainEqual({ Key: "ManagedBy", Value: DYNAMODB_TEST_CONSTANTS.TAGS.STANDARD.MANAGED_BY });
     });
 
     // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
     test("should apply custom tags to DynamoDB table", () => {
-      template.hasResourceProperties("AWS::DynamoDB::Table", {
-        Tags: Match.arrayWith([
-          {
-            Key: "Purpose",
-            Value: DYNAMODB_TEST_CONSTANTS.TAGS.CUSTOM.PURPOSE,
-          },
-          {
-            Key: "DataClassification",
-            Value: DYNAMODB_TEST_CONSTANTS.TAGS.CUSTOM.DATA_CLASSIFICATION,
-          },
-          {
-            Key: "Application",
-            Value: DYNAMODB_TEST_CONSTANTS.TAGS.CUSTOM.APPLICATION,
-          },
-        ]),
-      });
+      const resources = template.findResources("AWS::DynamoDB::Table");
+      const tableResource = Object.values(resources)[0] as any;
+      const tags = tableResource.Properties.Tags;
+      
+      // Verify custom tags are present
+      expect(tags).toContainEqual({ Key: "Purpose", Value: DYNAMODB_TEST_CONSTANTS.TAGS.CUSTOM.PURPOSE });
+      expect(tags).toContainEqual({ Key: "DataClassification", Value: DYNAMODB_TEST_CONSTANTS.TAGS.CUSTOM.DATA_CLASSIFICATION });
+      expect(tags).toContainEqual({ Key: "Application", Value: DYNAMODB_TEST_CONSTANTS.TAGS.CUSTOM.APPLICATION });
     });
   });
 
@@ -476,16 +453,20 @@ describe("WebappDynamoDbStack", () => {
 
     test("should expose articlesTable property", () => {
       expect(stack.articlesTable).toBeDefined();
-      expect(stack.articlesTable.tableName).toBe(
-        DYNAMODB_TEST_CONSTANTS.TABLE_NAMES.FULL_DEV
-      );
+      // Use Template assertion instead of direct property comparison to handle CDK tokens
+      const template = Template.fromStack(stack);
+      template.hasResourceProperties("AWS::DynamoDB::Table", {
+        TableName: DYNAMODB_TEST_CONSTANTS.TABLE_NAMES.FULL_DEV,
+      });
     });
 
     test("should expose assetsBucket property", () => {
       expect(stack.assetsBucket).toBeDefined();
-      expect(stack.assetsBucket.bucketName).toBe(
-        DYNAMODB_TEST_CONSTANTS.BUCKET_NAMES.ASSETS_DEV
-      );
+      // Use Template assertion instead of direct property comparison to handle CDK tokens
+      const template = Template.fromStack(stack);
+      template.hasResourceProperties("AWS::S3::Bucket", {
+        BucketName: DYNAMODB_TEST_CONSTANTS.BUCKET_NAMES.ASSETS_DEV,
+      });
     });
   });
 });

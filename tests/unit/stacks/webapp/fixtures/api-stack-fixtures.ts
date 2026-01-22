@@ -126,8 +126,9 @@ export function createMockTable(
   stack: cdk.Stack,
   tableName: string
 ): dynamodb.ITable {
+  // Only provide tableArn - CDK extracts tableName from ARN automatically
+  // Providing both causes "Only one of tableArn or tableName can be provided" error
   return dynamodb.Table.fromTableAttributes(stack, "MockTable", {
-    tableName,
     tableArn: `arn:aws:dynamodb:${TEST_CONFIG.region}:${TEST_CONFIG.account}:table/${tableName}`,
     tableStreamArn: `arn:aws:dynamodb:${TEST_CONFIG.region}:${TEST_CONFIG.account}:table/${tableName}/stream/2024-01-01T00:00:00.000`,
   });
@@ -255,6 +256,8 @@ export class ApiStackTestFixtures {
       envConfig: createTestEnvConfig(envName, isProduction),
       articlesTable: this.getMockTable(),
       assetsS3Bucket: this.getMockBucket(),
+      // For production tests, provide test CORS origin; for development, allow wildcard
+      corsOrigins: isProduction ? ["https://test-example.com"] : ["*"],
     };
   }
 }
@@ -295,7 +298,14 @@ export function createTestApiStack(
   }
 
   const fixtures = new ApiStackTestFixtures(app);
-  const minimalProps = fixtures.getMinimalProps();
+  
+  // Determine environment based on stack ID
+  const isProduction = id.toLowerCase().includes("prod");
+  const envName = isProduction 
+    ? BASE_TEST_CONSTANTS.ENVIRONMENTS.PRODUCTION 
+    : BASE_TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT;
+  
+  const minimalProps = fixtures.getMinimalProps(envName, isProduction);
 
   return new WebappApiStack(app, id, {
     ...minimalProps,

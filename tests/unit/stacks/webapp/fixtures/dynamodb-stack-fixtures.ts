@@ -90,7 +90,7 @@ export const DYNAMODB_TEST_CONSTANTS = {
   TAGS: {
     STANDARD: {
       STACK: "WebappDynamoDB",
-      LAYER: "Database",
+      LAYER: "Storage", // DynamoDB is storage infrastructure, not database logic
       MANAGED_BY: "CDK",
     },
     CUSTOM: {

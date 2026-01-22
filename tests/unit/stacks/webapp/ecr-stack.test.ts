@@ -307,9 +307,16 @@ describe("WebappEcrStack", () => {
           Statement: Match.arrayWith([
             Match.objectLike({
               Principal: Match.objectLike({
-                AWS: Match.stringLikeRegexp(
-                  ECR_TEST_CONSTANTS.ACCOUNTS.PIPELINE
-                ),
+                // CDK generates Fn::Join with format: ["", ["arn:", Ref("AWS::Partition"), ":iam::ACCOUNT:root"]]
+                // Check for Fn::Join structure and verify account ID is in the nested array
+                AWS: Match.objectLike({
+                  "Fn::Join": Match.arrayWith([
+                    // Second element is array containing the account reference
+                    Match.arrayWith([
+                      Match.stringLikeRegexp(`:iam::${ECR_TEST_CONSTANTS.ACCOUNTS.PIPELINE}:`),
+                    ]),
+                  ]),
+                }),
               }),
               Action: Match.arrayWith([
                 ECR_TEST_CONSTANTS.ECR_ACTIONS.BATCH_GET_IMAGE,
@@ -345,32 +352,18 @@ describe("WebappEcrStack", () => {
       template = Template.fromStack(stack);
     });
 
-    // eslint-disable-next-line jest/expect-expect -- template.hasResourceProperties throws on failure
+    // Test tags individually to avoid Match.arrayWith issues with object matching
     test("should apply standard tags to repository", () => {
-      template.hasResourceProperties("AWS::ECR::Repository", {
-        Tags: Match.arrayWith([
-          {
-            Key: "Environment",
-            Value: ECR_TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT,
-          },
-          {
-            Key: "Project",
-            Value: ECR_TEST_CONSTANTS.PROJECT_NAMES.WEBAPP,
-          },
-          {
-            Key: "Stack",
-            Value: ECR_TEST_CONSTANTS.TAGS.STANDARD.STACK,
-          },
-          {
-            Key: "Layer",
-            Value: ECR_TEST_CONSTANTS.TAGS.STANDARD.LAYER,
-          },
-          {
-            Key: "ManagedBy",
-            Value: ECR_TEST_CONSTANTS.TAGS.STANDARD.MANAGED_BY,
-          },
-        ]),
-      });
+      const resources = template.findResources("AWS::ECR::Repository");
+      const repoResource = Object.values(resources)[0] as any;
+      const tags = repoResource.Properties.Tags;
+      
+      // Verify each required tag is present
+      expect(tags).toContainEqual({ Key: "Environment", Value: ECR_TEST_CONSTANTS.ENVIRONMENTS.DEVELOPMENT });
+      expect(tags).toContainEqual({ Key: "Project", Value: ECR_TEST_CONSTANTS.PROJECT_NAMES.WEBAPP });
+      expect(tags).toContainEqual({ Key: "Stack", Value: ECR_TEST_CONSTANTS.TAGS.STANDARD.STACK });
+      expect(tags).toContainEqual({ Key: "Layer", Value: ECR_TEST_CONSTANTS.TAGS.STANDARD.LAYER });
+      expect(tags).toContainEqual({ Key: "ManagedBy", Value: ECR_TEST_CONSTANTS.TAGS.STANDARD.MANAGED_BY });
     });
   });
 
@@ -470,9 +463,11 @@ describe("WebappEcrStack", () => {
 
     test("should expose repository property", () => {
       expect(stack.repository).toBeDefined();
-      expect(stack.repository.repositoryName).toBe(
-        ECR_TEST_CONSTANTS.REPOSITORY_NAMES.DEFAULT
-      );
+      // Use Template assertion instead of direct property comparison to handle CDK tokens
+      const template = Template.fromStack(stack);
+      template.hasResourceProperties("AWS::ECR::Repository", {
+        RepositoryName: ECR_TEST_CONSTANTS.REPOSITORY_NAMES.DEFAULT,
+      });
     });
   });
 });

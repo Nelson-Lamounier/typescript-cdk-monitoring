@@ -385,7 +385,7 @@ export class WebappDynamoDbStack extends cdk.Stack {
     cdk.Tags.of(this).add("Stack", "WebappDynamoDB");
     cdk.Tags.of(this).add("Project", projectName);
     cdk.Tags.of(this).add("Environment", envName);
-    cdk.Tags.of(this).add("Layer", "Database");
+    cdk.Tags.of(this).add("Layer", "Storage"); // DynamoDB is storage infrastructure
     cdk.Tags.of(this).add("ManagedBy", "CDK");
 
     // ========================================================================
