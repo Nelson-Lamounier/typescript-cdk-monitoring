@@ -26,6 +26,7 @@ dist/
 node_modules
 
 # IDE
+.cursorrules
 .idea
 .vscode
 *.swp
@@ -72,6 +73,7 @@ prompts/*
 iam/*
 
 scripts/helper/*
+scripts/bootstrap/*    
 scripts/integration/deployment/docs-integration-scripts/*
 scripts/integration/deprecated/*
 
