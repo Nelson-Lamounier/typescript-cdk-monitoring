@@ -1,5 +1,5 @@
 /** @format */
-
+// To run the deploy-monitoring-dev workflow, change the handler to export async function handler(
 import {
   DynamoDBClient,
   GetItemCommand,
@@ -88,7 +88,7 @@ function extractSlug(event: APIGatewayProxyEvent): string | null {
  */
 export const handler = async (
   event: APIGatewayProxyEvent,
-  context: Context
+  context: Context,
 ): Promise<APIGatewayProxyResult> => {
   console.log("Event:", JSON.stringify(event, null, 2));
   console.log("Context:", JSON.stringify(context, null, 2));
@@ -194,4 +194,4 @@ export const handler = async (
 
     return createInternalServerErrorResponse("An unknown error occurred");
   }
-}
+};
