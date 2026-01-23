@@ -9,9 +9,10 @@ on:
       - develop
     paths:
       - "lib/stacks/**"
+      - "lib/constructs/**"
+      - "lib/shared/**"
       - "bin/**"
       - "config/**"
-      - "handlers/**"
       - "lambda/**"
       - ".github/workflows/deploy-monitoring-dev.yml"
       - ".github/actions/**"

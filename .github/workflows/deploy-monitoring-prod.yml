@@ -9,9 +9,10 @@ on:
       - main
     paths:
       - "lib/stacks/**"
+      - "lib/constructs/**"
+      - "lib/shared/**"
       - "bin/**"
       - "config/**"
-      - "handlers/**"
       - "lambda/**"
       - ".github/workflows/deploy-monitoring-prod.yml"
       - ".github/actions/**"

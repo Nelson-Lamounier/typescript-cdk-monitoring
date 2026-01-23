@@ -2,1141 +2,464 @@
 
 # GitHub Actions Documentation
 
-This directory contains reusable composite actions for CDK infrastructure deployment, drift detection, and pipeline orchestration. All actions are designed for reliability, error handling, and comprehensive troubleshooting guidance.
+This directory contains GitHub Actions workflows and reusable composite actions for CDK infrastructure deployment, CI/CD pipelines, and infrastructure security scanning.
 
 ## Table of Contents
 
 - [Overview](#overview)
+- [Directory Structure](#directory-structure)
 - [Workflows](#workflows)
-  - [CI Workflow (ci.yml)](#ci-workflow-ciyml)
-  - [CD Workflow (deploy.yml)](#cd-workflow-deployyml)
-  - [Determine Jobs to Run](#determine-jobs-to-run)
-- [Actions](#actions)
-  - [setup-infrastructure](#setup-infrastructure)
+  - [CI Workflow](#ci-workflow-ciyml)
+  - [Deployment Workflows](#deployment-workflows)
+  - [Reusable Workflows](#reusable-workflows)
+- [Composite Actions](#composite-actions)
+  - [setup-node-yarn](#setup-node-yarn)
   - [setup-cdk-deployment](#setup-cdk-deployment)
   - [deploy-cdk-stack](#deploy-cdk-stack)
-  - [drift-detection](#drift-detection)
-  - [parallel-execution-manager](#parallel-execution-manager)
-- [Common Usage Patterns](#common-usage-patterns)
+- [Stack Naming Convention](#stack-naming-convention)
+- [Environment Configuration](#environment-configuration)
 - [Troubleshooting](#troubleshooting)
-  - [CDK Bootstrap Issues](#cdk-bootstrap-issues)
+- [Best Practices](#best-practices)
 
 ## Overview
 
-These composite actions provide a complete workflow for:
+The CI/CD pipeline is designed around:
 
-- Setting up Node.js, Yarn, and CDK environments
-- Deploying CDK stacks with comprehensive error handling
-- Detecting infrastructure drift between code and deployed resources
-- Managing parallel job execution for optimal pipeline performance
-- Supporting multi-project infrastructure deployments
+- **Environment-specific workflows**: Separate workflows for development, staging, and production
+- **OIDC Authentication**: Secure credential-less AWS authentication via GitHub OIDC
+- **Immutable Artifacts**: Staging synthesizes artifacts that production reuses
+- **Post-deployment Verification**: Automated validation after each stack deployment
+- **Path-based Filtering**: CI/CD only runs on relevant code changes
 
-All actions include:
+## Directory Structure
 
-- Input validation with clear error messages
-- Comprehensive error handling and recovery
-- Detailed troubleshooting guidance
-- Support for cross-account deployments
-- Environment-specific configuration
-- Project-agnostic naming and configuration (Multi-Project Infrastructure Pattern)
+```
+.github/
+├── actions/                          # Composite actions
+│   ├── deploy-cdk-stack/             # CDK stack deployment
+│   │   ├── action.yml
+│   │   └── README.md
+│   ├── setup-cdk-deployment/         # Full deployment environment setup
+│   │   └── action.yml
+│   └── setup-node-yarn/              # Node.js and Yarn setup with caching
+│       ├── action.yml
+│       └── README.md
+│
+├── workflows/
+│   ├── _deploy-stack.yml             # Reusable stack deployment workflow
+│   ├── _iac-security-scan.yml        # Reusable IaC security scanning
+│   ├── ci.yml                        # Continuous Integration
+│   │
+│   ├── deploy-monitoring-dev.yml     # Monitoring → Development
+│   ├── deploy-monitoring-staging.yml # Monitoring → Staging
+│   ├── deploy-monitoring-prod.yml    # Monitoring → Production
+│   │
+│   ├── deploy-webapp-dev.yml         # Webapp → Development
+│   └── deploy-dashboards.yml         # Dashboard deployments
+│
+├── CODEOWNERS                        # Code ownership for PR reviews
+├── PULL_REQUEST_TEMPLATE.md          # PR template
+├── ISSUE_TEMPLATE/                   # Issue templates
+│   ├── bug_report.md
+│   └── feature_request.md
+├── dependabot.yml                    # Automated dependency updates
+├── README.md                         # This file
+└── GUIDE.md                          # Local development guide
+```
+
+---
 
 ## Workflows
 
-The repository uses two separate workflows to optimise performance, security, and maintainability:
-
 ### CI Workflow (`ci.yml`)
 
-**Purpose**: Provides fast feedback on code quality for every commit and pull request.
+**Purpose**: Fast feedback on code quality for every commit and pull request.
 
 **Triggers**:
 
 - Push to any branch
 - Pull requests to any branch
-- Manual dispatch
 
 **Jobs**:
 
-1. **determine-jobs** - Determines which CI jobs to run based on inputs
-2. **security-scan** - Validates workflow inputs and scans for secrets in code
-3. **lint-and-quality** - TypeScript linting, type checking, CDK validation, tests, shell/YAML/JSON linting, documentation validation
-4. **build** - Compiles infrastructure code and validates CDK synthesis
-5. **validate-setup** - Read-only AWS environment validation (no deployment permissions)
+| Job | Description | Condition |
+|-----|-------------|-----------|
+| `detect-changes` | Identifies which code areas changed | Always |
+| `setup` | Installs dependencies and caches | Always |
+| `lint` | ESLint code linting | Source/test changes |
+| `typecheck` | TypeScript type checking | Source/test changes |
+| `test-monitoring` | Monitoring domain tests | Monitoring changes or shared changes |
+| `test-webapp` | Webapp domain tests | Webapp changes or shared changes |
+| `test-foundation` | Foundation/networking tests | Foundation changes or shared changes |
+| `test-constructs` | CDK construct tests | Construct changes or shared changes |
+| `test-shared` | Shared utility tests | Shared changes |
+| `test-security` | Security tests | Security test changes or shared changes |
+| `test-connectivity` | Connectivity tests | Foundation changes or shared changes |
+| `test-snapshots` | Snapshot tests | Any source/test changes |
+| `build` | TypeScript compilation | Source changes |
+| `validate-cdk` | CDK synthesis validation | Source changes |
+| `iac-security-scan` | Checkov/cfn-nag scanning | Source changes |
 
 **Key Features**:
 
-- **Fast Execution**: Typically completes in < 5 minutes
-- **Minimal Permissions**: Read-only access, no deployment capabilities
-- **Early Feedback**: Runs on every commit to catch issues quickly
-- **No Environment Protection**: Can run on any branch without approval gates
-
-**Usage**:
-
-```yaml
-# Automatically runs on push/PR
-# Or manually trigger via GitHub Actions UI
-```
-
-**Outputs**:
-
-- Build cache key for use in CD workflow
-- Test coverage reports
-- Linting reports
-- Validation results
+- **Smart Filtering**: Uses `dorny/paths-filter` to run only relevant tests
+- **Parallel Execution**: Independent tests run concurrently
+- **Continue on Error**: Test jobs don't block other tests
+- **Snapshot Auto-Update**: Commits updated snapshots automatically
 
 ---
 
-### CD Workflow (`deploy.yml`)
+### Deployment Workflows
 
-**Purpose**: Controlled infrastructure deployments with comprehensive validation and error handling.
+Each environment has its own deployment workflow for clear separation and different approval requirements.
+
+#### Monitoring Project
+
+| Workflow | Branch | Environment | Account |
+|----------|--------|-------------|---------|
+| `deploy-monitoring-dev.yml` | `develop` | development | Development |
+| `deploy-monitoring-staging.yml` | `staging` | staging | Staging |
+| `deploy-monitoring-prod.yml` | `main` | production | Production |
+
+#### Webapp Project
+
+| Workflow | Branch | Environment |
+|----------|--------|-------------|
+| `deploy-webapp-dev.yml` | `develop` | development |
+
+#### Common Deployment Flow
+
+Each deployment workflow follows this pattern:
+
+```
+Setup & Build → Deploy Networking → Verify Networking
+              → Deploy S3 → Verify S3
+              → Deploy EFS → Verify EFS
+              → Deploy Infra → Verify Infra
+              → Deploy Service → Verify Service
+              → Deploy Security → Verify Security
+              → Deployment Summary
+```
 
 **Triggers**:
 
-- Push to `main` branch (protected)
-- Manual dispatch with stack selection
+- Push to designated branch with relevant path changes
+- Manual dispatch via `workflow_dispatch`
 
-**Workflow Inputs** (Manual Dispatch):
+**Path Filters** (what triggers deployments):
 
-- `environment`: Environment to deploy to (development, staging, production)
-  - Default: `development` (first deployment target)
-  - Deployment flow: development → staging → production
-- `project`: Project name (e.g., monitoring, webapp) - defaults to "monitoring"
-- `stack`: Stack to deploy (networking, ebs-storage, ecs, load-balancer, launch-template, vpc-peering, destroy-all)
-- `jobs_to_run`: Comma-separated job list or 'all' or 'failed'
-- `rerun_failed_from`: Run ID to re-run failed jobs from
-- `enable_drift_detection`: Enable drift detection after deployment
-- `drift_threshold`: Maximum drift count before failing
-- `skip_validation`: Skip pre-deployment validation
+```yaml
+paths:
+  - "lib/stacks/**"
+  - "lib/constructs/**"
+  - "lib/shared/**"
+  - "bin/**"
+  - "config/**"
+  - "lambda/**"
+  - ".github/workflows/deploy-*.yml"
+  - ".github/actions/**"
+```
 
-**Jobs**:
+---
 
-1. **determine-jobs** - Determines which deployment jobs to run based on inputs, project, and stack selection
-2. **build** - Compiles infrastructure code (required for deployments)
-3. **validate-setup** - AWS environment setup with deployment permissions
-4. **deploy-networking** - Deploys NetworkingStack (project-specific: `NetworkingStack-${project}-${environment}`)
-5. **deploy-ebs-storage** - Deploys EbsStorageStack (project-specific: `EbsStorageStack-${project}-${environment}`)
-6. **deploy-ecs** - Deploys EcsStack (project-specific: `EcsStack-${project}-${environment}`)
-7. **deploy-load-balancer** - Deploys LoadBalancerStack (project-specific: `LoadBalancerStack-${project}-${environment}`)
-8. **deploy-launch-template** - Deploys LaunchTemplateStack (project-specific: `LaunchTemplateStack-${project}-${environment}`)
-9. **deploy-vpc-peering** - Deploys VpcPeeringStack (project-specific: `VpcPeeringStack-${project}-${environment}`)
-10. **health-checks** - Post-deployment health validation
-11. **drift-detection-\*** - Infrastructure drift detection for each stack
-12. **destroy-all** - Stack destruction job (optional)
+### Reusable Workflows
 
-**Key Features**:
+#### `_deploy-stack.yml`
 
-- **Environment Protection**: Requires approval for production deployments
-- **Deployment Permissions**: Full AWS deployment access via OIDC
-- **Comprehensive Validation**: Pre-deployment checks and post-deployment verification
-- **Error Recovery**: Automatic retry logic and detailed troubleshooting guidance
-- **Selective Execution**: Run specific jobs or re-run failed jobs only
+Reusable workflow for deploying a single CDK stack. Called by environment-specific workflows.
+
+**Inputs**:
+
+| Input | Description | Required | Default |
+|-------|-------------|----------|---------|
+| `stack-name` | Full CDK stack name | Yes | - |
+| `environment` | Target environment | Yes | - |
+| `aws-account-id` | Target AWS account ID | Yes | - |
+| `aws-region` | AWS region | No | `eu-west-1` |
+| `additional-context` | CDK context as JSON | No | `{}` |
+| `require-approval` | CDK approval requirement | No | `never` |
+| `verify-bootstrap` | Verify CDK bootstrap | No | `false` |
+| `outputs-directory` | Directory for stack outputs | No | `""` |
 
 **Usage**:
 
 ```yaml
-# Automatically runs on merge to main (deploys to development by default)
-# Or manually trigger with environment and stack selection:
-# - Select environment (development, staging, production)
-#   - Development: First deployment target
-#   - Staging: Pre-production testing
-#   - Production: Requires approval
-# - Select project (e.g., monitoring, webapp) - defaults to "monitoring"
-# - Select stack to deploy
-# - Optionally specify jobs_to_run
-# - Optionally provide rerun_failed_from run ID
-```
-
-**Deployment Flow**:
-
-1. Deploy to **development** account first
-2. After testing, deploy to **staging** account
-3. After approval, deploy to **production** account
-
-**Stack Naming Pattern**:
-All stacks follow the Multi-Project Infrastructure Pattern:
-
-- Format: `[StackName]-[project]-[environment]`
-- Example: `NetworkingStack-monitoring-development`
-- Example: `EcsStack-webapp-staging`
-- Example: `EbsStorageStack-monitoring-production`
-
-**SSM Parameter Pattern**:
-All SSM parameters follow project-specific paths:
-
-- Format: `/${project}/${environment}/[resource]/[parameter]`
-- Example: `/monitoring/development/ebs/prometheus-volume-size`
-- Example: `/webapp/staging/ecs/cluster-name`
-
-**Dependencies**:
-
-- Requires successful CI workflow (or can run build/validate-setup internally)
-- Uses build cache from CI when available
-- Validates AWS credentials and account configuration
-
----
-
-### Multi-Project Infrastructure Pattern
-
-The deployment workflow supports the **Multi-Project Infrastructure Pattern**, allowing you to deploy multiple projects (e.g., monitoring, webapp) using the same infrastructure codebase with project-specific naming and configuration.
-
-#### Key Concepts
-
-**Project-Agnostic Stacks**: All stacks are dynamically named based on project and environment:
-
-- Stack naming: `[StackName]-[project]-[environment]`
-- Example: `NetworkingStack-monitoring-development` (first deployment target)
-- Example: `EcsStack-webapp-staging` (second deployment target)
-
-**Project-Specific Configuration**:
-
-- SSM parameters: `/${project}/${environment}/[resource]/[parameter]`
-- CloudFormation exports: `${environment}-${project}-[resource]-[property]`
-- Resource tags: Include `Project` and `ProjectType` tags
-
-**Default Project**: If no project is specified, defaults to `"monitoring"` for backward compatibility.
-
-#### Project Selection
-
-**Via Workflow Dispatch**:
-
-```yaml
-# Manual deployment with project selection
-environment: "development" # First deployment target
-project: "monitoring" # or "webapp", etc.
-stack: "networking"
-```
-
-**Via Environment Variables**:
-
-```bash
-# Local deployment - Development (first deployment target)
-PROJECT_NAME=monitoring ENVIRONMENT=development cdk deploy NetworkingStack-monitoring-development
-
-# Or with CDK context
-cdk deploy NetworkingStack-monitoring-development \
-  --context project=monitoring \
-  --context environment=development
-```
-
-**Via GitHub Actions**:
-
-```yaml
-- uses: ./.github/actions/deploy-cdk-stack
+deploy-networking:
+  uses: ./.github/workflows/_deploy-stack.yml
   with:
-    stack-name: "NetworkingStack-monitoring-development"
+    stack-name: "development-Networking"
     environment: "development"
-    project-name: "monitoring" # Optional, defaults to "monitoring"
+    aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
+    aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
+    outputs-directory: "deployment-outputs"
+  secrets:
+    AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_DEV }}
 ```
 
-#### Project Configuration
+#### `_iac-security-scan.yml`
 
-Projects are configured in `lib/config/projects.ts`:
-
-- Each project defines its type (monitoring, webapp, etc.)
-- Project-specific configurations (volumes, services, etc.)
-- Environment-specific overrides
-
-#### Benefits
-
-1. **Code Reusability**: Same infrastructure code for multiple projects
-2. **Clear Separation**: Project-specific naming prevents resource conflicts
-3. **Cost Optimisation**: Shared infrastructure where appropriate, isolated where needed
-4. **Flexible Deployment**: Deploy different projects to different environments independently
-
----
-
-### Determine Jobs to Run
-
-Both workflows include a `determine-jobs` job that intelligently selects which jobs to execute based on various inputs.
-
-#### How It Works
-
-**Three Execution Modes**:
-
-1. **Rerun Failed Jobs** (`rerun_failed_from`)
-
-   - Fetches failed jobs from a previous workflow run
-   - Uses GitHub CLI to query run information
-   - Automatically enables dependencies
-   - Example: If `deploy-ecs` failed, it enables `build`, `validate-setup`, `deploy-networking`, `deploy-ebs-storage`, and `deploy-ecs`
-
-2. **Selective Jobs** (`jobs_to_run`)
-
-   - Comma-separated list: `"build,deploy-networking"`
-   - Case-insensitive keyword matching
-   - Auto-enables dependencies for deployment jobs
-   - Example: `"deploy-networking"` automatically enables `build` and `validate-setup`
-
-3. **All Jobs** (`jobs_to_run: "all"` or empty)
-   - Runs all standard jobs
-   - Disables `destroy-all` and `rollback` by default (safety)
-   - Respects `enable_drift_detection` input
-
-#### Job Keywords
-
-For selective execution, use these keywords (case-insensitive):
-
-- `security` → Security scan
-- `lint` → Lint and quality checks
-- `build` → Build infrastructure
-- `validate` or `setup` → Validate and setup
-- `networking` → Deploy networking stack
-- `ebs` or `storage` → Deploy EBS storage stack
-- `ecs` → Deploy ECS stack
-- `load-balancer` or `alb` → Deploy load balancer stack
-- `launch-template` → Deploy launch template stack
-- `peering` or `vpc` → Deploy VPC peering
-- `health` → Health checks
-- `destroy` → Destroy all stacks
-- `drift` → Drift detection
-
-#### Stack-Specific Logic
-
-When `stack: "destroy-all"` is selected:
-
-- Enables `destroy-all` job
-- Disables all deployment jobs
-- Prevents accidental deployments during destruction
-
-#### Usage Examples
-
-```yaml
-# Re-run failed jobs from a previous run
-rerun_failed_from: "1234567890"
-
-# Run specific jobs for monitoring project
-project: "monitoring"
-jobs_to_run: "build,deploy-networking"
-
-# Run all jobs for webapp project
-project: "webapp"
-jobs_to_run: "all"  # or leave empty
-
-# Quick deployment without drift detection
-project: "monitoring"
-jobs_to_run: "build,deploy-networking"
-enable_drift_detection: false
-
-# Deploy specific stack for a project
-project: "monitoring"
-stack: "networking"
-environment: "pipeline"
-```
-
-#### Error Handling
-
-The `determine-jobs` job includes comprehensive error handling:
-
-- **Invalid Run ID**: Validates format and provides clear error messages
-- **Run Not Found**: Falls back to running all jobs with helpful guidance
-- **No Failed Jobs**: Handles case where all jobs succeeded
-- **GitHub API Errors**: Graceful degradation with fallback behaviour
-
----
-
-## Actions
-
-### setup-infrastructure
-
-Sets up the Node.js environment, package manager, and dependency caching for infrastructure operations.
-
-**Purpose**: Provides a consistent environment for all infrastructure-related jobs with optimised caching to reduce build times.
+Reusable workflow for infrastructure-as-code security scanning using Checkov.
 
 **Inputs**:
 
-| Input          | Description                   | Required | Default |
-| -------------- | ----------------------------- | -------- | ------- |
-| `node-version` | Node.js version to use        | No       | `22`    |
-| `cache-key`    | Cache key for build artifacts | No       | `""`    |
+| Input | Description | Required | Default |
+|-------|-------------|----------|---------|
+| `environment` | Target environment | Yes | - |
+| `enforce-blocking` | Fail on findings | No | `false` |
+| `cdk-output-path` | Path to CDK output | No | `cdk.out` |
+| `skip-checks` | Checks to skip | No | `""` |
+| `soft-fail-on` | Severity levels to soft-fail | No | `LOW,MEDIUM` |
+
+---
+
+## Composite Actions
+
+### setup-node-yarn
+
+Sets up Node.js, enables Corepack for Yarn v4+, and caches dependencies.
+
+**Inputs**:
+
+| Input | Description | Required | Default |
+|-------|-------------|----------|---------|
+| `node-version` | Node.js version | No | `22` |
+| `install-dependencies` | Run yarn install | No | `true` |
+| `cache-dependency-path` | Lockfile path | No | `yarn.lock` |
 
 **Outputs**:
 
-| Output      | Description                      |
-| ----------- | -------------------------------- |
-| `cache-hit` | Whether dependency cache was hit |
+| Output | Description |
+|--------|-------------|
+| `cache-hit` | Whether cache was hit |
+| `cache-key` | Cache key used |
+| `node-version` | Installed Node version |
 
-**Usage Example**:
+**Usage**:
 
 ```yaml
-- name: Setup Infrastructure
-  uses: ./.github/actions/setup-infrastructure
+- name: Setup Node.js and Yarn
+  uses: ./.github/actions/setup-node-yarn
   with:
     node-version: "22"
 ```
-
-**Key Features**:
-
-- Enables Corepack for Yarn v4+ package management
-- Caches Turbo build artifacts for faster subsequent runs
-- Caches Yarn dependencies based on lockfile hash
-- Always runs `yarn install` to ensure binaries (like CDK) are available
 
 ---
 
 ### setup-cdk-deployment
 
-Sets up the complete environment for CDK deployment including AWS credentials, build cache restoration, and environment verification.
-
-**Purpose**: Prepares the deployment environment with all prerequisites validated before attempting CDK operations.
+Sets up the complete environment for CDK deployment including AWS credentials and build cache.
 
 **Inputs**:
 
-| Input              | Description                              | Required | Default       |
-| ------------------ | ---------------------------------------- | -------- | ------------- |
-| `node-version`     | Node.js version to use                   | No       | `22`          |
-| `aws-role`         | AWS IAM role ARN for OIDC authentication | Yes      | -             |
-| `aws-region`       | AWS region for deployment                | Yes      | -             |
-| `build-cache-key`  | Build cache key from build job           | Yes      | -             |
-| `environment-name` | Environment name for deployment          | No       | `development` |
+| Input | Description | Required | Default |
+|-------|-------------|----------|---------|
+| `node-version` | Node.js version | No | `22` |
+| `aws-role` | AWS OIDC role ARN | Yes | - |
+| `aws-region` | AWS region | Yes | - |
+| `build-cache-key` | Build cache key | Yes | - |
+| `environment-name` | Environment name | No | `development` |
 
-**Usage Example**:
+**Usage**:
 
 ```yaml
 - name: Setup CDK Deployment
   uses: ./.github/actions/setup-cdk-deployment
   with:
-    node-version: "22"
-    aws-role: ${{ secrets.AWS_ROLE_ARN }}
+    aws-role: ${{ secrets.AWS_OIDC_ROLE_DEV }}
     aws-region: "eu-west-1"
     build-cache-key: ${{ needs.build.outputs.cache-key }}
     environment-name: "development"
 ```
 
-**Key Features**:
-
-- Configures AWS credentials via OIDC (no long-lived credentials)
-- Restores build cache from previous build job
-- Verifies Node.js, Yarn, AWS CLI, and CDK availability
-- Falls back to building infrastructure if cache is missing
-- Validates AWS credentials are active before proceeding
-
-**Verification Checks**:
-
-- Node.js and Yarn installation
-- AWS CLI availability and credentials
-- CDK CLI availability via npx
-- Build artifacts presence (or triggers fallback build)
-
 ---
 
 ### deploy-cdk-stack
 
-Deploys a CDK stack with comprehensive validation, error handling, and troubleshooting guidance.
-
-**Purpose**: Provides a battle-tested deployment workflow that handles common CDK deployment issues, validates prerequisites, and provides actionable error messages.
+Deploys a CDK stack with validation, error handling, and output capture.
 
 **Inputs**:
 
-| Input             | Description                                                                      | Required | Default                    |
-| ----------------- | -------------------------------------------------------------------------------- | -------- | -------------------------- |
-| `stack-name`      | Name of the CDK stack to deploy (format: `StackName-${project}-${environment}`)  | Yes      | -                          |
-| `environment`     | Environment name (e.g., development, staging, production)                        | Yes      | -                          |
-| `project-name`    | Project name (e.g., monitoring, webapp) for multi-project infrastructure pattern | No       | `monitoring`               |
-| `aws-account-id`  | AWS Account ID for deployment                                                    | Yes      | -                          |
-| `aws-region`      | AWS Region for deployment                                                        | Yes      | -                          |
-| `dev-vpc-id`      | Development VPC ID (optional, for cross-account peering)                         | No       | `""`                       |
-| `dev-account-id`  | Development Account ID (optional)                                                | No       | `""`                       |
-| `additional-args` | Additional CDK deploy arguments                                                  | No       | `--require-approval never` |
+| Input | Description | Required | Default |
+|-------|-------------|----------|---------|
+| `stack-name` | CDK stack name | Yes | - |
+| `environment` | Target environment | Yes | - |
+| `aws-account-id` | AWS account ID | Yes | - |
+| `aws-region` | AWS region | Yes | - |
+| `additional-context` | CDK context as JSON | No | `{}` |
+| `additional-args` | Extra CDK arguments | No | `""` |
+| `require-approval` | Approval requirement | No | `never` |
+| `verify-bootstrap` | Verify CDK bootstrap | No | `false` |
+| `outputs-directory` | Output save directory | No | `""` |
 
 **Outputs**:
 
-| Output              | Description                                       |
-| ------------------- | ------------------------------------------------- |
-| `deployment-status` | Status of the deployment (`success` or `failure`) |
+| Output | Description |
+|--------|-------------|
+| `deployment-status` | `success` or `failure` |
+| `stack-outputs` | CloudFormation outputs (JSON) |
+| `outputs-file` | Path to saved outputs file |
 
-**Usage Examples**:
+**Usage**:
 
 ```yaml
-# Deploy monitoring project stack to development (first deployment target)
-- name: Deploy Networking Stack
+- name: Deploy Stack
   uses: ./.github/actions/deploy-cdk-stack
   with:
-    stack-name: "NetworkingStack-monitoring-development"
+    stack-name: "development-Networking"
     environment: "development"
-    project-name: "monitoring"
-    aws-account-id: ${{ needs.validate-setup.outputs.aws-account-id }}
+    aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
     aws-region: "eu-west-1"
-    dev-vpc-id: ${{ secrets.DEV_VPC_ID }}
-    dev-account-id: ${{ secrets.DEV_ACCOUNT_ID }}
-
-# Deploy webapp project stack
-- name: Deploy Networking Stack
-  uses: ./.github/actions/deploy-cdk-stack
-  with:
-    stack-name: "NetworkingStack-webapp-development"
-    environment: "development"
-    project-name: "webapp"
-    aws-account-id: ${{ needs.validate-setup.outputs.aws-account-id }}
-    aws-region: "eu-west-1"
+    outputs-directory: "deployment-outputs"
 ```
-
-**Key Features**:
-
-- Validates all required environment variables before deployment
-- Verifies stack exists in CDK application (handles EPIPE errors gracefully)
-- Cleans up existing change sets to prevent conflicts
-- Handles EPIPE (broken pipe) errors common in GitHub Actions
-- Detects and provides guidance for CloudFormation export dependency errors
-- Retries deployment on change set conflicts
-- Comprehensive error analysis with troubleshooting steps
-
-**Error Handling**:
-
-- **EPIPE Errors**: Automatically retries without piping to avoid broken pipe issues
-- **Change Set Conflicts**: Cleans up conflicting change sets and retries
-- **Export Dependencies**: Provides ordered deployment guidance when exports are in use
-- **Stack Not Found**: Validates stack name format (including project name) and provides available stack list
-
-**Common Error Scenarios**:
-
-1. **Stack Not Found**: Verifies stack name format (`StackName-${project}-${environment}`) and environment/project configuration
-2. **CDK CLI Missing**: Checks setup-cdk-deployment job completion
-3. **Change Set Conflicts**: Automatically cleans up and retries
-4. **Export Dependencies**: Guides ordered deployment of dependent stacks (project-specific exports)
-5. **Project Context Missing**: Ensures `project-name` is provided or defaults to "monitoring"
 
 ---
 
-### drift-detection
+## Stack Naming Convention
 
-Detects infrastructure drift between deployed CloudFormation stacks and CDK code configuration.
+Stacks follow the pattern: `{environment}-{StackName}`
 
-**Purpose**: Identifies when deployed infrastructure has been manually modified or differs from the CDK code, enabling infrastructure-as-code compliance.
+| Stack | Development | Staging | Production |
+|-------|-------------|---------|------------|
+| Networking | `development-Networking` | `staging-Networking` | `production-Networking` |
+| Monitoring S3 | `development-MonitoringS3` | `staging-MonitoringS3` | `production-MonitoringS3` |
+| Monitoring EFS | `development-MonitoringEfs` | `staging-MonitoringEfs` | `production-MonitoringEfs` |
+| Monitoring Infra | `development-MonitoringInfra` | `staging-MonitoringInfra` | `production-MonitoringInfra` |
+| Monitoring Service | `development-MonitoringService` | `staging-MonitoringService` | `production-MonitoringService` |
+| Security Prowler | `development-SecurityProwler` | `staging-SecurityProwler` | `production-SecurityProwler` |
 
-**Inputs**:
+### SSM Parameter Paths
 
-| Input             | Description                                                                     | Required | Default |
-| ----------------- | ------------------------------------------------------------------------------- | -------- | ------- |
-| `stack-name`      | Name of the CDK stack to check for drift                                        | Yes      | -       |
-| `environment`     | Environment name (e.g., development, staging, production)                       | Yes      | -       |
-| `aws-account-id`  | AWS Account ID for deployment                                                   | Yes      | -       |
-| `aws-region`      | AWS Region for deployment                                                       | Yes      | -       |
-| `dev-vpc-id`      | Development VPC ID (optional)                                                   | No       | `""`    |
-| `dev-account-id`  | Development Account ID (optional)                                               | No       | `""`    |
-| `drift-threshold` | Maximum number of drifted resources before failing (0 = fail on any drift)      | No       | `0`     |
-| `check-mode`      | Drift check mode: `full` (CloudFormation + CDK diff) or `quick` (CDK diff only) | No       | `full`  |
+SSM parameters follow: `/{project}/{environment}/{resource}/{parameter}`
 
-**Outputs**:
+Examples:
+- `/monitoring/development/efs/filesystem-id`
+- `/monitoring/staging/ecs/cluster-arn`
+- `/webapp/development/dynamodb/table-name`
 
-| Output           | Description                                                    |
-| ---------------- | -------------------------------------------------------------- |
-| `drift-detected` | Whether drift was detected (`true` or `false`)                 |
-| `drift-count`    | Number of resources with detected drift                        |
-| `drift-severity` | Severity of drift: `none`, `low`, `medium`, `high`, `critical` |
+### CloudFormation Exports
 
-**Usage Examples**:
+Exports follow: `{environment}-{resource}-{property}`
 
-```yaml
-# Detect drift for monitoring project in development
-- name: Detect Infrastructure Drift
-  uses: ./.github/actions/drift-detection
-  with:
-    stack-name: "NetworkingStack-monitoring-development"
-    environment: "development"
-    aws-account-id: ${{ needs.validate-setup.outputs.aws-account-id }}
-    aws-region: "eu-west-1"
-    drift-threshold: "2"
-    check-mode: "full"
-
-# Detect drift for webapp project
-- name: Detect Infrastructure Drift
-  uses: ./.github/actions/drift-detection
-  with:
-    stack-name: "EcsStack-webapp-development"
-    environment: "development"
-    aws-account-id: ${{ needs.validate-setup.outputs.aws-account-id }}
-    aws-region: "eu-west-1"
-    drift-threshold: "2"
-    check-mode: "full"
-```
-
-**Key Features**:
-
-- Validates all inputs including drift threshold and check mode
-- Verifies stack exists and is in stable state before drift detection
-- Performs CDK diff analysis to detect code vs deployment differences
-- Optionally performs CloudFormation drift detection (full mode)
-- Categorises drift by type (additions, deletions, modifications)
-- Calculates drift severity based on resource count
-- Generates comprehensive drift reports as artifacts
-- Configurable threshold allows tolerance for non-critical drift
-
-**Check Modes**:
-
-- **Full Mode**: Performs both CDK diff and CloudFormation drift detection for comprehensive analysis
-- **Quick Mode**: Only performs CDK diff for faster execution (skips CloudFormation API calls)
-
-**Drift Severity Levels**:
-
-- `none`: No drift detected
-- `low`: 1-2 drifted resources
-- `medium`: 3-5 drifted resources
-- `high`: 6-10 drifted resources
-- `critical`: 11+ drifted resources
-
-**Artifacts Generated**:
-
-- `drift-report/drift-summary.md`: Markdown summary of drift detection results
-- `drift-report/cdk-diff-output.txt`: Full CDK diff output (if changes detected)
-- `drift-report/cf-drift-details.txt`: CloudFormation drift details (full mode only)
-
-**Remediation Guidance**:
-When drift is detected, the action provides guidance on:
-
-- Reviewing and approving intentional changes
-- Updating CDK code to align with manual changes
-- Reverting manual changes through AWS Console/CLI
-- Force deploying CDK to override manual changes
+Examples:
+- `development-vpc-id`
+- `staging-alb-arn`
+- `production-ecs-cluster-name`
 
 ---
 
-### parallel-execution-manager
+## Environment Configuration
 
-Manages parallel job execution and dependency optimisation for pipeline workflows.
+### GitHub Environments
 
-**Purpose**: Analyses job dependencies and generates optimised execution plans to minimise pipeline duration while respecting resource constraints.
+Configure these GitHub Environments in repository settings:
 
-**Inputs**:
+| Environment | Branch Protection | Required Reviewers |
+|-------------|-------------------|-------------------|
+| `development` | None | 0 |
+| `staging` | `staging` branch | 0 |
+| `production` | `main` branch | 1+ |
 
-| Input                | Description                                                                                          | Required | Default      |
-| -------------------- | ---------------------------------------------------------------------------------------------------- | -------- | ------------ |
-| `execution-strategy` | Execution strategy: `parallel`, `sequential`, or `adaptive`                                          | No       | `parallel`   |
-| `max-parallel-jobs`  | Maximum number of parallel jobs to run simultaneously                                                | No       | `5`          |
-| `dependency-mode`    | Dependency handling: `strict` (wait for all deps) or `optimistic` (proceed if critical deps succeed) | No       | `optimistic` |
+### Required Secrets (per environment)
 
-**Outputs**:
+| Secret | Description |
+|--------|-------------|
+| `AWS_OIDC_ROLE_DEV` | OIDC role ARN for development account |
+| `AWS_OIDC_ROLE_STAGING` | OIDC role ARN for staging account |
+| `AWS_OIDC_ROLE_PROD` | OIDC role ARN for production account |
 
-| Output               | Description                                      |
-| -------------------- | ------------------------------------------------ |
-| `execution-plan`     | Generated execution plan for the pipeline (JSON) |
-| `parallel-groups`    | JSON array of parallel execution groups          |
-| `estimated-duration` | Estimated pipeline duration in minutes           |
+### Required Variables (per environment)
 
-**Usage Example**:
-
-```yaml
-- name: Generate Execution Plan
-  uses: ./.github/actions/parallel-execution-manager
-  with:
-    execution-strategy: "parallel"
-    max-parallel-jobs: "5"
-    dependency-mode: "optimistic"
-```
-
-**Key Features**:
-
-- Models pipeline as directed acyclic graph (DAG) with dependencies
-- Groups jobs into parallel execution groups based on dependencies
-- Calculates estimated duration for different execution strategies
-- Validates execution plan for circular dependencies
-- Checks resource constraints against max parallel jobs
-- Identifies critical path jobs that must succeed
-
-**Execution Strategies**:
-
-- **Parallel**: Maximises parallel execution for fastest completion
-- **Sequential**: Executes jobs one at a time (useful for debugging or resource constraints)
-- **Adaptive**: Balances critical path execution with parallel opportunities
-
-**Job Dependency Model**:
-The action includes a predefined dependency model for common pipeline jobs:
-
-- `determine-jobs`: Foundation job with no dependencies
-- `security-scan`: Depends on determine-jobs
-- `lint-and-quality`: Depends on determine-jobs and security-scan
-- `build`: Depends on determine-jobs, security-scan, and lint-and-quality
-- `validate-setup`: Depends on determine-jobs, security-scan, and lint-and-quality
-- Deployment jobs: Depend on build and validate-setup
-- Drift detection jobs: Depend on respective deployment jobs
-
-**Optimisation Metrics**:
-
-- Sequential duration: Sum of all job durations
-- Parallel duration: Sum of maximum durations per parallel group
-- Time saved: Difference between sequential and parallel execution
-- Efficiency gain: Percentage improvement from parallel execution
-
----
-
-## Common Usage Patterns
-
-### CI/CD Workflow Integration
-
-The CI and CD workflows work together to provide a complete pipeline:
-
-```yaml
-# CI Workflow (ci.yml) - Runs on every commit/PR
-# Provides fast feedback on code quality
-# Outputs: build cache key, test results, linting reports
-
-# CD Workflow (deploy.yml) - Runs on merge to main
-# Uses CI build cache when available
-# Performs controlled deployments with validation
-```
-
-**Typical Flow**:
-
-1. Developer pushes code → CI workflow runs
-2. CI validates code quality, runs tests, builds infrastructure
-3. Code is reviewed and merged to `main`
-4. CD workflow runs automatically
-5. CD uses CI build cache (if available) or rebuilds
-6. CD validates AWS environment and deploys stacks
-7. CD runs health checks and drift detection
-
-### Complete Deployment Workflow
-
-```yaml
-jobs:
-  setup:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: ./.github/actions/setup-infrastructure
-        with:
-          node-version: "22"
-
-  build:
-    needs: setup
-    runs-on: ubuntu-latest
-    steps:
-      - uses: ./.github/actions/setup-infrastructure
-      - name: Build
-        run: yarn build
-      - name: Cache Build
-        uses: actions/cache@v4
-        with:
-          path: infrastructure/dist
-          key: build-${{ runner.os }}-${{ github.sha }}
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: ./.github/actions/setup-cdk-deployment
-        with:
-          aws-role: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: "eu-west-1"
-          build-cache-key: build-${{ runner.os }}-${{ github.sha }}
-
-      - uses: ./.github/actions/deploy-cdk-stack
-        with:
-          stack-name: "NetworkingStack-monitoring-development"
-          environment: "development"
-          project-name: "monitoring"
-          aws-account-id: ${{ secrets.AWS_ACCOUNT_ID }}
-          aws-region: "eu-west-1"
-
-  drift-check:
-    needs: deploy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: ./.github/actions/setup-cdk-deployment
-        with:
-          aws-role: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: "eu-west-1"
-          build-cache-key: build-${{ runner.os }}-${{ github.sha }}
-
-      - uses: ./.github/actions/drift-detection
-        with:
-          stack-name: "NetworkingStack-monitoring-development"
-          environment: "development"
-          aws-account-id: ${{ secrets.AWS_ACCOUNT_ID }}
-          aws-region: "eu-west-1"
-          drift-threshold: "0"
-          check-mode: "full"
-```
-
-### Cross-Account Deployment
-
-```yaml
-# Deploy monitoring project with cross-account VPC peering (development)
-- uses: ./.github/actions/deploy-cdk-stack
-  with:
-    stack-name: "NetworkingStack-monitoring-development"
-    environment: "development"
-    project-name: "monitoring"
-    aws-account-id: ${{ secrets.PIPELINE_ACCOUNT_ID }}
-    aws-region: "eu-west-1"
-    dev-vpc-id: ${{ secrets.DEV_VPC_ID }}
-    dev-account-id: ${{ secrets.DEV_ACCOUNT_ID }}
-```
-
-### Quick Drift Check
-
-```yaml
-# Quick drift check for monitoring project (development)
-- uses: ./.github/actions/drift-detection
-  with:
-    stack-name: "NetworkingStack-monitoring-development"
-    environment: "development"
-    aws-account-id: ${{ secrets.AWS_ACCOUNT_ID }}
-    aws-region: "eu-west-1"
-    check-mode: "quick" # Faster, CDK diff only
-    drift-threshold: "2" # Allow up to 2 drifted resources
-```
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `AWS_ACCOUNT_ID_DEV` | Development account ID | `123456789012` |
+| `AWS_ACCOUNT_ID_STAGING` | Staging account ID | `234567890123` |
+| `AWS_ACCOUNT_ID_PROD` | Production account ID | `345678901234` |
+| `AWS_REGION` | AWS region | `eu-west-1` |
 
 ---
 
 ## Troubleshooting
 
-### Deployment Failures
+### Common Issues
 
-**Stack Not Found Error**:
+#### Stack Not Found
 
-- Verify stack name format: `[StackName]-[project]-[environment]` (e.g., `NetworkingStack-monitoring-development`)
-- Check `bin/app.ts` for stack definitions and project configuration
-- Ensure `ENVIRONMENT` and `PROJECT_NAME` variables match input values
-- Run locally: `PROJECT_NAME=monitoring ENVIRONMENT=development npx cdk list`
-- Or with context: `npx cdk list --context project=monitoring --context environment=development`
-
-**CDK CLI Not Found**:
-
-- Verify `setup-cdk-deployment` action completed successfully
-- Check Node.js and Yarn installation
-- Ensure dependencies are installed: `yarn install`
-- Verify CDK is in `package.json` dependencies
-
-**EPIPE (Broken Pipe) Errors**:
-
-- Action automatically retries without piping
-- If persistent, check GitHub Actions runner logs
-- Verify CDK version compatibility
-
-**Change Set Conflicts**:
-
-- Action automatically cleans up conflicting change sets
-- If manual intervention needed: `aws cloudformation delete-change-set --stack-name <stack> --change-set-name cdk-deploy-change-set`
-
-**CloudFormation Export Dependencies**:
-
-- Update dependent stacks first, then the exporting stack
-- For NetworkingStack: Update EbsStorageStack → EcsStack → NetworkingStack (project-specific)
-- Export names follow pattern: `${environment}-${project}-[resource]-[property]`
-- Example: `development-monitoring-vpc-id` (for monitoring project in development environment)
-- See `infrastructure/CLOUDFORMATION_EXPORT_DEPENDENCY_FIX.md` for details
-
-### Drift Detection Issues
-
-**Stack Not in Stable State**:
-
-- Wait for stack operations to complete (CREATE/UPDATE/DELETE)
-- Check CloudFormation console for stack status
-- Re-run drift detection after stack stabilises
-
-**Drift Detection Timeout**:
-
-- Large stacks may exceed 5-minute timeout
-- Consider using `quick` mode for faster checks
-- Check AWS service health dashboard
-
-**False Positives**:
-
-- Review CDK diff output in artifacts
-- Verify environment variables (`ENVIRONMENT`, `PROJECT_NAME`) match deployment
-- Check for SSM parameter lookup differences (project-specific paths: `/${project}/${environment}/...`)
-- Ensure project context is consistent: `--context project=${projectName} --context environment=${environment}`
-
-### Setup Issues
-
-**Cache Misses**:
-
-- Verify cache keys are consistent across jobs
-- Check `yarn.lock` and `package.json` haven't changed unexpectedly
-- Build job must complete before deployment jobs
-
-**AWS Credentials Not Configured**:
-
-- Verify OIDC role ARN in repository secrets
-- Check IAM role trust relationship includes GitHub OIDC provider
-- Ensure role has necessary permissions for deployment
-
-**Build Artifacts Missing**:
-
-- Action automatically falls back to building infrastructure
-- Check build job completed successfully
-- Verify cache key matches between build and deployment jobs
-
-### CDK Bootstrap Issues
-
-**Bootstrap Not Found or Outdated**:
-
-The deployment workflow automatically checks for CDK bootstrap and provides guidance if it's missing or outdated. However, you may need to manually bootstrap accounts using SSO profiles.
-
-#### Manual Bootstrap Using SSO Profile
-
-**Prerequisites**:
-
-- AWS CLI configured with SSO profile
-- SSO profile has permissions to create CloudFormation stacks, S3 buckets, IAM roles, and ECR repositories
-- Access to the target AWS account
-
-**Step 1: Configure AWS SSO Profile** (if not already configured):
-
-```bash
-# Configure SSO profile
-aws configure sso
-
-# Follow prompts:
-# - SSO start URL: https://your-org.awsapps.com/start
-# - SSO region: eu-west-1 (or your SSO region)
-# - SSO account ID: 123456789012 (target account)
-# - SSO role name: AdministratorAccess (or appropriate role)
-# - CLI default region: eu-west-1
-# - CLI default output format: json
+```
+Error: Stack development-Networking not found
 ```
 
-**Step 2: Login to SSO**:
+**Solution**: Verify the stack name matches the pattern `{environment}-{StackName}` and exists in `bin/app.ts`.
 
-```bash
-# Login to SSO (opens browser for authentication)
-aws sso login --profile your-sso-profile-name
+#### CDK Bootstrap Not Found
+
+```
+Error: CDK bootstrap stack not found
 ```
 
-**Step 3: Bootstrap Development Account**:
-
+**Solution**: Bootstrap the CDK environment:
 ```bash
-# Set environment variables
-export AWS_PROFILE=your-sso-profile-name
-export CDK_ENVIRONMENT=development
-export PROJECT_NAME=monitoring
-export AWS_ACCOUNT_ID_DEV=123456789012  # Replace with actual account ID
-export AWS_REGION=eu-west-1
-
-# Bootstrap development account
-npx cdk bootstrap aws://${AWS_ACCOUNT_ID_DEV}/${AWS_REGION} \
-  --context environment=development \
-  --context project=monitoring \
-  --profile ${AWS_PROFILE}
+npx cdk bootstrap aws://ACCOUNT_ID/REGION --profile YOUR_PROFILE
 ```
 
-**Step 4: Bootstrap Staging Account**:
+#### OIDC Authentication Failed
 
-```bash
-# Set environment variables for staging
-export AWS_PROFILE=your-sso-profile-name
-export CDK_ENVIRONMENT=staging
-export PROJECT_NAME=monitoring
-export AWS_ACCOUNT_ID_STAGING=123456789013  # Replace with actual account ID
-export AWS_REGION=eu-west-1
-
-# Bootstrap staging account
-npx cdk bootstrap aws://${AWS_ACCOUNT_ID_STAGING}/${AWS_REGION} \
-  --context environment=staging \
-  --context project=monitoring \
-  --profile ${AWS_PROFILE}
+```
+Error: Could not assume role with OIDC
 ```
 
-**Step 5: Bootstrap Production Account**:
+**Solutions**:
+1. Verify the OIDC role trust policy includes GitHub's OIDC provider
+2. Check the role ARN in secrets is correct
+3. Ensure the role has necessary permissions
 
-```bash
-# Set environment variables for production
-export AWS_PROFILE=your-sso-profile-name
-export CDK_ENVIRONMENT=production
-export PROJECT_NAME=monitoring
-export AWS_ACCOUNT_ID_PROD=123456789014  # Replace with actual account ID
-export AWS_REGION=eu-west-1
+#### Path Filter Not Triggering
 
-# Bootstrap production account
-npx cdk bootstrap aws://${AWS_ACCOUNT_ID_PROD}/${AWS_REGION} \
-  --context environment=production \
-  --context project=monitoring \
-  --profile ${AWS_PROFILE}
-```
+If workflows don't trigger on code changes:
+1. Check the `paths` filter includes your changed files
+2. Verify you're pushing to the correct branch
+3. Check for typos in path patterns
 
-#### Update Existing Bootstrap
+### Verification Script Failures
 
-If an account is already bootstrapped but the version is outdated (requires version 30+), you can update it:
-
-**Check Current Bootstrap Version**:
-
-```bash
-# Using SSO profile
-aws cloudformation describe-stacks \
-  --stack-name CDKToolkit \
-  --region eu-west-1 \
-  --profile your-sso-profile-name \
-  --query 'Stacks[0].Parameters[?ParameterKey==`BootstrapVersion`].ParameterValue' \
-  --output text
-```
-
-**Update Bootstrap** (if version < 30):
-
-```bash
-# Set environment variables
-export AWS_PROFILE=your-sso-profile-name
-export CDK_ENVIRONMENT=development
-export PROJECT_NAME=monitoring
-export AWS_ACCOUNT_ID_DEV=123456789012
-export AWS_REGION=eu-west-1
-
-# Re-bootstrap (updates existing bootstrap stack)
-npx cdk bootstrap aws://${AWS_ACCOUNT_ID_DEV}/${AWS_REGION} \
-  --context environment=development \
-  --context project=monitoring \
-  --profile ${AWS_PROFILE}
-
-# CDK will detect existing bootstrap and update it automatically
-```
-
-**Verify Bootstrap After Update**:
-
-```bash
-# Check bootstrap version
-aws cloudformation describe-stacks \
-  --stack-name CDKToolkit \
-  --region eu-west-1 \
-  --profile your-sso-profile-name \
-  --query 'Stacks[0].Parameters[?ParameterKey==`BootstrapVersion`].ParameterValue' \
-  --output text
-
-# Should return 30 or higher
-```
-
-#### Bootstrap for Multiple Projects
-
-If you're deploying multiple projects (e.g., monitoring and webapp), bootstrap once per account/region. The bootstrap is shared across all projects in the same account:
-
-```bash
-# Bootstrap once per account/region (shared for all projects)
-export AWS_PROFILE=your-sso-profile-name
-export AWS_ACCOUNT_ID_DEV=123456789012
-export AWS_REGION=eu-west-1
-
-# Bootstrap development account (works for all projects)
-npx cdk bootstrap aws://${AWS_ACCOUNT_ID_DEV}/${AWS_REGION} \
-  --context environment=development \
-  --profile ${AWS_PROFILE}
-
-# No need to bootstrap separately for each project
-# The same bootstrap works for monitoring, webapp, etc.
-```
-
-#### Troubleshooting Bootstrap Issues
-
-**Error: "Bootstrap stack not found"**:
-
-- Verify SSO profile has correct account ID
-- Check SSO login is active: `aws sts get-caller-identity --profile your-sso-profile-name`
-- Ensure profile has permissions to create CloudFormation stacks
-
-**Error: "Access Denied"**:
-
-- Verify SSO profile has AdministratorAccess or equivalent permissions
-- Check IAM permissions for: CloudFormation, S3, IAM, ECR
-- Re-login to SSO: `aws sso login --profile your-sso-profile-name`
-
-**Error: "Bootstrap version outdated"**:
-
-- Run bootstrap command again (CDK will update automatically)
-- No need to delete existing bootstrap stack
-- CDK bootstrap is idempotent and safe to run multiple times
-
-**Error: "Stack CDKToolkit already exists"**:
-
-- This is normal if bootstrap already exists
-- Run bootstrap command again to update to latest version
-- CDK will update the existing stack automatically
-
-#### Bootstrap Resources Created
-
-The bootstrap process creates the following resources in the target account:
-
-- **S3 Bucket**: `cdk-${ACCOUNT_ID}-${REGION}-staging` - Stores CDK assets
-- **IAM Roles**:
-  - `cdk-${ACCOUNT_ID}-${REGION}-deploy-role` - Deployment role
-  - `cdk-${ACCOUNT_ID}-${REGION}-file-publishing-role` - Asset publishing role
-  - `cdk-${ACCOUNT_ID}-${REGION}-image-publishing-role` - ECR image publishing role
-- **ECR Repository**: `cdk-${ACCOUNT_ID}-${REGION}-container-assets` - Docker image storage
-- **CloudFormation Stack**: `CDKToolkit` - Manages bootstrap resources
-
-**Note**: Bootstrap resources are shared across all projects and environments in the same account/region. You only need to bootstrap once per account/region.
+If post-deployment verification fails:
+1. Check CloudFormation stack events for deployment issues
+2. Verify AWS credentials have necessary read permissions
+3. Check the verification script logs for specific errors
 
 ---
 
 ## Best Practices
 
-### Workflow Best Practices
+### Workflow Development
 
-1. **Keep CI fast and frequent**: CI runs on every commit - optimise for speed
-2. **Protect CD workflows**: Use environment protection for production deployments
-3. **Use selective job execution**: Run only necessary jobs for faster iteration
-4. **Leverage build cache**: CI builds artifacts that CD can reuse
-5. **Re-run failed jobs**: Use `rerun_failed_from` to retry only failed jobs
-6. **Enable drift detection**: Run drift detection after deployments to ensure compliance
+1. **Test on feature branches first**: Create `test/workflow-update` branches
+2. **Use manual dispatch**: Test with `workflow_dispatch` before automated triggers
+3. **Check job summaries**: Review `$GITHUB_STEP_SUMMARY` for deployment details
 
-### Action Best Practices
+### Security
 
-1. **Always use setup-infrastructure first**: Ensures consistent environment across all jobs
-2. **Cache build artifacts**: Reduces deployment time by reusing compiled code
-3. **Validate before deploy**: Use `validate-setup` job to verify AWS account and credentials
-4. **Run drift detection post-deployment**: Ensures infrastructure matches code
-5. **Use appropriate check modes**: `quick` for frequent checks, `full` for comprehensive analysis
-6. **Set drift thresholds appropriately**: Allow tolerance for non-critical drift in non-production
-7. **Handle errors gracefully**: All actions provide detailed troubleshooting guidance
-8. **Use parallel execution manager**: Optimise pipeline duration for large workflows
+1. **Never hardcode credentials**: Always use OIDC or GitHub secrets
+2. **Use environment protection**: Require approvals for production
+3. **Audit secrets regularly**: Rotate OIDC roles and verify permissions
 
----
+### Performance
 
-## Workflow Architecture
+1. **Leverage caching**: Node modules and Turbo cache significantly speed up builds
+2. **Use path filters**: Don't run tests for unrelated changes
+3. **Parallel jobs**: Independent tests run concurrently
 
-### Separation of Concerns
+### Maintenance
 
-The workflows are split to optimise for different requirements:
-
-| Aspect          | CI Workflow                     | CD Workflow                            |
-| --------------- | ------------------------------- | -------------------------------------- |
-| **Frequency**   | Every commit/PR                 | Merge to main or manual                |
-| **Speed**       | Fast (< 5 min)                  | Comprehensive (15-30 min)              |
-| **Permissions** | Read-only                       | Deployment access                      |
-| **Environment** | No protection                   | Protected (pipeline)                   |
-| **Purpose**     | Code quality feedback           | Infrastructure deployment              |
-| **Jobs**        | Security, lint, build, validate | Build, validate, deploy, health, drift |
-
-### Workflow Dependencies
-
-```
-CI Workflow (ci.yml)
-├── determine-jobs (CI)
-├── security-scan
-├── lint-and-quality
-├── build → outputs cache-key
-└── validate-setup (read-only)
-
-CD Workflow (deploy.yml)
-├── determine-jobs (CD) - includes project selection
-├── build (uses CI cache if available)
-├── validate-setup (with deployment permissions)
-├── deploy-networking (project-specific: NetworkingStack-${project}-${environment})
-├── deploy-ebs-storage (project-specific: EbsStorageStack-${project}-${environment})
-├── deploy-ecs (project-specific: EcsStack-${project}-${environment})
-├── deploy-load-balancer (project-specific: LoadBalancerStack-${project}-${environment})
-├── deploy-launch-template (project-specific: LaunchTemplateStack-${project}-${environment})
-├── deploy-vpc-peering (project-specific: VpcPeeringStack-${project}-${environment})
-├── health-checks
-└── drift-detection-* (project-specific)
-```
-
-### Job Selection Logic
-
-The `determine-jobs` job in both workflows supports:
-
-1. **Automatic Selection**: Based on workflow trigger and inputs
-2. **Selective Execution**: Specify exact jobs to run
-3. **Failed Job Re-run**: Automatically detect and re-run failed jobs
-4. **Dependency Resolution**: Auto-enables required dependencies
-
-This provides flexibility for:
-
-- Quick iterations (run specific jobs only)
-- Debugging (re-run failed jobs)
-- Full deployments (run all jobs)
-- Selective updates (update single stack)
+1. **Keep actions updated**: Use Dependabot for action version updates
+2. **Document changes**: Update this README when modifying workflows
+3. **Monitor run times**: Investigate if builds become slower
 
 ---
 
 ## Related Documentation
 
+- [Local Development Guide](./GUIDE.md) - Running CDK locally
+- [CDK Patterns Guide](../.cursor/rules/cdk-patterns.md) - CDK coding standards
+- [Scripts Guide](../docs/SCRIPTS_GUIDE.md) - Verification scripts
 - [AWS CDK Documentation](https://docs.aws.amazon.com/cdk/)
-- [GitHub Actions Composite Actions](https://docs.github.com/en/actions/creating-actions/creating-a-composite-action)
-- [AWS CloudFormation Drift Detection](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-cfn-stack-drift.html)
-- [Workflow Analysis](./WORKFLOW_ANALYSIS.md) - Detailed analysis of workflow structure
-- [Split Workflows Summary](./SPLIT_WORKFLOWS_SUMMARY.md) - Migration guide for workflow split
+- [GitHub Actions Documentation](https://docs.github.com/en/actions)

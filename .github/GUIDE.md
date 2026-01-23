@@ -2,577 +2,401 @@
 
 # Local Development Guide
 
-## You Must Commit and Push to GitHub
+This guide covers how to develop and test CDK infrastructure locally before pushing to GitHub.
 
-Workflows run on GitHub's servers, not your local machine.
+## Table of Contents
 
-### Why You Need to Push
+- [Key Concepts](#key-concepts)
+- [Prerequisites](#prerequisites)
+- [Local CDK Commands](#local-cdk-commands)
+- [Workflow Testing](#workflow-testing)
+- [Environment Setup](#environment-setup)
+- [Quick Reference](#quick-reference)
 
-When you run:
+---
+
+## Key Concepts
+
+### Why Push to GitHub?
+
+GitHub Actions workflows run on GitHub's servers, not your local machine. When you trigger a workflow:
+
+1. GitHub clones the repository from GitHub (not your local files)
+2. Checks out the specified branch
+3. Runs the workflow using code from GitHub
+
+**Your local uncommitted changes are not included in workflow runs.**
+
+### Development Approaches
+
+| Scenario | Best Approach | Speed |
+|----------|---------------|-------|
+| Testing CDK stack changes | Local `cdk deploy` | ⚡⚡⚡ Fastest |
+| Testing CDK syntax | Local `cdk synth` | ⚡⚡⚡ Fastest |
+| Testing workflow changes | Push to test branch | ⚡⚡ Fast |
+| Full pipeline validation | Merge to target branch | ⚡ Slower |
+
+---
+
+## Prerequisites
+
+### Required Tools
 
 ```bash
-gh workflow run deploy.yml -f environment=pipeline
+# Node.js 22+
+node --version  # v22.x.x
+
+# Yarn (via Corepack)
+corepack enable
+yarn --version  # 4.x.x
+
+# AWS CLI v2
+aws --version  # aws-cli/2.x.x
+
+# CDK CLI (via project dependencies)
+npx cdk --version
 ```
 
-Here's what happens:
+### AWS Authentication
 
-1. GitHub Actions clones the repository from GitHub (not your local files)
-2. Checks out the branch (default or specified)
-3. Runs the workflow using code from GitHub's servers
-
-Your local uncommitted changes are not included.
-
-## Practical Alternatives
-
-### Option 1: Quick Dev Branch Push (Recommended)
+Configure AWS credentials using SSO or IAM:
 
 ```bash
-# Create development branch for testing
-git checkout -b test/quick-deployment
+# Option 1: AWS SSO (recommended)
+aws configure sso
+aws sso login --profile your-profile
 
-# Make your changes
-# ... edit files ...
+# Option 2: Environment variables
+export AWS_ACCESS_KEY_ID=xxx
+export AWS_SECRET_ACCESS_KEY=xxx
+export AWS_REGION=eu-west-1
+```
 
-# Quick commit and push
+---
+
+## Local CDK Commands
+
+### Stack Naming Convention
+
+Stacks follow the pattern: `{environment}-{StackName}`
+
+Examples:
+- `development-Networking`
+- `staging-MonitoringInfra`
+- `production-MonitoringService`
+
+### List Available Stacks
+
+```bash
+# List all stacks
+npx cdk list
+
+# List stacks for specific environment
+ENVIRONMENT=development npx cdk list
+```
+
+### Synthesize (Validate)
+
+```bash
+# Synthesize all stacks
+npx cdk synth --all
+
+# Synthesize specific stack
+npx cdk synth development-Networking
+
+# With verbose output
+npx cdk synth development-Networking --verbose
+```
+
+### Diff (Preview Changes)
+
+```bash
+# See what would change
+npx cdk diff development-Networking
+
+# Diff all stacks
+npx cdk diff --all
+```
+
+### Deploy
+
+```bash
+# Deploy single stack
+npx cdk deploy development-Networking
+
+# Deploy without approval prompts
+npx cdk deploy development-Networking --require-approval never
+
+# Deploy with outputs file
+npx cdk deploy development-Networking --outputs-file outputs.json
+
+# Deploy all stacks (use with caution)
+npx cdk deploy --all --require-approval never
+```
+
+### Destroy
+
+```bash
+# Destroy single stack
+npx cdk destroy development-Networking
+
+# Force destroy without prompts
+npx cdk destroy development-Networking --force
+```
+
+---
+
+## Workflow Testing
+
+### Option 1: Test Branch (Recommended)
+
+```bash
+# 1. Create test branch
+git checkout -b test/my-changes
+
+# 2. Make changes and commit
 git add .
-git commit -m "test: quick deployment test"
-git push origin test/quick-deployment
+git commit -m "test: my changes"
 
-# Run workflow on your test branch (deploys to development by default)
-gh workflow run deploy.yml \
-  --ref test/quick-deployment \
-  -f environment=development \
-  -f project=monitoring \
-  -f stack=networking
+# 3. Push to remote
+git push origin test/my-changes
 
-# Watch the workflow
+# 4. Trigger workflow manually
+gh workflow run deploy-monitoring-dev.yml --ref test/my-changes
+
+# 5. Watch the workflow
 gh run watch
 
-# If it works, merge to main
-# If not, make more changes and force push
+# 6. Iterate if needed
 git commit --amend --no-edit
-git push --force origin test/quick-deployment
+git push --force origin test/my-changes
+gh workflow run deploy-monitoring-dev.yml --ref test/my-changes
+
+# 7. Clean up when done
+git checkout develop
+git branch -D test/my-changes
+git push origin --delete test/my-changes
 ```
 
-**Benefits**:
+### Option 2: Using `act` (Local Workflow Testing)
 
-- ✅ Fast iteration
-- ✅ Don't pollute main branch
-- ✅ Easy cleanup (`git branch -D test/quick-deployment`)
-- ✅ Can test workflow changes
-
-### Option 2: Run CDK Locally (Fastest for Testing)
-
-Skip GitHub Actions entirely for quick tests:
-
-```bash
-# Test synthesis locally (with project context)
-# Development is the first deployment target
-PROJECT_NAME=monitoring ENVIRONMENT=development npx cdk synth
-
-# Or using CDK context
-npx cdk synth --context project=monitoring --context environment=development
-
-# See what would change (project-specific stack name)
-PROJECT_NAME=monitoring ENVIRONMENT=development npx cdk diff NetworkingStack-monitoring-development
-
-# Or using CDK context
-npx cdk diff NetworkingStack-monitoring-development \
-  --context project=monitoring \
-  --context environment=development
-
-# Deploy directly (fastest!)
-PROJECT_NAME=monitoring ENVIRONMENT=development npx cdk deploy NetworkingStack-monitoring-development \
-  --require-approval never
-
-# Or using CDK context
-npx cdk deploy NetworkingStack-monitoring-development \
-  --context project=monitoring \
-  --context environment=development \
-  --require-approval never
-
-# Destroy when testing
-PROJECT_NAME=monitoring ENVIRONMENT=development npx cdk destroy NetworkingStack-monitoring-development
-
-# For different projects (e.g., webapp)
-PROJECT_NAME=webapp ENVIRONMENT=development npx cdk deploy NetworkingStack-webapp-development
-
-# Deploy to staging (second deployment target)
-PROJECT_NAME=monitoring ENVIRONMENT=staging npx cdk deploy NetworkingStack-monitoring-staging
-
-# Deploy to production (third deployment target, requires approval)
-PROJECT_NAME=monitoring ENVIRONMENT=production npx cdk deploy NetworkingStack-monitoring-production
-```
-
-**When to use**:
-
-- 🔥 Testing stack changes quickly
-- 🔥 Debugging CDK errors
-- 🔥 Validating configurations
-- 🔥 Development iteration
-
-**When NOT to use**:
-
-- ❌ Testing GitHub Actions workflow changes
-- ❌ Validating CI/CD pipeline
-- ❌ Production deployments
-
-### Option 3: Use act to Run Workflows Locally
-
-`act` runs GitHub Actions on your local machine using Docker:
+[act](https://github.com/nektos/act) runs GitHub Actions locally using Docker:
 
 ```bash
 # Install act
 brew install act  # macOS
-# or
-curl https://raw.githubusercontent.com/nektos/act/master/install.sh | sudo bash  # Linux
 
-# Run workflow locally with your uncommitted changes
-# Development is the first deployment target
+# Run workflow locally
 act workflow_dispatch \
-  --workflows .github/workflows/deploy.yml \
-  --input environment=development \
-  --input project=monitoring \
-  --input stack=networking
-
-# Test different projects
-act workflow_dispatch \
-  --workflows .github/workflows/deploy.yml \
-  --input environment=development \
-  --input project=webapp \
-  --input stack=networking
-
-# Test staging deployment
-act workflow_dispatch \
-  --workflows .github/workflows/deploy.yml \
-  --input environment=staging \
-  --input project=monitoring \
-  --input stack=networking
+  --workflows .github/workflows/deploy-monitoring-dev.yml \
+  --input skip_verification=true
 
 # Run specific job
-act -j deploy \
-  --workflows .github/workflows/deploy.yml \
-  --input environment=pipeline
+act -j setup --workflows .github/workflows/ci.yml
 ```
-
-**Benefits**:
-
-- ✅ Test uncommitted changes
-- ✅ No GitHub API rate limits
-- ✅ Faster iteration
-- ✅ Test workflow changes locally
 
 **Limitations**:
+- Requires Docker
+- OIDC authentication doesn't work locally
+- Some GitHub features not fully supported
 
-- ⚠️ Requires Docker
-- ⚠️ Some GitHub Actions features not fully supported
-- ⚠️ OIDC authentication won't work (can't assume AWS roles the same way)
-- ⚠️ Secrets management is different
-
-### Option 4: Workflow Development Pattern
-
-Use this pattern for rapid workflow development:
+### Option 3: Draft Pull Request
 
 ```bash
-# 1. Create feature branch
-git checkout -b feat/update-deployment-workflow
-
-# 2. Make changes to workflow
-vim .github/workflows/deploy.yml
-
-# 3. Quick commit
-git add .github/workflows/deploy.yml
-git commit -m "test: update deployment logic"
-
-# 4. Push to remote
-git push origin feat/update-deployment-workflow
-
-# 5. Run immediately (deploys to development)
-gh workflow run deploy.yml \
-  --ref feat/update-deployment-workflow \
-  -f environment=development \
-  -f project=monitoring \
-  -f stack=networking
-
-# 6. Watch in real-time
-gh run watch
-
-# 7. Iterate quickly
-# Edit workflow → git commit --amend → git push --force → gh workflow run
-gh workflow run deploy.yml \
-  --ref test/workflow-update \
-  -f environment=pipeline \
-  -f project=monitoring \
-  -f stack=networking
-
-# 8. When satisfied, merge to main
-git checkout main
-git merge feat/update-deployment-workflow
-git push origin main
-```
-
-## Recommended Development Workflow
-
-Here's my recommended approach for your situation:
-
-### For Stack Changes (CDK Code)
-
-```bash
-# 1. Test locally first (fastest) - use project-specific stack name
-PROJECT_NAME=monitoring ENVIRONMENT=development npx cdk diff NetworkingStack-monitoring-development
-
-# Or using CDK context
-npx cdk diff NetworkingStack-monitoring-development \
-  --context project=monitoring \
-  --context environment=development
-
-# 2. If synthesis works, test deployment locally
-# Development is the first deployment target
-PROJECT_NAME=monitoring ENVIRONMENT=development npx cdk deploy NetworkingStack-monitoring-development
-
-# Or using CDK context
-npx cdk deploy NetworkingStack-monitoring-development \
-  --context project=monitoring \
-  --context environment=development
-
-# For different projects
-PROJECT_NAME=webapp ENVIRONMENT=development npx cdk deploy NetworkingStack-webapp-development
-
-# 3. If local deployment works, commit and push
-git add .
-git commit -m "feat(networking): add VPC flow logs"
-git push origin main
-
-# 4. Let GitHub Actions deploy to other environments
-# (GitHub Actions handles pipeline → dev → prod progression)
-# Stack names follow pattern: StackName-${project}-${environment}
-```
-
-### For Workflow Changes
-
-```bash
-# 1. Create test branch
-git checkout -b test/workflow-update
-
-# 2. Make workflow changes
-vim .github/workflows/deploy.yml
-
-# 3. Commit and push
-git add .github/workflows/deploy.yml
-git commit -m "ci: improve error handling in deploy action"
-git push origin test/workflow-update
-
-# 4. Test the workflow (deploys to development)
-gh workflow run deploy.yml \
-  --ref test/workflow-update \
-  -f environment=development \
-  -f project=monitoring \
-  -f stack=networking
-
-# 5. Watch results
-gh run watch
-
-# 6. Iterate until working
-# ... make changes ...
-git commit --amend --no-edit
-git push --force origin test/workflow-update
-gh workflow run deploy.yml \
-  --ref test/workflow-update \
-  -f environment=development \
-  -f project=monitoring \
-  -f stack=networking
-
-# 7. Merge when ready
-git checkout main
-git merge test/workflow-update
-git push origin main
-```
-
-## Quick Reference Commands
-
-### Check Workflow Status
-
-```bash
-# List recent runs
-gh run list --workflow=deploy.yml
-
-# Watch current run
-gh run watch
-
-# View specific run
-gh run view <run-id>
-
-# View logs
-gh run view <run-id> --log
-
-# Cancel running workflow
-gh run cancel <run-id>
-
-# Re-run failed workflow
-gh run rerun <run-id>
-```
-
-### Test Before Pushing
-
-```bash
-# Validate YAML syntax
-yamllint .github/workflows/deploy.yml
-
-# Check for common issues
-actionlint .github/workflows/deploy.yml
-
-# Validate CDK synthesis (with project context)
-# Development is the first deployment target
-PROJECT_NAME=monitoring ENVIRONMENT=development npx cdk synth
-
-# Or using CDK context
-npx cdk synth --context project=monitoring --context environment=development
-
-# List all stacks for a project
-npx cdk list --context project=monitoring --context environment=development
-
-# Run unit tests
-yarn test
-
-# Check TypeScript compilation
-yarn run build
-```
-
-## Pro Tips
-
-### 1. Use Branch Protection for Main
-
-```yaml
-# .github/workflows/deploy.yml
-on:
-  workflow_dispatch:
-    inputs:
-      environment:
-        type: choice
-        options:
-          - pipeline
-          - development
-          - production
-  push:
-    branches:
-      - main # Only auto-deploy from main
-    paths:
-      - "lib/**"
-      - ".github/workflows/deploy.yml"
-```
-
-### 2. Create Development Environment
-
-```bash
-# Add a 'development' environment for testing
-PROJECT_NAME=monitoring ENVIRONMENT=development npx cdk deploy --all
-
-# Or deploy specific stack
-PROJECT_NAME=monitoring ENVIRONMENT=development npx cdk deploy NetworkingStack-monitoring-development
-
-# This way you can test without affecting pipeline/production
-gh workflow run deploy.yml \
-  -f environment=development \
-  -f project=monitoring \
-  -f stack=networking
-
-# Test different projects in development
-gh workflow run deploy.yml \
-  -f environment=development \
-  -f project=webapp \
-  -f stack=networking
-```
-
-### 3. Use Draft Pull Requests
-
-```bash
-# Create draft PR for testing
+# Create draft PR
 gh pr create --draft --title "test: deployment updates"
 
-# GitHub Actions will run on the PR
-# Iterate on the PR branch
-# Convert to ready when satisfied
+# CI runs automatically on PRs
+# Iterate on the branch
+
+# Convert to ready when done
 gh pr ready
 ```
 
-### 4. Enable Workflow Logs Locally
+---
+
+## Environment Setup
+
+### Environment Variables
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `ENVIRONMENT` | Target environment | `development` |
+| `AWS_REGION` | AWS region | `eu-west-1` |
+| `AWS_PROFILE` | AWS CLI profile | `dev-account` |
+
+### Using Environment Variables
 
 ```bash
-# Set environment variable for detailed CDK logs
-export CDK_DEBUG=true
+# Set environment for CDK
+export ENVIRONMENT=development
+export AWS_REGION=eu-west-1
 
-# Run with verbose output (project-specific stack)
-# Development is the first deployment target
-PROJECT_NAME=monitoring ENVIRONMENT=development npx cdk deploy NetworkingStack-monitoring-development --verbose
-
-# Or using CDK context
-npx cdk deploy NetworkingStack-monitoring-development \
-  --context project=monitoring \
-  --context environment=development \
-  --verbose
+# Or inline with command
+ENVIRONMENT=development npx cdk deploy development-Networking
 ```
 
-## Summary
-
-| Scenario                  | Best Approach                    | Speed          |
-| ------------------------- | -------------------------------- | -------------- |
-| Testing CDK stack changes | Local CDK deploy                 | ⚡⚡⚡ Fastest |
-| Testing workflow changes  | Test branch + gh workflow run    | ⚡⚡ Fast      |
-| Quick iteration           | Local CDK diff/synth             | ⚡⚡⚡ Fastest |
-| Full pipeline test        | Commit → Push → Trigger workflow | ⚡ Slower      |
-| Testing without push      | act (limited AWS functionality)  | ⚡⚡ Fast      |
-
-### My Recommendation for Your Workflow
-
-````bash
-# 1. Quick iteration (uncommitted changes) - use project-specific stack names
-# Development is the first deployment target
-PROJECT_NAME=monitoring ENVIRONMENT=development npx cdk diff NetworkingStack-monitoring-development
-
-# Or using CDK context
-npx cdk diff NetworkingStack-monitoring-development \
-  --context project=monitoring \
-  --context environment=development
-
-# Deploy locally for testing
-PROJECT_NAME=monitoring ENVIRONMENT=development npx cdk deploy NetworkingStack-monitoring-development
-
-# 2. When satisfied, commit to test branch
-git checkout -b test/networking-updates
-git add .
-git commit -m "feat(networking): add configuration"
-git push origin test/networking-updates
-
-# 3. Test full pipeline (include project parameter)
-# Deploys to development account
-gh workflow run deploy.yml \
-  --ref test/networking-updates \
-  -f environment=development \
-  -f project=monitoring \
-  -f stack=networking
-
-# 4. Merge when confirmed working
-git checkout main
-git merge test/networking-updates
-git push origin main
-This gives you:
-
-- ✅ Fast local iteration
-- ✅ Safe testing in isolation
-- ✅ Full pipeline validation
-- ✅ Clean main branch
-
-**The key insight**: Use local CDK for stack testing, use GitHub Actions for pipeline testing. Don't use GitHub Actions to test every small CDK change!
-
-## Multi-Project Infrastructure Pattern
-
-### Stack Naming Convention
-
-All stacks follow the pattern: `[StackName]-[project]-[environment]`
-
-**Examples**:
-- `NetworkingStack-monitoring-development` (first deployment target)
-- `EcsStack-webapp-staging` (second deployment target)
-- `EbsStorageStack-monitoring-production` (third deployment target, requires approval)
-
-### Local Development with Projects
-
-**Default Project**: If no project is specified, defaults to `"monitoring"` for backward compatibility.
-
-**Using Environment Variables**:
-```bash
-# Monitoring project - Development (first deployment target)
-PROJECT_NAME=monitoring ENVIRONMENT=development npx cdk deploy NetworkingStack-monitoring-development
-
-# Monitoring project - Staging (second deployment target)
-PROJECT_NAME=monitoring ENVIRONMENT=staging npx cdk deploy NetworkingStack-monitoring-staging
-
-# Monitoring project - Production (third deployment target, requires approval)
-PROJECT_NAME=monitoring ENVIRONMENT=production npx cdk deploy NetworkingStack-monitoring-production
-
-# Webapp project - Development
-PROJECT_NAME=webapp ENVIRONMENT=development npx cdk deploy NetworkingStack-webapp-development
-````
-
-**Using CDK Context**:
+### Multiple Accounts
 
 ```bash
-# Monitoring project - Development (first deployment target)
-npx cdk deploy NetworkingStack-monitoring-development \
-  --context project=monitoring \
-  --context environment=development
+# Development account
+export AWS_PROFILE=dev-account
+npx cdk deploy development-Networking
 
-# Monitoring project - Staging (second deployment target)
-npx cdk deploy NetworkingStack-monitoring-staging \
-  --context project=monitoring \
-  --context environment=staging
+# Staging account
+export AWS_PROFILE=staging-account
+npx cdk deploy staging-Networking
 
-# Monitoring project - Production (third deployment target)
-npx cdk deploy NetworkingStack-monitoring-production \
-  --context project=monitoring \
-  --context environment=production
-
-# Webapp project - Development
-npx cdk deploy NetworkingStack-webapp-development \
-  --context project=webapp \
-  --context environment=development
+# Production account
+export AWS_PROFILE=prod-account
+npx cdk deploy production-Networking
 ```
 
-### Listing Stacks
+---
+
+## Quick Reference
+
+### CDK Commands
+
+| Command | Description |
+|---------|-------------|
+| `npx cdk list` | List all stacks |
+| `npx cdk synth <stack>` | Generate CloudFormation template |
+| `npx cdk diff <stack>` | Show pending changes |
+| `npx cdk deploy <stack>` | Deploy stack |
+| `npx cdk destroy <stack>` | Delete stack |
+| `npx cdk doctor` | Check CDK setup |
+
+### GitHub CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `gh workflow list` | List workflows |
+| `gh workflow run <name>` | Trigger workflow |
+| `gh run list` | List recent runs |
+| `gh run watch` | Watch current run |
+| `gh run view <id>` | View run details |
+| `gh run view <id> --log` | View run logs |
+| `gh run cancel <id>` | Cancel running workflow |
+| `gh run rerun <id>` | Rerun failed workflow |
+
+### Makefile Targets
 
 ```bash
-# List all stacks for monitoring project in development
-npx cdk list --context project=monitoring --context environment=development
+# Build
+make build
 
-# List all stacks for monitoring project in staging
-npx cdk list --context project=monitoring --context environment=staging
+# Lint
+make lint
+make lint-fix
 
-# List all stacks for webapp project in development
-npx cdk list --context project=webapp --context environment=development
+# Tests
+make test
+make test-domain-monitoring
+make test-domain-webapp
 
-# Using environment variables
-PROJECT_NAME=monitoring ENVIRONMENT=development npx cdk list
+# Verification
+make verify-networking ENVIRONMENT=development
+make verify-efs ENVIRONMENT=development
+make verify-service ENVIRONMENT=development
+
+# CDK
+make synth
+make deploy STACK=development-Networking
+make destroy STACK=development-Networking
 ```
 
-### Common Local Development Commands
+### Pre-Push Checklist
 
 ```bash
-# Synthesize monitoring project (development - first deployment target)
-PROJECT_NAME=monitoring ENVIRONMENT=development npx cdk synth
+# 1. Validate YAML syntax
+yamllint .github/workflows/*.yml
 
-# Diff changes for monitoring project
-PROJECT_NAME=monitoring ENVIRONMENT=development npx cdk diff NetworkingStack-monitoring-development
+# 2. Check TypeScript compilation
+yarn build
 
-# Deploy monitoring project stack to development
-PROJECT_NAME=monitoring ENVIRONMENT=development npx cdk deploy NetworkingStack-monitoring-development
+# 3. Run linter
+yarn lint
 
-# Deploy monitoring project stack to staging (second deployment target)
-PROJECT_NAME=monitoring ENVIRONMENT=staging npx cdk deploy NetworkingStack-monitoring-staging
+# 4. Run tests
+yarn test
 
-# Deploy monitoring project stack to production (third deployment target, requires approval)
-PROJECT_NAME=monitoring ENVIRONMENT=production npx cdk deploy NetworkingStack-monitoring-production
+# 5. Synthesize CDK
+npx cdk synth --all
 
-# Deploy webapp project stack to development
-PROJECT_NAME=webapp ENVIRONMENT=development npx cdk deploy NetworkingStack-webapp-development
-
-# Destroy monitoring project stack
-PROJECT_NAME=monitoring ENVIRONMENT=development npx cdk destroy NetworkingStack-monitoring-development
+# 6. Diff changes
+npx cdk diff development-Networking
 ```
 
-### SSM Parameter Paths
+---
 
-SSM parameters follow project-specific paths:
+## CDK Bootstrap
 
-- Format: `/${project}/${environment}/[resource]/[parameter]`
-- Example: `/monitoring/development/ebs/prometheus-volume-size` (first deployment target)
-- Example: `/monitoring/staging/ebs/prometheus-volume-size` (second deployment target)
-- Example: `/webapp/development/ecs/cluster-name`
+### Check Bootstrap Status
 
-### CloudFormation Exports
+```bash
+aws cloudformation describe-stacks \
+  --stack-name CDKToolkit \
+  --query 'Stacks[0].Parameters[?ParameterKey==`BootstrapVersion`].ParameterValue' \
+  --output text
+```
 
-CloudFormation exports follow project-specific naming:
+### Bootstrap New Account
 
-- Format: `${environment}-${project}-[resource]-[property]`
-- Example: `development-monitoring-vpc-id` (first deployment target)
-- Example: `staging-monitoring-vpc-id` (second deployment target)
-- Example: `development-webapp-alb-arn`
+```bash
+# Using SSO profile
+aws sso login --profile your-profile
+
+npx cdk bootstrap aws://ACCOUNT_ID/REGION \
+  --profile your-profile
+```
+
+### Update Existing Bootstrap
+
+```bash
+# Re-run bootstrap to update (safe to run multiple times)
+npx cdk bootstrap aws://ACCOUNT_ID/REGION \
+  --profile your-profile
+```
+
+---
+
+## Troubleshooting
+
+### CDK Issues
+
+**"Stack not found"**
+```bash
+# Verify stack name pattern: {environment}-{StackName}
+npx cdk list | grep -i networking
+```
+
+**"No credentials"**
+```bash
+# Check AWS credentials
+aws sts get-caller-identity
+```
+
+**"Bootstrap required"**
+```bash
+npx cdk bootstrap aws://ACCOUNT_ID/REGION
+```
+
+### Workflow Issues
+
+**"Workflow not triggering"**
+- Check branch name matches workflow trigger
+- Verify path filters include changed files
+- Check for `[skip ci]` in commit message
+
+**"OIDC authentication failed"**
+- Verify secret `AWS_OIDC_ROLE_*` is set correctly
+- Check IAM role trust policy
+
+---
+
+## Related Documentation
+
+- [GitHub Actions README](./README.md) - Workflow documentation
+- [CDK Patterns Guide](../.cursor/rules/cdk-patterns.md) - CDK coding standards
+- [Scripts Guide](../docs/SCRIPTS_GUIDE.md) - Verification and helper scripts

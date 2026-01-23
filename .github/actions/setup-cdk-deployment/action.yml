@@ -29,8 +29,8 @@ runs:
     - name: Checkout Repository
       uses: actions/checkout@v4
 
-    - name: Setup Infrastructure Environment
-      uses: ./.github/actions/setup-infrastructure
+    - name: Setup Node.js and Yarn
+      uses: ./.github/actions/setup-node-yarn
       with:
         node-version: ${{ inputs.node-version }}
 

@@ -9,9 +9,12 @@ on:
       - develop
     paths:
       - "lib/stacks/webapp/**"
+      - "lib/constructs/**"
+      - "lib/shared/**"
       - "bin/stacks/webapp-stack.ts"
       - "config/**"
-      - "lambda/handlers/articles/**"
+      - "lambda/handlers/api/articles/**"
+      - "lambda/shared/**"
       - ".github/workflows/deploy-webapp-dev.yml"
       - ".github/actions/**"
   workflow_dispatch:
