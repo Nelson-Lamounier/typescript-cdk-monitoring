@@ -1,15 +1,17 @@
 /** @format */
 
+import * as path from "path";
+
 import * as cdk from "aws-cdk-lib";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as logs from "aws-cdk-lib/aws-logs";
 import { Construct } from "constructs";
+
 import { EnvironmentConfig } from "../../../config/environments";
 import { ApiGatewayConstruct } from "../../constructs/networking/api/api-gateway-construct";
 import { LambdaFunctionConstruct } from "../../constructs/compute/lambda/lambda-function-construct";
 import { SuppressionManager } from "../../cdk-nag";
-import * as path from "path";
 
 /**
  * Properties for WebappApiStack
@@ -102,7 +104,10 @@ export class WebappApiStack extends cdk.Stack {
   public readonly listArticlesByTagFunction: LambdaFunctionConstruct;
 
   constructor(scope: Construct, id: string, props: WebappApiStackProps) {
-    super(scope, id, props);
+    super(scope, id, {
+      ...props,
+      description: `Serverless API for ${props.projectName} portfolio - Provisions API Gateway REST API with Lambda functions for article operations`,
+    });
 
     const {
       envName,
@@ -127,15 +132,15 @@ export class WebappApiStack extends cdk.Stack {
       projectName,
       apiName: "articles-api",
       description: `Articles API for ${projectName} portfolio`,
-      
+
       enableLogging: true,
       logRetention: isProduction
         ? logs.RetentionDays.ONE_MONTH
         : logs.RetentionDays.ONE_WEEK,
-      
+
       enableDetailedMetrics: isProduction,
       enableTracing: isProduction,
-      
+
       cors: {
         allowOrigins: allowedOrigins,
         allowMethods: ["GET", "OPTIONS"],
@@ -143,14 +148,14 @@ export class WebappApiStack extends cdk.Stack {
         allowCredentials: true,
         maxAge: 3600,
       },
-      
+
       throttle: {
         rateLimit: isProduction ? 1000 : 100,
         burstLimit: isProduction ? 2000 : 200,
       },
-      
+
       stageName: "api",
-      
+
       removalPolicy: isProduction
         ? cdk.RemovalPolicy.RETAIN
         : cdk.RemovalPolicy.DESTROY,
@@ -180,10 +185,7 @@ export class WebappApiStack extends cdk.Stack {
       {
         envName,
         functionName: `${projectName}-get-article`,
-        entry: path.join(
-          __dirname,
-          "../../../lambda/handlers/articles/get-article.ts"
-        ),
+        entry: path.join(__dirname, "../../../lambda/handlers/api/index.ts"),
         handler: "handler",
         memorySize: 256,
         timeout: cdk.Duration.seconds(30),
@@ -191,20 +193,17 @@ export class WebappApiStack extends cdk.Stack {
         logRetention: isProduction
           ? logs.RetentionDays.ONE_MONTH
           : logs.RetentionDays.ONE_WEEK,
-      }
+        // Explicit IAM permissions via separate policy resources
+        dynamoDbTableArn: articlesTable.tableArn,
+        s3BucketArn: assetsS3Bucket.bucketArn,
+      },
     );
-
-    // Grant DynamoDB read permissions
-    articlesTable.grantReadData(this.getArticleFunction.function);
-    
-    // Grant S3 read permissions for large content (optional)
-    assetsS3Bucket.grantRead(this.getArticleFunction.function);
 
     // Add to API Gateway
     this.api.addLambdaIntegration(
       "GET",
       "/articles/{slug}",
-      this.getArticleFunction.function
+      this.getArticleFunction.function,
     );
 
     // ========================================
@@ -217,10 +216,7 @@ export class WebappApiStack extends cdk.Stack {
       {
         envName,
         functionName: `${projectName}-list-articles`,
-        entry: path.join(
-          __dirname,
-          "../../../lambda/handlers/articles/list-articles.ts"
-        ),
+        entry: path.join(__dirname, "../../../lambda/handlers/api/index.ts"),
         handler: "handler",
         memorySize: 256,
         timeout: cdk.Duration.seconds(30),
@@ -228,17 +224,16 @@ export class WebappApiStack extends cdk.Stack {
         logRetention: isProduction
           ? logs.RetentionDays.ONE_MONTH
           : logs.RetentionDays.ONE_WEEK,
-      }
+        // Explicit IAM permissions via separate policy resources
+        dynamoDbTableArn: articlesTable.tableArn,
+      },
     );
-
-    // Grant DynamoDB read permissions (including GSI1)
-    articlesTable.grantReadData(this.listArticlesFunction.function);
 
     // Add to API Gateway
     this.api.addLambdaIntegration(
       "GET",
       "/articles",
-      this.listArticlesFunction.function
+      this.listArticlesFunction.function,
     );
 
     // ========================================
@@ -251,10 +246,7 @@ export class WebappApiStack extends cdk.Stack {
       {
         envName,
         functionName: `${projectName}-list-articles-by-tag`,
-        entry: path.join(
-          __dirname,
-          "../../../lambda/handlers/articles/list-articles-by-tag.ts"
-        ),
+        entry: path.join(__dirname, "../../../lambda/handlers/api/index.ts"),
         handler: "handler",
         memorySize: 256,
         timeout: cdk.Duration.seconds(30),
@@ -262,17 +254,16 @@ export class WebappApiStack extends cdk.Stack {
         logRetention: isProduction
           ? logs.RetentionDays.ONE_MONTH
           : logs.RetentionDays.ONE_WEEK,
-      }
+        // Explicit IAM permissions via separate policy resources
+        dynamoDbTableArn: articlesTable.tableArn,
+      },
     );
-
-    // Grant DynamoDB read permissions (including GSI2)
-    articlesTable.grantReadData(this.listArticlesByTagFunction.function);
 
     // Add to API Gateway
     this.api.addLambdaIntegration(
       "GET",
       "/articles/tag/{tag}",
-      this.listArticlesByTagFunction.function
+      this.listArticlesByTagFunction.function,
     );
 
     // ========================================================================

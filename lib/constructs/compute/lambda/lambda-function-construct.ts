@@ -7,6 +7,7 @@ import * as iam from "aws-cdk-lib/aws-iam";
 import { Construct } from "constructs";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import { NagSuppressions } from "cdk-nag";
+import { LambdaExecutionPolicy } from "../../iam/policies/lambda-execution-policy";
 
 export interface LambdaFunctionConstructProps {
   /**
@@ -73,6 +74,18 @@ export interface LambdaFunctionConstructProps {
     sourceMap?: boolean;
     externalModules?: string[];
   };
+
+  /**
+   * DynamoDB table ARN for read permissions
+   * If provided, creates explicit IAM policy with DynamoDB read permissions
+   */
+  dynamoDbTableArn?: string;
+
+  /**
+   * S3 bucket ARN for read permissions
+   * If provided, creates explicit IAM policy with S3 read permissions
+   */
+  s3BucketArn?: string;
 }
 
 /**
@@ -85,18 +98,41 @@ export interface LambdaFunctionConstructProps {
  * - TypeScript support with automatic bundling
  * - CloudWatch Logs with configurable retention
  * - IAM role with least privilege
+ * - Centralized IAM policies via LambdaExecutionPolicy construct
  * - Environment variable support
  * - Configurable timeout and memory
  *
+ * IAM Permissions:
+ * - Uses `LambdaExecutionPolicy` construct for centralized permission management
+ * - If `dynamoDbTableArn` is provided, adds DynamoDB read permissions
+ * - If `s3BucketArn` is provided, adds S3 read permissions
+ * - Always includes CloudWatch Logs permissions
+ * - Creates separate AWS::IAM::Policy resource (not inline policies)
+ *
+ * Separation of Concerns:
+ * - Construct creates Lambda function and log group
+ * - IAM permissions delegated to LambdaExecutionPolicy construct
+ * - Permissions are centralized and reusable across all Lambda functions
+ *
  * Usage:
  * ```typescript
+ * // With centralized IAM policies (recommended)
  * const fn = new LambdaFunctionConstruct(this, 'MyFunction', {
  *   envName: 'development',
  *   functionName: 'my-function',
  *   entry: 'lambda/handlers/my-handler.ts',
+ *   dynamoDbTableArn: table.tableArn,
+ *   s3BucketArn: bucket.bucketArn,
  *   environment: {
  *     TABLE_NAME: table.tableName,
  *   },
+ * });
+ *
+ * // With custom policy statements (alternative)
+ * const fn = new LambdaFunctionConstruct(this, 'MyFunction', {
+ *   envName: 'development',
+ *   functionName: 'my-function',
+ *   entry: 'lambda/handlers/my-handler.ts',
  *   initialPolicy: [
  *     new iam.PolicyStatement({
  *       actions: ['dynamodb:PutItem'],
@@ -110,6 +146,7 @@ export class LambdaFunctionConstruct extends Construct {
   public readonly function: NodejsFunction;
   public readonly role: iam.Role;
   public readonly logGroup: logs.LogGroup;
+  public readonly executionPolicy?: LambdaExecutionPolicy;
 
   constructor(
     scope: Construct,
@@ -150,9 +187,22 @@ export class LambdaFunctionConstruct extends Construct {
 
     this.role = this.function.role as iam.Role;
 
-    // Grant explicit CloudWatch Logs permissions
-    // These are required for Lambda to write logs to CloudWatch
-    this.logGroup.grantWrite(this.function);
+    // ========================================================================
+    // EXPLICIT IAM POLICY (for separate AWS::IAM::Policy resource)
+    // ========================================================================
+    // Use centralized LambdaExecutionPolicy construct for all permissions
+    // This creates a separate AWS::IAM::Policy resource and centralizes
+    // permission definitions for reusability and consistency
+    this.executionPolicy = new LambdaExecutionPolicy(this, "ExecutionPolicy", {
+      logGroupArn: this.logGroup.logGroupArn,
+      dynamoDbTableArn: props.dynamoDbTableArn,
+      s3BucketArn: props.s3BucketArn,
+      envName: props.envName,
+      functionName: props.functionName,
+    });
+
+    // Attach policy to Lambda function's role
+    this.executionPolicy.attachToRole(this.role);
 
     // ========================================================================
     // CDK NAG SUPPRESSIONS

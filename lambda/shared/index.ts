@@ -8,6 +8,6 @@
 
 // API Gateway response utilities
 export * from "./api-response";
-
-// CloudFormation custom resource utilities
-export * from "./cfn-response";
+export { createSuccessResponse as createCfnSuccessResponse } from "./cfn-response";
+export { createFailureResponse } from "./cfn-response";
+export { sendCfnResponse } from "./cfn-response";
