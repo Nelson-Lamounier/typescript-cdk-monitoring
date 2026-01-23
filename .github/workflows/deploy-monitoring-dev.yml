@@ -1,5 +1,5 @@
 # @format
-# @description Deploy Monitoring to Development
+# @description Deploy Monitoring to Development // test to trigger the dev workflow
 
 name: Deploy Monitoring to Development
 
@@ -47,7 +47,7 @@ jobs:
     environment: development
     outputs:
       aws-account-id: ${{ steps.account-id.outputs.account_id }}
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -70,14 +70,14 @@ jobs:
             echo ""
             exit 1
           fi
-          
+
           # Validate format
           if ! [[ "$ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
             echo "ERROR: Invalid AWS account ID format: $ACCOUNT_ID"
             echo "Expected format: 12-digit number (e.g., 123456789012)"
             exit 1
           fi
-          
+
           echo "account_id=$ACCOUNT_ID" >> $GITHUB_OUTPUT
           echo "Deploying to account: ***${ACCOUNT_ID: -4}"
 
@@ -112,7 +112,7 @@ jobs:
     timeout-minutes: 10
     environment: development
     if: inputs.skip_verification != true
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -140,10 +140,10 @@ jobs:
           echo "=== AWS Account Verification ==="
           CURRENT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
           TARGET_ACCOUNT="${{ needs.setup.outputs.aws-account-id }}"
-          
+
           echo "Current Account: $CURRENT_ACCOUNT"
           echo "Target Account:  $TARGET_ACCOUNT"
-          
+
           if [ "$CURRENT_ACCOUNT" != "$TARGET_ACCOUNT" ]; then
             echo ""
             echo "ERROR: AWS_OIDC_ROLE_DEV is configured for wrong account"
@@ -154,20 +154,20 @@ jobs:
             echo "   arn:aws:iam::$TARGET_ACCOUNT:role/GitHubOIDCRole"
             exit 1
           fi
-          
+
           echo "Authenticated to correct development account"
 
       - name: Verify Networking Stack
         run: |
           echo "Verifying Networking Stack deployment..."
-          
+
           # Use outputs file + AWS validation (same OIDC role as deployment)
           npx tsx scripts/integration/deployment/monitoring/verify-networking-stack.ts \
             --environment ${{ env.ENVIRONMENT }} \
             --aws-region ${{ env.AWS_REGION }} \
             --outputs-file deployment-outputs/development-Networking-outputs.json \
             --report-file verification-reports/development-networking-verification.json
-      
+
       - name: Upload Verification Report
         if: always()
         uses: actions/upload-artifact@v4
@@ -176,7 +176,6 @@ jobs:
           path: verification-reports/development-networking-verification.json
           retention-days: 30
           if-no-files-found: warn
-
 
           # ===========================================================================
   # Deploy S3 Stack
@@ -187,14 +186,14 @@ jobs:
     if: always() && needs.deploy-networking.result == 'success' && (needs.verify-networking.result == 'success' || needs.verify-networking.result == 'skipped')
     uses: ./.github/workflows/_deploy-stack.yml
     with:
-      stack-name: "development-MonitoringS3"  # Change per environment
-      environment: "development"               # Change per environment
+      stack-name: "development-MonitoringS3" # Change per environment
+      environment: "development" # Change per environment
       aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
       aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
       require-approval: "never"
       outputs-directory: "deployment-outputs"
     secrets:
-      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_DEV }}  # Change per environment
+      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_DEV }} # Change per environment
 
   # ===========================================================================
   # Verify S3 Stack
@@ -204,9 +203,9 @@ jobs:
     needs: [setup, deploy-s3]
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: development                    # Change per environment
+    environment: development # Change per environment
     if: always() && needs.deploy-s3.result == 'success' && inputs.skip_verification != true
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -219,21 +218,21 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_DEV }}  # Change per environment
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_DEV }} # Change per environment
           aws-region: ${{ env.AWS_REGION }}
           audience: sts.amazonaws.com
 
       - name: Verify S3 Stack
         run: |
           echo "Verifying S3 Stack deployment..."
-          
+
           # Get bucket name from stack outputs for verification script
           STACK_NAME="${{ env.ENVIRONMENT }}-MonitoringS3"
           BUCKET_NAME=$(aws cloudformation describe-stacks \
             --stack-name "$STACK_NAME" \
             --query 'Stacks[0].Outputs[?OutputKey==`DashboardBucketNameOutput`].OutputValue' \
             --output text 2>/dev/null || echo "")
-          
+
           # Run verification using Makefile target
           if [ -n "$BUCKET_NAME" ] && [ "$BUCKET_NAME" != "None" ]; then
             make verify-s3 \
@@ -276,7 +275,7 @@ jobs:
     timeout-minutes: 10
     environment: development
     if: always() && needs.deploy-efs.result == 'success' && inputs.skip_verification != true
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -328,7 +327,7 @@ jobs:
     timeout-minutes: 10
     environment: development
     if: always() && needs.deploy-infra.result == 'success' && inputs.skip_verification != true
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -363,7 +362,7 @@ jobs:
             --region ${{ env.AWS_REGION }} \
             --non-blocking \
             --verbose
-          
+
           echo ""
           echo "If verification failed, see troubleshooting guide:"
           echo "  docs/PROMETHEUS_HEALTH_CHECK_TROUBLESHOOTING_2026-01-20.md"
@@ -414,7 +413,7 @@ jobs:
     timeout-minutes: 10
     environment: development
     if: always() && needs.deploy-security.result == 'success' && inputs.skip_verification != true
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -436,13 +435,13 @@ jobs:
           echo "Verifying Security Stack deployment..."
           echo ""
           echo "Checking Prowler resources:"
-          
+
           # Verify S3 bucket exists
           BUCKET_NAME=$(aws cloudformation describe-stacks \
             --stack-name "development-SecurityProwler" \
             --query 'Stacks[0].Outputs[?OutputKey==`ResultsBucketName`].OutputValue' \
             --output text 2>/dev/null || echo "")
-          
+
           if [ -n "$BUCKET_NAME" ] && [ "$BUCKET_NAME" != "None" ]; then
             echo "  - Results bucket: $BUCKET_NAME"
             
@@ -455,26 +454,26 @@ jobs:
           else
             echo "WARNING: Could not retrieve results bucket name"
           fi
-          
+
           # Verify task definition exists
           TASK_DEF_ARN=$(aws cloudformation describe-stacks \
             --stack-name "development-SecurityProwler" \
             --query 'Stacks[0].Outputs[?OutputKey==`TaskDefinitionArn`].OutputValue' \
             --output text 2>/dev/null || echo "")
-          
+
           if [ -n "$TASK_DEF_ARN" ] && [ "$TASK_DEF_ARN" != "None" ]; then
             echo "  - Task definition: Created"
           else
             echo "WARNING: Could not retrieve task definition ARN"
           fi
-          
+
           # Check EventBridge rule
           RULE_NAME="${{ env.ENVIRONMENT }}-security-prowler-schedule"
           RULE_STATE=$(aws events describe-rule \
             --name "$RULE_NAME" \
             --query 'State' \
             --output text 2>/dev/null || echo "NOT_FOUND")
-          
+
           if [ "$RULE_STATE" = "ENABLED" ]; then
             echo "  - Schedule rule: ENABLED"
           elif [ "$RULE_STATE" = "DISABLED" ]; then
@@ -482,7 +481,7 @@ jobs:
           else
             echo "  - Schedule rule: Could not verify (may use different naming)"
           fi
-          
+
           echo ""
           echo "Security stack verification completed."
 
@@ -498,7 +497,7 @@ jobs:
     if: always() && needs.deploy-service.result == 'success' && inputs.skip_verification != true
     outputs:
       alb-dns: ${{ steps.endpoints.outputs.alb_dns }}
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -540,7 +539,7 @@ jobs:
             --max-retries 3 \
             --retry-interval 30 \
             --verbose
-          
+
           EXIT_CODE=$?
           if [ $EXIT_CODE -ne 0 ]; then
             echo ""
@@ -573,7 +572,7 @@ jobs:
             --environment ${{ env.ENVIRONMENT }} \
             --region ${{ env.AWS_REGION }} \
             --verbose || true
-          
+
           echo ""
           echo "If datasource connectivity fails, check:"
           echo "  - HOST_IP_PLACEHOLDER was replaced with actual EC2 private IP"
@@ -584,12 +583,12 @@ jobs:
         id: endpoints
         run: |
           STACK_NAME="development-MonitoringInfra"
-          
+
           ALB_DNS=$(aws cloudformation describe-stacks \
             --stack-name "$STACK_NAME" \
             --query 'Stacks[0].Outputs[?OutputKey==`LoadBalancerDns`].OutputValue' \
             --output text 2>/dev/null || echo "")
-          
+
           if [ -n "$ALB_DNS" ] && [ "$ALB_DNS" != "None" ]; then
             echo "alb_dns=$ALB_DNS" >> $GITHUB_OUTPUT
             echo "Load Balancer DNS: $ALB_DNS"
@@ -601,11 +600,11 @@ jobs:
         if: steps.endpoints.outputs.alb_dns != ''
         run: |
           ALB_DNS="${{ steps.endpoints.outputs.alb_dns }}"
-          
+
           echo "Running smoke tests against endpoints..."
           echo "ALB DNS: ${ALB_DNS}"
           echo ""
-          
+
           # Test Grafana health endpoint
           echo "Testing Grafana health (http://${ALB_DNS}/grafana/api/health)..."
           GRAFANA_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "http://${ALB_DNS}/grafana/api/health" || echo "000")
@@ -614,9 +613,9 @@ jobs:
           else
             echo "WARNING: Grafana health check returned HTTP $GRAFANA_RESPONSE"
           fi
-          
+
           echo ""
-          
+
           # Test Prometheus health endpoint
           # Note: ALB forwards full path, Prometheus serves at /prometheus/-/healthy
           echo "Testing Prometheus health (http://${ALB_DNS}/prometheus/-/healthy)..."
@@ -640,10 +639,10 @@ jobs:
             echo "Full troubleshooting guide:"
             echo "  docs/PROMETHEUS_HEALTH_CHECK_TROUBLESHOOTING_2026-01-20.md"
           fi
-          
+
           echo ""
           echo "Smoke tests completed."
-          
+
           # Summary
           echo ""
           echo "=========================================="
@@ -651,7 +650,7 @@ jobs:
           echo "=========================================="
           echo "Grafana:    HTTP $GRAFANA_RESPONSE"
           echo "Prometheus: HTTP $PROMETHEUS_RESPONSE"
-          echo "==========================================" 
+          echo "=========================================="
 
   # ===========================================================================
   # Deployment Summary
@@ -681,7 +680,7 @@ jobs:
         run: |
           ACCOUNT_LAST4="${{ needs.setup.outputs.aws-account-id }}"
           TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
-          
+
           cat >> $GITHUB_STEP_SUMMARY << EOF
           ## Monitoring Infrastructure Deployment - Development
 
@@ -701,7 +700,7 @@ jobs:
           | Security (Prowler) | ${{ needs.deploy-security.result }} | ${{ needs.verify-security.result }} |
 
           EOF
-          
+
           if [ -n "${{ needs.verify-service.outputs.alb-dns }}" ]; then
             ALB_DNS="${{ needs.verify-service.outputs.alb-dns }}"
             cat >> $GITHUB_STEP_SUMMARY << EOF
@@ -714,7 +713,7 @@ jobs:
 
           EOF
           fi
-          
+
           cat >> $GITHUB_STEP_SUMMARY << 'EOF'
           ### Next Steps
 
@@ -735,35 +734,35 @@ jobs:
       - name: Check Deployment Status
         run: |
           echo "Checking overall deployment status..."
-          
+
           FAILED=false
-          
+
           # Check deployment results
           if [[ "${{ needs.deploy-networking.result }}" == "failure" ]]; then
             echo "ERROR: Networking deployment failed"
             FAILED=true
           fi
-          
+
           if [[ "${{ needs.deploy-efs.result }}" == "failure" ]]; then
             echo "ERROR: EFS deployment failed"
             FAILED=true
           fi
-          
+
           if [[ "${{ needs.deploy-infra.result }}" == "failure" ]]; then
             echo "ERROR: Infrastructure deployment failed"
             FAILED=true
           fi
-          
+
           if [[ "${{ needs.deploy-service.result }}" == "failure" ]]; then
             echo "ERROR: Service deployment failed"
             FAILED=true
           fi
-          
+
           if [[ "${{ needs.deploy-security.result }}" == "failure" ]]; then
             echo "ERROR: Security (Prowler) deployment failed"
             FAILED=true
           fi
-          
+
           # Check verification results (only if not skipped)
           if [[ "${{ inputs.skip_verification }}" != "true" ]]; then
             if [[ "${{ needs.verify-networking.result }}" == "failure" ]]; then
@@ -791,12 +790,12 @@ jobs:
               FAILED=true
             fi
           fi
-          
+
           if [[ "$FAILED" == "true" ]]; then
             echo ""
             echo "Deployment pipeline failed - check individual job logs"
             exit 1
           fi
-          
+
           echo ""
           echo "✓ All deployments and verifications passed successfully"
