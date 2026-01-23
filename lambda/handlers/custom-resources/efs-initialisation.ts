@@ -18,9 +18,6 @@
  * via SSM State Manager (ApplicationSetupSsmAssociationConstruct)
  */
 
-import * as https from "https";
-import * as url from "url";
-
 import * as yaml from "yaml";
 import {
   CloudFormationCustomResourceEvent,
@@ -34,8 +31,26 @@ import {
   ParameterNotFound,
 } from "@aws-sdk/client-ssm";
 
-// Initialize SSM client
-const ssmClient = new SSMClient({});
+import {
+  sendCfnResponse,
+  createFailureResponse,
+} from "../../shared/cfn-response";
+
+// ========================================================================
+// ENVIRONMENT VARIABLES
+// ========================================================================
+
+const REGION = process.env.AWS_REGION || "eu-west-1";
+
+// ========================================================================
+// AWS SDK CLIENTS
+// ========================================================================
+
+const ssmClient = new SSMClient({ region: REGION });
+
+// ========================================================================
+// LAMBDA HANDLER
+// ========================================================================
 
 /**
  * Lambda handler for CloudFormation Custom Resource
@@ -70,20 +85,11 @@ export const handler = async (
   } catch (error) {
     console.error("Error in handler:", error);
 
-    const physicalResourceId =
-      "PhysicalResourceId" in event
-        ? event.PhysicalResourceId
-        : "efs-config-failed";
-
-    const failureResponse: CloudFormationCustomResourceResponse = {
-      Status: "FAILED",
-      Reason: error instanceof Error ? error.message : String(error),
-      PhysicalResourceId: physicalResourceId,
-      StackId: event.StackId,
-      RequestId: event.RequestId,
-      LogicalResourceId: event.LogicalResourceId,
-      Data: {},
-    };
+    const failureResponse = createFailureResponse(
+      event,
+      error instanceof Error ? error : String(error),
+      "efs-config-failed"
+    );
 
     await sendCfnResponse(event, context, failureResponse);
     return failureResponse;
@@ -646,56 +652,3 @@ async function putParameter(
   }
 }
 
-/**
- * Send CloudFormation response
- */
-async function sendCfnResponse(
-  event: CloudFormationCustomResourceEvent,
-  context: Context,
-  response: CloudFormationCustomResourceResponse
-): Promise<void> {
-  const responseBody = JSON.stringify({
-    Status: response.Status,
-    Reason:
-      response.Reason ||
-      `See CloudWatch Logs: ${context.logGroupName} / ${context.logStreamName}`,
-    PhysicalResourceId: response.PhysicalResourceId || context.logStreamName,
-    StackId: event.StackId,
-    RequestId: event.RequestId,
-    LogicalResourceId: event.LogicalResourceId,
-    Data: response.Data || {},
-  });
-
-  console.log("Sending CloudFormation response:", responseBody);
-
-  const parsedUrl = url.parse(event.ResponseURL);
-  const options = {
-    hostname: parsedUrl.hostname,
-    port: 443,
-    path: parsedUrl.path,
-    method: "PUT",
-    headers: {
-      "content-type": "",
-      "content-length": Buffer.byteLength(responseBody),
-    },
-  };
-
-  await new Promise<void>((resolve, reject) => {
-    const req = https.request(options, (res) => {
-      console.log(`CloudFormation response status: ${res.statusCode}`);
-      res.on("data", () => undefined);
-      res.on("end", () => {
-        console.log("CloudFormation response sent successfully");
-        resolve();
-      });
-    });
-
-    req.on("error", (err) => {
-      console.error("Failed to send CloudFormation response:", err);
-      reject(err);
-    });
-
-    req.write(responseBody);
-    req.end();
-  });
-}

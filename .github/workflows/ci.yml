@@ -140,6 +140,24 @@ jobs:
   # ============================================================================
   # Code Quality (Always Run - Fast)
   # ============================================================================
+  audit:
+    name: Security Packages Audit
+    needs: [setup, detect-changes]
+    runs-on: ubuntu-latest
+    if: needs.detect-changes.outputs.any-src == 'true' || needs.detect-changes.outputs.any-tests == 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ needs.setup.outputs.node-version }}
+
+      - name: Run Audit
+        run: make audit
+
   lint:
     name: Lint Code
     needs: [setup, detect-changes]
@@ -577,16 +595,16 @@ jobs:
         run: |
           echo "## CI Pipeline Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           echo "### Change Detection" >> $GITHUB_STEP_SUMMARY
           echo "- Run All Tests: ${{ needs.detect-changes.outputs.run-all }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           echo "### Code Quality" >> $GITHUB_STEP_SUMMARY
           echo "- Lint: ${{ needs.lint.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Type Check: ${{ needs.typecheck.result }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           echo "### Domain Tests" >> $GITHUB_STEP_SUMMARY
           echo "- Monitoring: ${{ needs.test-monitoring.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Webapp: ${{ needs.test-webapp.result }}" >> $GITHUB_STEP_SUMMARY
@@ -594,13 +612,13 @@ jobs:
           echo "- Constructs: ${{ needs.test-constructs.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Shared: ${{ needs.test-shared.result }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           echo "### Cross-Cutting Tests" >> $GITHUB_STEP_SUMMARY
           echo "- Security: ${{ needs.test-security.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Connectivity: ${{ needs.test-connectivity.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Snapshots: ${{ needs.test-snapshots.result }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           echo "### Build & Validation" >> $GITHUB_STEP_SUMMARY
           echo "- Build: ${{ needs.build.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- CDK Validation: ${{ needs.validate-cdk.result }}" >> $GITHUB_STEP_SUMMARY

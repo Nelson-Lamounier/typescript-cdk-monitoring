@@ -14,9 +14,6 @@
  * @format
  */
 
-import * as https from "https";
-import * as url from "url";
-
 import {
   CloudFormationCustomResourceEvent,
   CloudFormationCustomResourceResponse,
@@ -34,8 +31,27 @@ import {
   AssumeRoleCommand,
 } from "@aws-sdk/client-sts";
 
-const ec2Client = new EC2Client({ region: process.env.AWS_REGION });
-const stsClient = new STSClient({ region: process.env.AWS_REGION });
+import {
+  sendCfnResponse,
+  createFailureResponse,
+} from "../../shared/cfn-response";
+
+// ========================================================================
+// ENVIRONMENT VARIABLES
+// ========================================================================
+
+const REGION = process.env.AWS_REGION || "eu-west-1";
+
+// ========================================================================
+// AWS SDK CLIENTS
+// ========================================================================
+
+const ec2Client = new EC2Client({ region: REGION });
+const stsClient = new STSClient({ region: REGION });
+
+// ========================================================================
+// LAMBDA HANDLER
+// ========================================================================
 
 export const handler = async (
   event: CloudFormationCustomResourceEvent,
@@ -60,25 +76,18 @@ export const handler = async (
       throw new Error(`Unknown request type: ${requestType}`);
     }
 
-    await sendResponse(event, context, response);
+    await sendCfnResponse(event, context, response);
     return response;
   } catch (error) {
     console.error("Error in handler:", error);
-    const physicalResourceId =
-      "PhysicalResourceId" in event
-        ? event.PhysicalResourceId
-        : "route-update-failed";
 
-    const failureResponse: CloudFormationCustomResourceResponse = {
-      Status: "FAILED",
-      Reason: error instanceof Error ? error.message : String(error),
-      PhysicalResourceId: physicalResourceId,
-      StackId: event.StackId,
-      RequestId: event.RequestId,
-      LogicalResourceId: event.LogicalResourceId,
-      Data: {},
-    };
-    await sendResponse(event, context, failureResponse);
+    const failureResponse = createFailureResponse(
+      event,
+      error instanceof Error ? error : String(error),
+      "route-update-failed"
+    );
+
+    await sendCfnResponse(event, context, failureResponse);
     return failureResponse;
   }
 };
@@ -140,7 +149,7 @@ async function updatePeerRoutes(
   }
 
   const peerEc2Client = new EC2Client({
-    region: Region || process.env.AWS_REGION || "us-east-1",
+    region: Region || REGION,
     credentials: {
       accessKeyId: assumeRoleResponse.Credentials.AccessKeyId,
       secretAccessKey: assumeRoleResponse.Credentials.SecretAccessKey,
@@ -267,7 +276,7 @@ async function deletePeerRoutes(
     }
 
     const peerEc2Client = new EC2Client({
-      region: Region || process.env.AWS_REGION || "us-east-1",
+      region: Region || REGION,
       credentials: {
         accessKeyId: credentials.AccessKeyId,
         secretAccessKey: credentials.SecretAccessKey,
@@ -355,49 +364,4 @@ async function verifyPeeringConnectionActive(
       `Peering connection ${peeringConnectionId} is not active (state: ${state})`
     );
   }
-}
-
-async function sendResponse(
-  event: CloudFormationCustomResourceEvent,
-  context: Context,
-  response: CloudFormationCustomResourceResponse
-): Promise<void> {
-  const responseBody = JSON.stringify({
-    Status: response.Status,
-    Reason:
-      response.Reason ||
-      `See CloudWatch Logs for requestId: ${context.awsRequestId}`,
-    PhysicalResourceId: response.PhysicalResourceId || context.logStreamName,
-    StackId: event.StackId,
-    RequestId: event.RequestId,
-    LogicalResourceId: event.LogicalResourceId,
-    Data: response.Data || {},
-  });
-
-  const parsedUrl = url.parse(event.ResponseURL);
-  const options = {
-    hostname: parsedUrl.hostname,
-    port: 443,
-    path: parsedUrl.path,
-    method: "PUT",
-    headers: {
-      "content-type": "application/json",
-      "content-length": Buffer.byteLength(responseBody),
-    },
-  };
-
-  await new Promise<void>((resolve, reject) => {
-    const req = https.request(options, (res) => {
-      res.on("data", () => undefined);
-      res.on("end", resolve);
-    });
-
-    req.on("error", (err) => {
-      console.error("sendResponse error:", err);
-      reject(err);
-    });
-
-    req.write(responseBody);
-    req.end();
-  });
 }

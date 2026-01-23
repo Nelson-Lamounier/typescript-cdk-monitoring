@@ -8,8 +8,8 @@
  */
 
 // VPC Peering handlers
-export * from "./vpc-peering-create-accept";
-export * from "./vpc-peering-routes";
+export { handler as vpcPeeringCreateAcceptHandler } from "./vpc-peering-create-accept";
+export { handler as vpcPeeringRoutesHandler } from "./vpc-peering-routes";
 
 // EFS handlers
-export * from "./efs-initialisation";
+export { handler as efsInitialisationHandler } from "./efs-initialisation";

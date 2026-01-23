@@ -21,7 +21,7 @@ export interface ApiGatewayCorsConfig {
 
   /**
    * Allowed HTTP methods
-   * @default ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+   * @default ['GET', 'OPTIONS', 'PUT', 'POST', 'DELETE']
    */
   allowMethods?: string[];
 
@@ -183,7 +183,7 @@ export interface ApiGatewayConstructProps {
 
   /**
    * Enable X-Ray tracing
-   * @default false (enable in production)
+   * @default true for production, false for non-production (based on envName)
    */
   enableTracing?: boolean;
 
@@ -279,11 +279,14 @@ export class ApiGatewayConstruct extends Construct {
       enableWaf = false,
       customDomain,
       stageName = "api",
-      enableTracing = false,
+      enableTracing,
       removalPolicy,
     } = props;
 
     const isProduction = envName.toLowerCase() === "production";
+
+    // Default enableTracing based on environment if not explicitly provided
+    const shouldEnableTracing = enableTracing ?? isProduction;
 
     // ========================================================================
     // CLOUDWATCH LOG GROUP
@@ -320,7 +323,7 @@ export class ApiGatewayConstruct extends Construct {
           : apigateway.MethodLoggingLevel.OFF,
         dataTraceEnabled: enableDetailedMetrics,
         metricsEnabled: true,
-        tracingEnabled: enableTracing,
+        tracingEnabled: shouldEnableTracing,
         accessLogDestination: this.logGroup
           ? new apigateway.LogGroupLogDestination(this.logGroup)
           : undefined,

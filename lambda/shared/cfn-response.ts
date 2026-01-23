@@ -100,14 +100,22 @@ export function createSuccessResponse(
  * Create a failure response for CloudFormation
  *
  * @param event - CloudFormation Custom Resource event
- * @param physicalResourceId - Physical resource ID
- * @param reason - Failure reason
+ * @param error - Error object or message string
+ * @param defaultPhysicalId - Default physical resource ID if not present in event
+ * @returns CloudFormation failure response
  */
 export function createFailureResponse(
   event: CloudFormationCustomResourceEvent,
-  physicalResourceId: string,
-  reason: string
+  error: Error | string,
+  defaultPhysicalId: string
 ): CloudFormationCustomResourceResponse {
+  const physicalResourceId =
+    "PhysicalResourceId" in event && event.PhysicalResourceId
+      ? event.PhysicalResourceId
+      : defaultPhysicalId;
+
+  const reason = error instanceof Error ? error.message : String(error);
+
   return {
     Status: "FAILED",
     Reason: reason,
