@@ -18,6 +18,10 @@ import {
   createInternalServerErrorResponse,
   createResponse,
 } from "../../../shared/api-response";
+import {
+  ArticleMetadata,
+  ListArticlesByTagResponse,
+} from "../../../shared/types/articles-types";
 
 // ========================================================================
 // ENVIRONMENT VARIABLES
@@ -32,41 +36,6 @@ const GSI2_NAME = process.env.GSI2_NAME || "gsi2-tag-date";
 // ========================================================================
 
 const dynamoClient = new DynamoDBClient({ region: REGION });
-
-// ========================================================================
-// TYPES
-// ========================================================================
-
-interface ArticleMetadata {
-  pk: string;
-  sk: string;
-  entityType: string;
-  slug: string;
-  title: string;
-  description: string;
-  author: string;
-  date: string;
-  status: "draft" | "published" | "archived";
-  tags: string[];
-  category: string;
-  readingTimeMinutes: number;
-  featuredImage?: string;
-  createdAt: string;
-  updatedAt: string;
-  publishedAt?: string;
-  version: number;
-  gsi1pk: string;
-  gsi1sk: string;
-  gsi2pk?: string;
-  gsi2sk?: string;
-}
-
-interface ListArticlesByTagResponse {
-  tag: string;
-  articles: ArticleMetadata[];
-  nextToken?: string;
-  count: number;
-}
 
 // ========================================================================
 // HELPER FUNCTIONS
@@ -102,7 +71,7 @@ function parsePaginationParams(event: APIGatewayProxyEvent): {
   const queryParams = event.queryStringParameters || {};
   const limit = Math.min(
     parseInt(queryParams.limit || "10", 10),
-    100 // Maximum 100 items per page
+    100, // Maximum 100 items per page
   );
   const nextToken = queryParams.nextToken;
 
@@ -138,10 +107,10 @@ function parsePaginationParams(event: APIGatewayProxyEvent): {
  * @param event - API Gateway event
  * @param context - Lambda context
  */
-export async function handler(
+export const handler = async (
   event: APIGatewayProxyEvent,
   context: Context
-): Promise<APIGatewayProxyResult> {
+): Promise<APIGatewayProxyResult> => {
   console.log("Event:", JSON.stringify(event, null, 2));
   console.log("Context:", JSON.stringify(context, null, 2));
 
@@ -157,7 +126,7 @@ export async function handler(
   if (!tag) {
     return createBadRequestResponse(
       "Bad Request",
-      "Tag is required in path parameters"
+      "Tag is required in path parameters",
     );
   }
 
@@ -187,20 +156,20 @@ export async function handler(
     if (nextToken) {
       try {
         queryParams.ExclusiveStartKey = JSON.parse(
-          Buffer.from(nextToken, "base64").toString("utf-8")
+          Buffer.from(nextToken, "base64").toString("utf-8"),
         );
       } catch (error) {
         console.error("Invalid pagination token:", error);
         return createBadRequestResponse(
           "Bad Request",
-          "Invalid pagination token"
+          "Invalid pagination token",
         );
       }
     }
 
     console.log(
       "Querying articles by tag:",
-      JSON.stringify(queryParams, null, 2)
+      JSON.stringify(queryParams, null, 2),
     );
 
     const result = await dynamoClient.send(new QueryCommand(queryParams));
@@ -218,7 +187,7 @@ export async function handler(
     // ========================================
 
     const articles = result.Items.map((item) =>
-      unmarshall(item)
+      unmarshall(item),
     ) as ArticleMetadata[];
 
     // Filter out non-published articles (unless admin mode)
@@ -231,7 +200,7 @@ export async function handler(
     let responseNextToken: string | undefined;
     if (result.LastEvaluatedKey) {
       responseNextToken = Buffer.from(
-        JSON.stringify(result.LastEvaluatedKey)
+        JSON.stringify(result.LastEvaluatedKey),
       ).toString("base64");
     }
 
@@ -243,7 +212,7 @@ export async function handler(
     };
 
     console.log(
-      `Successfully retrieved ${filteredArticles.length} articles for tag: ${decodedTag}`
+      `Successfully retrieved ${filteredArticles.length} articles for tag: ${decodedTag}`,
     );
 
     return createCachedResponse(response);

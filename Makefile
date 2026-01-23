@@ -984,7 +984,9 @@ test-helpers: test-helpers-subnet-config ## Run all helper tests
 # ============================================================================
 # LINTING & BUILD
 # ============================================================================
-
+audit: ## Run linter (ESLint with max-warnings 0)
+	@echo "$(BLUE)Checks for known security issues with the installed packages...$(NC)"
+	yarn audit [--level info|low|moderate|high|critical]
 lint: ## Run linter (ESLint with max-warnings 0)
 	@echo "$(BLUE)Running linter...$(NC)"
 	npx eslint lib/ bin/ tests/ --max-warnings 0

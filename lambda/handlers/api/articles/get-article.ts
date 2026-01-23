@@ -20,6 +20,11 @@ import {
   createBadRequestResponse,
   createInternalServerErrorResponse,
 } from "../../../shared/api-response";
+import {
+  ArticleMetadata,
+  ArticleContent,
+  ArticleResponse,
+} from "../../../shared/types/articles-types";
 
 // ========================================================================
 // ENVIRONMENT VARIABLES
@@ -37,59 +42,6 @@ const dynamoClient = new DynamoDBClient({ region: REGION });
 // ========================================================================
 // TYPES
 // ========================================================================
-
-interface ArticleMetadata {
-  pk: string;
-  sk: string;
-  entityType: string;
-  slug: string;
-  title: string;
-  description: string;
-  author: string;
-  date: string;
-  status: "draft" | "published" | "archived";
-  tags: string[];
-  category: string;
-  readingTimeMinutes: number;
-  featuredImage?: string;
-  createdAt: string;
-  updatedAt: string;
-  publishedAt?: string;
-  version: number;
-  gsi1pk: string;
-  gsi1sk: string;
-}
-
-interface ArticleContent {
-  pk: string;
-  sk: string;
-  entityType: string;
-  contentType: "mdx" | "markdown" | "html";
-  content: string;
-  contentS3Key?: string;
-  componentData?: Array<{
-    componentId: string;
-    componentType: string;
-    position: number;
-    props: Record<string, unknown>;
-  }>;
-  images: Array<{
-    id: string;
-    s3Key: string;
-    alt: string;
-    caption?: string;
-    width?: number;
-    height?: number;
-  }>;
-  version: number;
-  createdAt: string;
-  changelog?: string;
-}
-
-interface ArticleResponse {
-  metadata: ArticleMetadata;
-  content: ArticleContent;
-}
 
 // ========================================================================
 // HELPER FUNCTIONS
@@ -134,10 +86,10 @@ function extractSlug(event: APIGatewayProxyEvent): string | null {
  * @param event - API Gateway event
  * @param context - Lambda context
  */
-export async function handler(
+export const handler = async (
   event: APIGatewayProxyEvent,
   context: Context
-): Promise<APIGatewayProxyResult> {
+): Promise<APIGatewayProxyResult> => {
   console.log("Event:", JSON.stringify(event, null, 2));
   console.log("Context:", JSON.stringify(context, null, 2));
 
@@ -153,7 +105,7 @@ export async function handler(
   if (!slug) {
     return createBadRequestResponse(
       "Bad Request",
-      "Slug is required in path parameters"
+      "Slug is required in path parameters",
     );
   }
 
@@ -173,7 +125,7 @@ export async function handler(
     console.log("Fetching metadata:", JSON.stringify(metadataParams, null, 2));
 
     const metadataResult = await dynamoClient.send(
-      new GetItemCommand(metadataParams)
+      new GetItemCommand(metadataParams),
     );
 
     if (!metadataResult.Item) {
@@ -186,7 +138,9 @@ export async function handler(
     // Only return published articles (unless admin query param provided)
     const isAdmin = event.queryStringParameters?.admin === "true";
     if (!isAdmin && metadata.status !== "published") {
-      console.warn(`Article not published: ${slug}, status: ${metadata.status}`);
+      console.warn(
+        `Article not published: ${slug}, status: ${metadata.status}`,
+      );
       return createNotFoundResponse("Article", slug);
     }
 
@@ -208,7 +162,7 @@ export async function handler(
     console.log("Fetching content:", JSON.stringify(contentParams, null, 2));
 
     const contentResult = await dynamoClient.send(
-      new QueryCommand(contentParams)
+      new QueryCommand(contentParams),
     );
 
     if (!contentResult.Items || contentResult.Items.length === 0) {

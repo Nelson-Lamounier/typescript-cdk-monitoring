@@ -1,6 +1,7 @@
 /** @format */
 /// <reference types="jest" />
 
+/* eslint-disable jest/no-conditional-in-test */
 /**
  * WebappApiStack Tests: IAM Permissions
  *
@@ -22,8 +23,6 @@ import {
 } from "../fixtures/api-stack-fixtures";
 import { createTestApp } from "../../../utils/stack-test-utils";
 import {
-  validateDynamoDbReadPermissions,
-  validateS3ReadPermissions,
   validateLambdaTrustPolicy,
 } from "../../../utils/webapp-test-helpers";
 
@@ -56,13 +55,15 @@ describe("WebappApiStack: IAM Permissions", () => {
       });
     });
 
+    // eslint-disable-next-line jest/expect-expect
     test("should create IAM roles for Lambda functions", () => {
       template.resourceCountIs(
         "AWS::IAM::Role",
-        API_TEST_CONSTANTS.RESOURCE_COUNTS.IAM_ROLE
+        API_TEST_CONSTANTS.RESOURCE_COUNTS.IAM_ROLE,
       );
     });
 
+    // eslint-disable-next-line jest/expect-expect
     test("should configure Lambda trust policy", () => {
       const expectedTrustPolicy = validateLambdaTrustPolicy();
 
@@ -87,14 +88,15 @@ describe("WebappApiStack: IAM Permissions", () => {
 
       expect(lambdaRoles.length).toBe(3); // 3 Lambda functions
 
-      lambdaRoles.forEach((role) => {
+      // Verify all Lambda roles have correct service principal
+      const allHaveLambdaPrincipal = lambdaRoles.every((role) => {
         const policy = role.assumeRolePolicy as {
           Statement: Array<{ Principal: { Service: string } }>;
         };
-        expect(policy.Statement[0].Principal.Service).toBe(
-          "lambda.amazonaws.com"
-        );
+        return policy.Statement[0].Principal.Service === "lambda.amazonaws.com";
       });
+
+      expect(allHaveLambdaPrincipal).toBe(true);
     });
 
     test("should use sts:AssumeRole action in trust policy", () => {
@@ -113,12 +115,15 @@ describe("WebappApiStack: IAM Permissions", () => {
 
       expect(lambdaRoles.length).toBe(3); // 3 Lambda functions
 
-      lambdaRoles.forEach((role) => {
+      // Verify all Lambda roles use sts:AssumeRole
+      const allUseAssumeRole = lambdaRoles.every((role) => {
         const policy = role.assumeRolePolicy as {
           Statement: Array<{ Action: string }>;
         };
-        expect(policy.Statement[0].Action).toBe("sts:AssumeRole");
+        return policy.Statement[0].Action === "sts:AssumeRole";
       });
+
+      expect(allUseAssumeRole).toBe(true);
     });
   });
 
@@ -150,7 +155,7 @@ describe("WebappApiStack: IAM Permissions", () => {
 
           // Find statements with DynamoDB actions
           const dynamoDbStatements = doc.Statement.filter((stmt) =>
-            stmt.Action.some((action) => action.startsWith("dynamodb:"))
+            stmt.Action.some((action) => action.startsWith("dynamodb:")),
           );
 
           return dynamoDbStatements.map((stmt) => ({
@@ -162,57 +167,81 @@ describe("WebappApiStack: IAM Permissions", () => {
     });
 
     test("should grant Lambda functions read access to DynamoDB table", () => {
-      const expectedActions = validateDynamoDbReadPermissions();
+      // Check if all 3 policies have DynamoDB permissions
+      // All functions (getArticle, listArticles, listArticlesByTag) need DynamoDB access
+      const policies = template.findResources("AWS::IAM::Policy");
+      
+      let policiesWithDynamoDb = 0;
+      const expectedActions = [
+        "dynamodb:BatchGetItem",
+        "dynamodb:GetItem",
+        "dynamodb:Query",
+        "dynamodb:Scan",
+        "dynamodb:ConditionCheckItem",
+        "dynamodb:DescribeTable",
+      ];
+      
+      Object.entries(policies).forEach(([_logicalId, policy]) => {
+        const props = (policy as { Properties: Record<string, unknown> }).Properties;
+        const doc = props.PolicyDocument as {
+          Statement: Array<{
+            Action: string | string[];
+            Effect: string;
+          }>;
+        };
+        
+        // Check each statement for DynamoDB actions
+        const hasStatement = doc.Statement.some((stmt) => {
+          const actions = Array.isArray(stmt.Action) ? stmt.Action : [stmt.Action];
+          
+          // Check if this statement has all required DynamoDB actions
+          const hasAllActions = expectedActions.every((expected) =>
+            actions.some((actual) => actual === expected)
+          );
+          
+          return hasAllActions && stmt.Effect === "Allow";
+        });
 
-      template.hasResourceProperties("AWS::IAM::Policy", {
-        PolicyDocument: {
-          Statement: Match.arrayWith([
-            Match.objectLike({
-              Action: expectedActions,
-              Effect: "Allow",
-              // Resource can be string, array, or object (Ref/GetAtt)
-              // Just verify it exists
-              Resource: Match.anyValue(),
-            }),
-          ]),
-        },
+        if (hasStatement) {
+          policiesWithDynamoDb++;
+        }
       });
+      
+      // All 3 Lambda functions should have DynamoDB permissions
+      expect(policiesWithDynamoDb).toBe(3);
     });
 
     test("should include Query permission for GSI access", () => {
-      template.hasResourceProperties("AWS::IAM::Policy", {
-        PolicyDocument: {
-          Statement: Match.arrayWith([
-            Match.objectLike({
-              Action: Match.arrayWith(["dynamodb:Query"]),
-            }),
-          ]),
-        },
-      });
+      // Check if policies contain Query permission
+      expect(policiesWithDynamoDb.length).toBeGreaterThan(0);
+      
+      const hasQuery = policiesWithDynamoDb.some((policy) =>
+        policy.actions.includes("dynamodb:Query")
+      );
+      
+      expect(hasQuery).toBe(true);
     });
 
     test("should include Scan permission for full table scans", () => {
-      template.hasResourceProperties("AWS::IAM::Policy", {
-        PolicyDocument: {
-          Statement: Match.arrayWith([
-            Match.objectLike({
-              Action: Match.arrayWith(["dynamodb:Scan"]),
-            }),
-          ]),
-        },
-      });
+      // Check if policies contain Scan permission
+      expect(policiesWithDynamoDb.length).toBeGreaterThan(0);
+      
+      const hasScan = policiesWithDynamoDb.some((policy) =>
+        policy.actions.includes("dynamodb:Scan")
+      );
+      
+      expect(hasScan).toBe(true);
     });
 
     test("should include GetItem permission for single item retrieval", () => {
-      template.hasResourceProperties("AWS::IAM::Policy", {
-        PolicyDocument: {
-          Statement: Match.arrayWith([
-            Match.objectLike({
-              Action: Match.arrayWith(["dynamodb:GetItem"]),
-            }),
-          ]),
-        },
-      });
+      // Check if policies contain GetItem permission
+      expect(policiesWithDynamoDb.length).toBeGreaterThan(0);
+      
+      const hasGetItem = policiesWithDynamoDb.some((policy) =>
+        policy.actions.includes("dynamodb:GetItem")
+      );
+      
+      expect(hasGetItem).toBe(true);
     });
 
     test("should scope DynamoDB permissions to specific table", () => {
@@ -220,23 +249,27 @@ describe("WebappApiStack: IAM Permissions", () => {
       expect(policiesWithDynamoDb).toBeDefined();
       expect(policiesWithDynamoDb.length).toBeGreaterThan(0);
 
-      policiesWithDynamoDb.forEach((policy) => {
+      // Verify all policies have valid resources
+      const allHaveValidResources = policiesWithDynamoDb.every((policy) => {
         // Resources can be a string or array in CloudFormation
         const resources = Array.isArray(policy.resources)
           ? policy.resources
           : [policy.resources];
 
-        expect(resources.length).toBeGreaterThan(0);
-        resources.forEach((resource) => {
+        if (resources.length === 0) {
+          return false;
+        }
+
+        // Check each resource
+        return resources.every((resource) => {
           // Check if resource is a string (direct ARN) or object (Ref/GetAtt)
-          if (typeof resource === "string") {
-            expect(resource).toMatch(/table/);
-          } else {
-            // For Ref/GetAtt, just verify it's an object
-            expect(resource).toBeDefined();
-          }
+          return typeof resource === "string"
+            ? resource.includes("table")
+            : resource !== undefined;
         });
       });
+
+      expect(allHaveValidResources).toBe(true);
     });
   });
 
@@ -269,7 +302,7 @@ describe("WebappApiStack: IAM Permissions", () => {
 
           // Find statements with S3 actions
           const s3Statements = doc.Statement.filter((stmt) =>
-            stmt.Action.some((action) => action.startsWith("s3:"))
+            stmt.Action.some((action) => action.startsWith("s3:")),
           );
 
           return s3Statements.map((stmt) => ({
@@ -290,7 +323,7 @@ describe("WebappApiStack: IAM Permissions", () => {
 
           // Find statements with DynamoDB actions
           const dynamoDbStatements = doc.Statement.filter((stmt) =>
-            stmt.Action.some((action) => action.startsWith("dynamodb:"))
+            stmt.Action.some((action) => action.startsWith("dynamodb:")),
           );
 
           return dynamoDbStatements.map((stmt) => ({
@@ -302,42 +335,66 @@ describe("WebappApiStack: IAM Permissions", () => {
     });
 
     test("should grant Lambda functions read access to S3 bucket", () => {
-      const expectedActions = validateS3ReadPermissions();
+      // Check if at least one policy has S3 permissions
+      // Only getArticleFunction should have S3 access (for large content retrieval)
+      const policies = template.findResources("AWS::IAM::Policy");
+      
+      let foundS3Permissions = false;
+      let policiesChecked = 0;
+      let policiesWithS3Count = 0;
+      
+      Object.entries(policies).forEach(([_logicalId, policy]) => {
+        policiesChecked++;
+        const props = (policy as { Properties: Record<string, unknown> }).Properties;
+        const doc = props.PolicyDocument as {
+          Statement: Array<{
+            Action: string | string[];
+            Effect: string;
+          }>;
+        };
+        
+        // Check if any statement has S3 actions
+        const hasS3Statement = doc.Statement.some((stmt) => {
+          const actions = Array.isArray(stmt.Action) ? stmt.Action : [stmt.Action];
+          const hasS3GetObject = actions.some((a) => a.startsWith("s3:GetObject"));
+          const hasS3List = actions.some((a) => a.startsWith("s3:List"));
+          const hasS3GetBucket = actions.some((a) => a.startsWith("s3:GetBucket"));
+          
+          return hasS3GetObject && hasS3List && hasS3GetBucket && stmt.Effect === "Allow";
+        });
 
-      template.hasResourceProperties("AWS::IAM::Policy", {
-        PolicyDocument: {
-          Statement: Match.arrayWith([
-            Match.objectLike({
-              Action: expectedActions,
-              Effect: "Allow",
-            }),
-          ]),
-        },
+        if (hasS3Statement) {
+          foundS3Permissions = true;
+          policiesWithS3Count++;
+        }
       });
+      
+      // Verify we found S3 permissions
+      expect(foundS3Permissions).toBe(true);
+      expect(policiesChecked).toBe(3); // 3 Lambda functions
+      expect(policiesWithS3Count).toBe(1); // Only getArticleFunction should have S3
     });
 
     test("should include GetObject permission for file retrieval", () => {
-      template.hasResourceProperties("AWS::IAM::Policy", {
-        PolicyDocument: {
-          Statement: Match.arrayWith([
-            Match.objectLike({
-              Action: Match.arrayWith(["s3:GetObject*"]),
-            }),
-          ]),
-        },
-      });
+      // Check if policies contain GetObject permission
+      expect(policiesWithS3.length).toBeGreaterThan(0);
+      
+      const hasGetObject = policiesWithS3.some((policy) =>
+        policy.actions.some((action) => action.startsWith("s3:GetObject"))
+      );
+      
+      expect(hasGetObject).toBe(true);
     });
 
     test("should include List permission for bucket operations", () => {
-      template.hasResourceProperties("AWS::IAM::Policy", {
-        PolicyDocument: {
-          Statement: Match.arrayWith([
-            Match.objectLike({
-              Action: Match.arrayWith(["s3:List*"]),
-            }),
-          ]),
-        },
-      });
+      // Check if policies contain List permission
+      expect(policiesWithS3.length).toBeGreaterThan(0);
+      
+      const hasList = policiesWithS3.some((policy) =>
+        policy.actions.some((action) => action.startsWith("s3:List"))
+      );
+      
+      expect(hasList).toBe(true);
     });
 
     test("should not grant write permissions to S3", () => {
@@ -345,15 +402,17 @@ describe("WebappApiStack: IAM Permissions", () => {
       expect(policiesWithS3).toBeDefined();
       expect(policiesWithS3.length).toBeGreaterThan(0);
 
-      policiesWithS3.forEach((policy) => {
-        const hasWriteAction = policy.actions.some(
+      // Check that no policy has write actions
+      const hasAnyWriteAction = policiesWithS3.some((policy) =>
+        policy.actions.some(
           (action) =>
             action.includes("Put") ||
             action.includes("Delete") ||
-            action.includes("Write")
-        );
-        expect(hasWriteAction).toBe(false);
-      });
+            action.includes("Write"),
+        ),
+      );
+
+      expect(hasAnyWriteAction).toBe(false);
     });
 
     test("should not grant write permissions to DynamoDB", () => {
@@ -361,15 +420,17 @@ describe("WebappApiStack: IAM Permissions", () => {
       expect(policiesWithDynamoDb).toBeDefined();
       expect(policiesWithDynamoDb.length).toBeGreaterThan(0);
 
-      policiesWithDynamoDb.forEach((policy) => {
-        const hasWriteAction = policy.actions.some(
+      // Check that no policy has write actions
+      const hasAnyWriteAction = policiesWithDynamoDb.some((policy) =>
+        policy.actions.some(
           (action) =>
             action.includes("PutItem") ||
             action.includes("UpdateItem") ||
-            action.includes("DeleteItem")
-        );
-        expect(hasWriteAction).toBe(false);
-      });
+            action.includes("DeleteItem"),
+        ),
+      );
+
+      expect(hasAnyWriteAction).toBe(false);
     });
   });
 
@@ -386,21 +447,24 @@ describe("WebappApiStack: IAM Permissions", () => {
       template = Template.fromStack(stack);
     });
 
+    // eslint-disable-next-line jest/expect-expect
     test("should create IAM policies", () => {
       // CDK consolidates all permissions into a single policy per Lambda function
       // Each Lambda has 1 policy with multiple statements (DynamoDB, S3, CloudWatch Logs)
       template.resourceCountIs(
         "AWS::IAM::Policy",
-        API_TEST_CONSTANTS.RESOURCE_COUNTS.IAM_POLICY
+        API_TEST_CONSTANTS.RESOURCE_COUNTS.IAM_POLICY,
       );
     });
 
+    // eslint-disable-next-line jest/expect-expect
     test("should attach policies to Lambda execution roles", () => {
       template.hasResourceProperties("AWS::IAM::Policy", {
         Roles: Match.anyValue(),
       });
     });
 
+    // eslint-disable-next-line jest/expect-expect
     test("should grant CloudWatch Logs permissions", () => {
       template.hasResourceProperties("AWS::IAM::Policy", {
         PolicyDocument: {

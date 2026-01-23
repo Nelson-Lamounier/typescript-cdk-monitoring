@@ -234,3 +234,219 @@ export function buildExportName(
 export function shouldExportOutputs(envName: string): boolean {
   return !envName.includes("pipeline");
 }
+
+// ============================================================================
+// TEST DEBUGGING HELPERS
+// ============================================================================
+
+/**
+ * Debug helper: Print all IAM policies found in template
+ *
+ * Useful for troubleshooting test failures when policies aren't found
+ *
+ * @param template - CDK Template to inspect
+ * @returns Array of policy summaries with their statements
+ */
+export function debugIamPolicies(template: {
+  findResources: (type: string) => Record<string, unknown>;
+}) {
+  const policies = template.findResources("AWS::IAM::Policy");
+  const policySummaries = Object.entries(policies).map(([logicalId, policy]) => {
+    const props = (policy as { Properties: Record<string, unknown> })
+      .Properties;
+    const doc = props.PolicyDocument as {
+      Statement: Array<{
+        Action: string | string[];
+        Resource: string | string[];
+        Effect: string;
+      }>;
+    };
+
+    return {
+      logicalId,
+      policyName: props.PolicyName as string,
+      roles: props.Roles as string[] | string | undefined,
+      statements: doc.Statement.map((stmt) => ({
+        effect: stmt.Effect,
+        actions: Array.isArray(stmt.Action) ? stmt.Action : [stmt.Action],
+        resources: Array.isArray(stmt.Resource)
+          ? stmt.Resource
+          : [stmt.Resource],
+      })),
+    };
+  });
+
+  console.log("\n=== IAM Policies Found ===");
+  console.log(`Total policies: ${policySummaries.length}\n`);
+
+  policySummaries.forEach((policy, index) => {
+    console.log(`Policy ${index + 1}: ${policy.logicalId}`);
+    console.log(`  Name: ${policy.policyName}`);
+    console.log(`  Roles: ${JSON.stringify(policy.roles, null, 2)}`);
+    console.log(`  Statements (${policy.statements.length}):`);
+
+    policy.statements.forEach((stmt, stmtIndex) => {
+      console.log(`    Statement ${stmtIndex + 1}:`);
+      console.log(`      Effect: ${stmt.effect}`);
+      console.log(`      Actions (${stmt.actions.length}):`);
+      
+      // Group actions by service for better readability
+      const actionGroups: Record<string, string[]> = {};
+      stmt.actions.forEach((action) => {
+        const service = action.split(":")[0];
+        if (!actionGroups[service]) {
+          actionGroups[service] = [];
+        }
+        actionGroups[service].push(action);
+      });
+      
+      Object.entries(actionGroups).forEach(([service, actions]) => {
+        console.log(`        ${service}:`);
+        actions.forEach((action) => console.log(`          - ${action}`));
+      });
+      
+      console.log(`      Resources (${stmt.resources.length}):`);
+      stmt.resources.forEach((resource) => {
+        const resourceStr = typeof resource === "string" 
+          ? resource 
+          : JSON.stringify(resource);
+        console.log(`        - ${resourceStr}`);
+      });
+    });
+    console.log("");
+  });
+
+  return policySummaries;
+}
+
+/**
+ * Debug helper: Find policies with specific action prefix
+ *
+ * @param template - CDK Template to inspect
+ * @param actionPrefix - Action prefix to search for (e.g., "s3:", "dynamodb:")
+ * @returns Array of matching statements
+ */
+export function debugPoliciesWithAction(
+  template: {
+    findResources: (type: string) => Record<string, unknown>;
+  },
+  actionPrefix: string
+) {
+  const policies = template.findResources("AWS::IAM::Policy");
+  const matchingStatements: Array<{
+    logicalId: string;
+    policyName: string;
+    statement: {
+      effect: string;
+      actions: string[];
+      resources: string[];
+    };
+  }> = [];
+
+  Object.entries(policies).forEach(([logicalId, policy]) => {
+    const props = (policy as { Properties: Record<string, unknown> })
+      .Properties;
+    const doc = props.PolicyDocument as {
+      Statement: Array<{
+        Action: string | string[];
+        Resource: string | string[];
+        Effect: string;
+      }>;
+    };
+
+    doc.Statement.forEach((stmt) => {
+      const actions = Array.isArray(stmt.Action) ? stmt.Action : [stmt.Action];
+      const hasMatchingAction = actions.some((action) =>
+        String(action).startsWith(actionPrefix)
+      );
+
+      if (hasMatchingAction) {
+        matchingStatements.push({
+          logicalId,
+          policyName: props.PolicyName as string,
+          statement: {
+            effect: stmt.Effect,
+            actions: actions.map(String),
+            resources: Array.isArray(stmt.Resource)
+              ? stmt.Resource.map(String)
+              : [String(stmt.Resource)],
+          },
+        });
+      }
+    });
+  });
+
+  console.log(
+    `\n=== Policies with ${actionPrefix} actions ===`
+  );
+  console.log(`Found ${matchingStatements.length} matching statement(s)\n`);
+
+  matchingStatements.forEach((match, index) => {
+    console.log(`Match ${index + 1}:`);
+    console.log(`  Policy: ${match.logicalId} (${match.policyName})`);
+    console.log(`  Effect: ${match.statement.effect}`);
+    console.log(`  Actions:`);
+    match.statement.actions.forEach((action) => {
+      const isMatch = action.startsWith(actionPrefix);
+      console.log(
+        `    ${isMatch ? "✓" : " "} ${action}${isMatch ? " ← MATCHES" : ""}`
+      );
+    });
+    console.log(`  Resources:`);
+    match.statement.resources.forEach((resource) =>
+      console.log(`    - ${resource}`)
+    );
+    console.log("");
+  });
+
+  return matchingStatements;
+}
+
+/**
+ * Debug helper: Print expected vs actual actions
+ *
+ * @param expectedActions - Expected actions (from Match.arrayWith or array)
+ * @param actualActions - Actual actions found in template
+ * @param actionPrefix - Optional prefix to filter (e.g., "s3:", "dynamodb:")
+ */
+export function debugActionComparison(
+  expectedActions: string[] | ReturnType<typeof Match.arrayWith>,
+  actualActions: string[],
+  actionPrefix?: string
+) {
+  // For Match.arrayWith, we can't extract the values directly
+  // So we'll just show what we're looking for
+  if (!Array.isArray(expectedActions)) {
+    console.log(
+      "\n=== Action Comparison (Match.arrayWith pattern) ==="
+    );
+    console.log("Note: Match.arrayWith requires ALL listed actions to be present\n");
+  }
+
+  const filteredActual = actionPrefix
+    ? actualActions.filter((action) => action.startsWith(actionPrefix))
+    : actualActions;
+
+  console.log("Expected actions (all must be present):");
+  if (Array.isArray(expectedActions)) {
+    expectedActions.forEach((action) => {
+      const found = filteredActual.includes(action);
+      console.log(`  ${found ? "✓" : "✗"} ${action}${found ? "" : " ← MISSING"}`);
+    });
+  } else {
+    console.log("  (Match.arrayWith pattern - cannot extract exact values)");
+  }
+
+  console.log("\nActual actions found:");
+  if (filteredActual.length === 0) {
+    console.log("  (none)");
+  } else {
+    filteredActual.forEach((action) => {
+      const isExpected = Array.isArray(expectedActions)
+        ? expectedActions.includes(action)
+        : true; // Can't check for Match patterns
+      console.log(`  ${isExpected ? "✓" : "?"} ${action}`);
+    });
+  }
+  console.log("");
+}

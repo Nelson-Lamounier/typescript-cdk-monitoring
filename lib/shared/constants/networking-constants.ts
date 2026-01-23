@@ -116,12 +116,12 @@ export const VPC_PEERING_LAMBDA_HANDLERS = {
   /**
    * Lambda handler for creating and accepting VPC peering connections
    */
-  CREATE_ACCEPT: "handlers/vpc-peering-create-accept.ts",
+  CREATE_ACCEPT: "lambda/handlers/custom-resources/vpc-peering-create-accept.ts",
 
   /**
    * Lambda handler for updating route tables in peer VPC
    */
-  UPDATE_ROUTES: "handlers/vpc-peering-routes.ts",
+  UPDATE_ROUTES: "lambda/handlers/custom-resources/vpc-peering-routes.ts",
 } as const;
 
 /**
