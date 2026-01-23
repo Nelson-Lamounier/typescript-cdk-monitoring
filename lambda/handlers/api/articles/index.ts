@@ -6,6 +6,6 @@
  * API Gateway Lambda handlers for article operations.
  */
 
-export { handler as getArticleHandler } from "./get-article";
-export { handler as listArticlesHandler } from "./list-articles";
-export { handler as listArticlesByTagHandler } from "./list-articles-by-tag";
+export * as getArticle from "./get-article";
+export * as listArticles from "./list-articles";
+export * as listArticlesByTag from "./list-articles-by-tag";
