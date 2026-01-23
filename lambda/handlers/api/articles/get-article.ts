@@ -14,6 +14,13 @@ import {
   Context,
 } from "aws-lambda";
 
+import {
+  createCachedResponse,
+  createNotFoundResponse,
+  createBadRequestResponse,
+  createInternalServerErrorResponse,
+} from "../../../shared/api-response";
+
 // ========================================================================
 // ENVIRONMENT VARIABLES
 // ========================================================================
@@ -89,41 +96,6 @@ interface ArticleResponse {
 // ========================================================================
 
 /**
- * Create standardised API response
- */
-function createResponse(
-  statusCode: number,
-  body: object | string,
-  headers?: Record<string, string>
-): APIGatewayProxyResult {
-  return {
-    statusCode,
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*", // Configure per environment
-      "Access-Control-Allow-Credentials": "true",
-      ...headers,
-    },
-    body: typeof body === "string" ? body : JSON.stringify(body),
-  };
-}
-
-/**
- * Create error response
- */
-function createErrorResponse(
-  statusCode: number,
-  error: string,
-  details?: string
-): APIGatewayProxyResult {
-  return createResponse(statusCode, {
-    error,
-    details,
-    timestamp: new Date().toISOString(),
-  });
-}
-
-/**
  * Validate required environment variables
  */
 function validateEnvironment(): string | null {
@@ -173,14 +145,13 @@ export async function handler(
   const envError = validateEnvironment();
   if (envError) {
     console.error("Environment validation failed:", envError);
-    return createErrorResponse(500, "Internal server error", envError);
+    return createInternalServerErrorResponse(envError);
   }
 
   // Extract slug from path parameters
   const slug = extractSlug(event);
   if (!slug) {
-    return createErrorResponse(
-      400,
+    return createBadRequestResponse(
       "Bad Request",
       "Slug is required in path parameters"
     );
@@ -207,7 +178,7 @@ export async function handler(
 
     if (!metadataResult.Item) {
       console.warn(`Article not found: ${slug}`);
-      return createErrorResponse(404, "Not Found", `Article '${slug}' not found`);
+      return createNotFoundResponse("Article", slug);
     }
 
     const metadata = unmarshall(metadataResult.Item) as ArticleMetadata;
@@ -216,7 +187,7 @@ export async function handler(
     const isAdmin = event.queryStringParameters?.admin === "true";
     if (!isAdmin && metadata.status !== "published") {
       console.warn(`Article not published: ${slug}, status: ${metadata.status}`);
-      return createErrorResponse(404, "Not Found", `Article '${slug}' not found`);
+      return createNotFoundResponse("Article", slug);
     }
 
     // ========================================
@@ -242,11 +213,7 @@ export async function handler(
 
     if (!contentResult.Items || contentResult.Items.length === 0) {
       console.warn(`No content found for article: ${slug}`);
-      return createErrorResponse(
-        404,
-        "Not Found",
-        `Content not found for article '${slug}'`
-      );
+      return createNotFoundResponse("Content", slug);
     }
 
     const content = unmarshall(contentResult.Items[0]) as ArticleContent;
@@ -262,21 +229,15 @@ export async function handler(
 
     console.log(`Successfully retrieved article: ${slug}`);
 
-    return createResponse(200, response, {
-      "Cache-Control": "public, max-age=300, stale-while-revalidate=60",
-    });
+    return createCachedResponse(response);
   } catch (error) {
     console.error("Error fetching article:", error);
 
     // Handle specific AWS SDK errors
     if (error instanceof Error) {
-      return createErrorResponse(500, "Internal server error", error.message);
+      return createInternalServerErrorResponse(error);
     }
 
-    return createErrorResponse(
-      500,
-      "Internal server error",
-      "An unknown error occurred"
-    );
+    return createInternalServerErrorResponse("An unknown error occurred");
   }
 }

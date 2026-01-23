@@ -12,13 +12,20 @@ import {
   Context,
 } from "aws-lambda";
 
+import {
+  createCachedResponse,
+  createBadRequestResponse,
+  createInternalServerErrorResponse,
+  createResponse,
+} from "../../../shared/api-response";
+
 // ========================================================================
 // ENVIRONMENT VARIABLES
 // ========================================================================
 
 const TABLE_NAME = process.env.TABLE_NAME || "";
 const REGION = process.env.AWS_REGION || "eu-west-1";
-const GSI1_NAME = process.env.GSI1_NAME || "gsi1-status-date";
+const GSI2_NAME = process.env.GSI2_NAME || "gsi2-tag-date";
 
 // ========================================================================
 // AWS SDK CLIENTS
@@ -50,9 +57,12 @@ interface ArticleMetadata {
   version: number;
   gsi1pk: string;
   gsi1sk: string;
+  gsi2pk?: string;
+  gsi2sk?: string;
 }
 
-interface ListArticlesResponse {
+interface ListArticlesByTagResponse {
+  tag: string;
   articles: ArticleMetadata[];
   nextToken?: string;
   count: number;
@@ -63,51 +73,23 @@ interface ListArticlesResponse {
 // ========================================================================
 
 /**
- * Create standardised API response
- */
-function createResponse(
-  statusCode: number,
-  body: object | string,
-  headers?: Record<string, string>
-): APIGatewayProxyResult {
-  return {
-    statusCode,
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*", // Configure per environment
-      "Access-Control-Allow-Credentials": "true",
-      ...headers,
-    },
-    body: typeof body === "string" ? body : JSON.stringify(body),
-  };
-}
-
-/**
- * Create error response
- */
-function createErrorResponse(
-  statusCode: number,
-  error: string,
-  details?: string
-): APIGatewayProxyResult {
-  return createResponse(statusCode, {
-    error,
-    details,
-    timestamp: new Date().toISOString(),
-  });
-}
-
-/**
  * Validate required environment variables
  */
 function validateEnvironment(): string | null {
   if (!TABLE_NAME) {
     return "TABLE_NAME environment variable is not set";
   }
-  if (!GSI1_NAME) {
-    return "GSI1_NAME environment variable is not set";
+  if (!GSI2_NAME) {
+    return "GSI2_NAME environment variable is not set";
   }
   return null;
+}
+
+/**
+ * Extract tag from path parameters
+ */
+function extractTag(event: APIGatewayProxyEvent): string | null {
+  return event.pathParameters?.tag || null;
 }
 
 /**
@@ -127,45 +109,31 @@ function parsePaginationParams(event: APIGatewayProxyEvent): {
   return { limit, nextToken };
 }
 
-/**
- * Parse status filter from query string
- */
-function parseStatusFilter(event: APIGatewayProxyEvent): string {
-  const queryParams = event.queryStringParameters || {};
-  const status = queryParams.status || "published";
-
-  // Validate status
-  const validStatuses = ["draft", "published", "archived"];
-  if (!validStatuses.includes(status)) {
-    return "published";
-  }
-
-  return status;
-}
-
 // ========================================================================
-// LAMBDA HANDLER: LIST ARTICLES
+// LAMBDA HANDLER: LIST ARTICLES BY TAG
 // ========================================================================
 
 /**
- * List articles with pagination and filtering
+ * List articles by tag with pagination
  *
- * GET /articles
+ * GET /articles/tag/{tag}
  *
  * Query Parameters:
- * - status: Filter by status (draft|published|archived) - default: published
  * - limit: Number of items per page (1-100) - default: 10
  * - nextToken: Pagination token from previous response
  *
  * Returns:
- * - 200: List of articles with pagination
- * - 400: Invalid query parameters
+ * - 200: List of articles for the tag
+ * - 400: Invalid query parameters or missing tag
  * - 500: Internal server error
  *
  * Query Pattern:
- * Uses GSI1 (gsi1-status-date) to query articles by status
- * - gsi1pk = "STATUS#<status>"
- * - gsi1sk = "<date>#<slug>" (sorted by date descending)
+ * Uses GSI2 (gsi2-tag-date) to query articles by tag
+ * - gsi2pk = "TAG#<tag>"
+ * - gsi2sk = "<date>#<slug>" (sorted by date descending)
+ *
+ * Note: For each tag on an article, a separate item exists in GSI2
+ * This enables efficient tag-based queries
  *
  * @param event - API Gateway event
  * @param context - Lambda context
@@ -181,24 +149,35 @@ export async function handler(
   const envError = validateEnvironment();
   if (envError) {
     console.error("Environment validation failed:", envError);
-    return createErrorResponse(500, "Internal server error", envError);
+    return createInternalServerErrorResponse(envError);
   }
+
+  // Extract tag from path parameters
+  const tag = extractTag(event);
+  if (!tag) {
+    return createBadRequestResponse(
+      "Bad Request",
+      "Tag is required in path parameters"
+    );
+  }
+
+  // Decode tag (URL encoded)
+  const decodedTag = decodeURIComponent(tag);
 
   // Parse query parameters
   const { limit, nextToken } = parsePaginationParams(event);
-  const status = parseStatusFilter(event);
 
   try {
     // ========================================
-    // QUERY ARTICLES BY STATUS
+    // QUERY ARTICLES BY TAG
     // ========================================
 
     const queryParams: QueryCommandInput = {
       TableName: TABLE_NAME,
-      IndexName: GSI1_NAME,
-      KeyConditionExpression: "gsi1pk = :gsi1pk",
+      IndexName: GSI2_NAME,
+      KeyConditionExpression: "gsi2pk = :gsi2pk",
       ExpressionAttributeValues: {
-        ":gsi1pk": { S: `STATUS#${status}` },
+        ":gsi2pk": { S: `TAG#${decodedTag}` },
       },
       ScanIndexForward: false, // Latest first (descending by date)
       Limit: limit,
@@ -212,20 +191,23 @@ export async function handler(
         );
       } catch (error) {
         console.error("Invalid pagination token:", error);
-        return createErrorResponse(
-          400,
+        return createBadRequestResponse(
           "Bad Request",
           "Invalid pagination token"
         );
       }
     }
 
-    console.log("Querying articles:", JSON.stringify(queryParams, null, 2));
+    console.log(
+      "Querying articles by tag:",
+      JSON.stringify(queryParams, null, 2)
+    );
 
     const result = await dynamoClient.send(new QueryCommand(queryParams));
 
-    if (!result.Items) {
+    if (!result.Items || result.Items.length === 0) {
       return createResponse(200, {
+        tag: decodedTag,
         articles: [],
         count: 0,
       });
@@ -239,6 +221,12 @@ export async function handler(
       unmarshall(item)
     ) as ArticleMetadata[];
 
+    // Filter out non-published articles (unless admin mode)
+    const isAdmin = event.queryStringParameters?.admin === "true";
+    const filteredArticles = isAdmin
+      ? articles
+      : articles.filter((article) => article.status === "published");
+
     // Generate next token if there are more results
     let responseNextToken: string | undefined;
     if (result.LastEvaluatedKey) {
@@ -247,31 +235,26 @@ export async function handler(
       ).toString("base64");
     }
 
-    const response: ListArticlesResponse = {
-      articles,
-      count: articles.length,
+    const response: ListArticlesByTagResponse = {
+      tag: decodedTag,
+      articles: filteredArticles,
+      count: filteredArticles.length,
       ...(responseNextToken && { nextToken: responseNextToken }),
     };
 
     console.log(
-      `Successfully retrieved ${articles.length} articles (status: ${status})`
+      `Successfully retrieved ${filteredArticles.length} articles for tag: ${decodedTag}`
     );
 
-    return createResponse(200, response, {
-      "Cache-Control": "public, max-age=300, stale-while-revalidate=60",
-    });
+    return createCachedResponse(response);
   } catch (error) {
-    console.error("Error listing articles:", error);
+    console.error("Error listing articles by tag:", error);
 
     // Handle specific AWS SDK errors
     if (error instanceof Error) {
-      return createErrorResponse(500, "Internal server error", error.message);
+      return createInternalServerErrorResponse(error);
     }
 
-    return createErrorResponse(
-      500,
-      "Internal server error",
-      "An unknown error occurred"
-    );
+    return createInternalServerErrorResponse("An unknown error occurred");
   }
 }
