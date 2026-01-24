@@ -1,0 +1,724 @@
+# @format
+# @description Deploy Monitoring to Staging - Synthesizes and stores immutable artifacts
+
+name: Deploy Monitoring to Staging
+
+on:
+  push:
+    branches:
+      - staging
+    paths:
+      - "lib/stacks/**"
+      - "lib/constructs/**"
+      - "lib/shared/**"
+      - "bin/**"
+      - "config/**"
+      - "lambda/**"
+      - ".github/workflows/deploy-monitoring-staging.yml"
+      - ".github/actions/**"
+  workflow_dispatch:
+    inputs:
+      skip_verification:
+        description: "Skip post-deployment verification (use for hotfixes only)"
+        type: boolean
+        default: false
+
+env:
+  NODE_VERSION: "22"
+  AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-1' }}
+  ENVIRONMENT: "staging"
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-monitoring-staging-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ===========================================================================
+  # Setup, Build & Synthesize
+  # ===========================================================================
+  setup-and-synthesize:
+    name: Setup, Build & Synthesize
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: staging
+    outputs:
+      aws-account-id: ${{ steps.account-id.outputs.account_id }}
+      commit-sha: ${{ steps.commit-info.outputs.sha }}
+      commit-short-sha: ${{ steps.commit-info.outputs.short_sha }}
+      synthesis-timestamp: ${{ steps.synthesis.outputs.timestamp }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Record Commit Information
+        id: commit-info
+        run: |
+          echo "sha=${{ github.sha }}" >> $GITHUB_OUTPUT
+          echo "short_sha=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+          echo "Deploying commit: ${{ github.sha }}"
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Get AWS Account ID
+        id: account-id
+        run: |
+          ACCOUNT_ID="${{ vars.AWS_ACCOUNT_ID_STAGING }}"
+          if [ -z "$ACCOUNT_ID" ]; then
+            echo "ERROR: AWS_ACCOUNT_ID_STAGING not configured in environment variables"
+            echo "Configure in: Settings > Environments > staging > Environment variables"
+            echo ""
+            echo "Required environment variables:"
+            echo "  - AWS_ACCOUNT_ID_STAGING: Your AWS account ID (12 digits)"
+            echo ""
+            exit 1
+          fi
+          
+          # Validate format
+          if ! [[ "$ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+            echo "ERROR: Invalid AWS account ID format: $ACCOUNT_ID"
+            echo "Expected format: 12-digit number (e.g., 123456789012)"
+            exit 1
+          fi
+          
+          # Mask account ID in logs
+          echo "::add-mask::$ACCOUNT_ID"
+          echo "account_id=$ACCOUNT_ID" >> $GITHUB_OUTPUT
+          echo "Deploying to account: ***${ACCOUNT_ID: -4}"
+
+      - name: Build TypeScript
+        run: yarn build
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_STAGING }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Synthesize CDK Templates
+        id: synthesis
+        run: |
+          TIMESTAMP=$(date -u '+%Y%m%d-%H%M%S')
+          echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+          
+          echo "Synthesizing CDK templates for staging..."
+          echo "Commit SHA: ${{ github.sha }}"
+          echo "Timestamp: $TIMESTAMP"
+          
+          # Synthesize all stacks
+          npx cdk synth \
+            --context environment=${{ env.ENVIRONMENT }} \
+            --context account=${{ steps.account-id.outputs.account_id }} \
+            --context region=${{ env.AWS_REGION }} \
+            --output cdk.out \
+            --quiet
+          
+          # Record synthesis metadata
+          cat > cdk.out/synthesis-metadata.json << EOF
+          {
+            "commitSha": "${{ github.sha }}",
+            "shortSha": "${GITHUB_SHA::8}",
+            "timestamp": "$TIMESTAMP",
+            "environment": "${{ env.ENVIRONMENT }}",
+            "region": "${{ env.AWS_REGION }}",
+            "synthesizedBy": "deploy-monitoring-staging.yml",
+            "workflowRunId": "${{ github.run_id }}",
+            "workflowRunNumber": "${{ github.run_number }}"
+          }
+          EOF
+          
+          echo "Synthesis complete. Templates ready for deployment."
+
+      - name: Upload Synthesized Templates
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdk-out-staging-${{ steps.commit-info.outputs.short_sha }}
+          path: cdk.out/
+          retention-days: 60
+          if-no-files-found: error
+
+      - name: Upload CDK Synthesis for Security Scan
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdk-synthesis
+          path: cdk.out/
+          retention-days: 7
+          if-no-files-found: error
+
+  # ===========================================================================
+  # IaC Security Scan (Blocking for Staging)
+  # ===========================================================================
+  iac-security-scan:
+    name: IaC Security Scan
+    needs: setup-and-synthesize
+    uses: ./.github/workflows/_iac-security-scan.yml
+    with:
+      environment: "staging"
+      enforce-blocking: true
+      cdk-output-path: "cdk.out"
+      skip-checks: ""
+      soft-fail-on: "LOW"
+
+  # ===========================================================================
+  # Deploy Networking Stack
+  # ===========================================================================
+  deploy-networking:
+    name: Deploy Networking
+    needs: [setup-and-synthesize, iac-security-scan]
+    if: needs.iac-security-scan.outputs.scan-passed == 'true'
+    uses: ./.github/workflows/_deploy-stack.yml
+    with:
+      stack-name: "staging-Networking"
+      environment: "staging"
+      aws-account-id: ${{ needs.setup-and-synthesize.outputs.aws-account-id }}
+      aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
+      require-approval: "never"
+      verify-bootstrap: false
+      outputs-directory: "deployment-outputs"
+    secrets:
+      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_STAGING }}
+
+  # ===========================================================================
+  # Verify Networking Stack
+  # ===========================================================================
+  verify-networking:
+    name: Verify Networking
+    needs: [setup-and-synthesize, deploy-networking]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: staging
+    if: inputs.skip_verification != true
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download Stack Outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: staging-Networking-outputs
+          path: deployment-outputs
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_STAGING }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Verify AWS Account
+        run: |
+          echo "=== AWS Account Verification ==="
+          CURRENT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+          TARGET_ACCOUNT="${{ needs.setup-and-synthesize.outputs.aws-account-id }}"
+          
+          # Mask account IDs
+          echo "::add-mask::$CURRENT_ACCOUNT"
+          echo "::add-mask::$TARGET_ACCOUNT"
+          
+          if [ "$CURRENT_ACCOUNT" != "$TARGET_ACCOUNT" ]; then
+            echo ""
+            echo "ERROR: AWS_OIDC_ROLE_STAGING is configured for wrong account"
+            exit 1
+          fi
+          
+          echo "Authenticated to correct staging account"
+
+      - name: Verify Networking Stack
+        run: |
+          echo "Verifying Networking Stack deployment..."
+          
+          npx tsx scripts/integration/deployment/monitoring/verify-networking-stack.ts \
+            --environment ${{ env.ENVIRONMENT }} \
+            --aws-region ${{ env.AWS_REGION }} \
+            --outputs-file deployment-outputs/staging-Networking-outputs.json \
+            --report-file verification-reports/staging-networking-verification.json
+      
+      - name: Upload Verification Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-networking-verification-report
+          path: verification-reports/staging-networking-verification.json
+          retention-days: 60
+          if-no-files-found: warn
+
+  # ===========================================================================
+  # Deploy EFS Stack
+  # ===========================================================================
+  deploy-efs:
+    name: Deploy EFS
+    needs: [setup-and-synthesize, deploy-networking, verify-networking]
+    if: always() && needs.deploy-networking.result == 'success' && (needs.verify-networking.result == 'success' || needs.verify-networking.result == 'skipped')
+    uses: ./.github/workflows/_deploy-stack.yml
+    with:
+      stack-name: "staging-MonitoringEfs"
+      environment: "staging"
+      aws-account-id: ${{ needs.setup-and-synthesize.outputs.aws-account-id }}
+      aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
+      require-approval: "never"
+      outputs-directory: "deployment-outputs"
+    secrets:
+      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_STAGING }}
+
+  # ===========================================================================
+  # Verify EFS Stack
+  # ===========================================================================
+  verify-efs:
+    name: Verify EFS
+    needs: [setup-and-synthesize, deploy-efs]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: staging
+    if: always() && needs.deploy-efs.result == 'success' && inputs.skip_verification != true
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_STAGING }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Verify EFS Stack
+        run: |
+          echo "Verifying EFS Stack deployment..."
+          make verify-efs \
+            ENVIRONMENT=${{ env.ENVIRONMENT }} \
+            AWS_REGION=${{ env.AWS_REGION }}
+
+  # ===========================================================================
+  # Deploy Infrastructure Stack
+  # ===========================================================================
+  deploy-infra:
+    name: Deploy Infrastructure
+    needs: [setup-and-synthesize, deploy-efs, verify-efs]
+    if: always() && needs.deploy-efs.result == 'success' && (needs.verify-efs.result == 'success' || needs.verify-efs.result == 'skipped')
+    uses: ./.github/workflows/_deploy-stack.yml
+    with:
+      stack-name: "staging-MonitoringInfra"
+      environment: "staging"
+      aws-account-id: ${{ needs.setup-and-synthesize.outputs.aws-account-id }}
+      aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
+      require-approval: "never"
+      outputs-directory: "deployment-outputs"
+    secrets:
+      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_STAGING }}
+
+  # ===========================================================================
+  # Verify Infrastructure Stack
+  # ===========================================================================
+  verify-infra:
+    name: Verify Infrastructure
+    needs: [setup-and-synthesize, deploy-infra]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: staging
+    if: always() && needs.deploy-infra.result == 'success' && inputs.skip_verification != true
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_STAGING }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Verify Infrastructure Stack
+        run: |
+          echo "Verifying Infrastructure Stack deployment..."
+          yarn ts-node scripts/integration/deployment/monitoring/verify-infra-stack.ts \
+            --environment ${{ env.ENVIRONMENT }} \
+            --region ${{ env.AWS_REGION }}
+
+  # ===========================================================================
+  # Deploy Service Stack
+  # ===========================================================================
+  deploy-service:
+    name: Deploy Service
+    needs: [setup-and-synthesize, deploy-infra, verify-infra]
+    if: always() && needs.deploy-infra.result == 'success' && (needs.verify-infra.result == 'success' || needs.verify-infra.result == 'skipped')
+    uses: ./.github/workflows/_deploy-stack.yml
+    with:
+      stack-name: "staging-MonitoringService"
+      environment: "staging"
+      aws-account-id: ${{ needs.setup-and-synthesize.outputs.aws-account-id }}
+      aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
+      require-approval: "never"
+      outputs-directory: "deployment-outputs"
+    secrets:
+      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_STAGING }}
+
+  # ===========================================================================
+  # Verify Service Stack & Connectivity
+  # ===========================================================================
+  verify-service:
+    name: Verify Service
+    needs: [setup-and-synthesize, deploy-service]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: staging
+    if: always() && needs.deploy-service.result == 'success' && inputs.skip_verification != true
+    outputs:
+      alb-dns: ${{ steps.endpoints.outputs.alb_dns }}
+      smoke-test-passed: ${{ steps.smoke-test.outputs.passed }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_STAGING }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Verify Service Stack
+        run: |
+          echo "Verifying Service Stack deployment..."
+          make verify-service \
+            ENVIRONMENT=${{ env.ENVIRONMENT }} \
+            AWS_REGION=${{ env.AWS_REGION }}
+
+      - name: Verify Grafana-Prometheus Connectivity
+        run: |
+          echo "Verifying Grafana-Prometheus connectivity..."
+          make verify-grafana-prometheus \
+            ENVIRONMENT=${{ env.ENVIRONMENT }} \
+            AWS_REGION=${{ env.AWS_REGION }}
+
+      - name: Get Service Endpoints
+        id: endpoints
+        run: |
+          STACK_NAME="staging-MonitoringInfra"
+          
+          ALB_DNS=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query 'Stacks[0].Outputs[?OutputKey==`LoadBalancerDns`].OutputValue' \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -n "$ALB_DNS" ] && [ "$ALB_DNS" != "None" ]; then
+            echo "alb_dns=$ALB_DNS" >> $GITHUB_OUTPUT
+            echo "Load Balancer DNS retrieved successfully"
+          else
+            echo "WARNING: Could not retrieve ALB DNS"
+          fi
+
+      - name: Smoke Test Endpoints
+        id: smoke-test
+        if: steps.endpoints.outputs.alb_dns != ''
+        run: |
+          ALB_DNS="${{ steps.endpoints.outputs.alb_dns }}"
+          PASSED=true
+          
+          echo "Running smoke tests against endpoints..."
+          
+          # Test Grafana health endpoint
+          echo "Testing Grafana health..."
+          if curl -f -s --max-time 30 "http://${ALB_DNS}/grafana/api/health" | grep -q "ok"; then
+            echo "Grafana is healthy"
+          else
+            echo "WARNING: Grafana health check failed"
+            PASSED=false
+          fi
+          
+          # Test Prometheus metrics endpoint
+          echo "Testing Prometheus..."
+          if curl -f -s --max-time 30 "http://${ALB_DNS}/prometheus/-/healthy" | grep -q "Prometheus"; then
+            echo "Prometheus is healthy"
+          else
+            echo "WARNING: Prometheus health check failed"
+            PASSED=false
+          fi
+          
+          echo "passed=$PASSED" >> $GITHUB_OUTPUT
+
+  # ===========================================================================
+  # Create Production-Ready Artifact
+  # ===========================================================================
+  create-production-artifact:
+    name: Create Production Artifact
+    needs:
+      [
+        setup-and-synthesize,
+        deploy-networking,
+        verify-networking,
+        deploy-efs,
+        verify-efs,
+        deploy-infra,
+        verify-infra,
+        deploy-service,
+        verify-service,
+      ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: |
+      always() &&
+      needs.deploy-networking.result == 'success' &&
+      needs.deploy-efs.result == 'success' &&
+      needs.deploy-infra.result == 'success' &&
+      needs.deploy-service.result == 'success' &&
+      (needs.verify-service.outputs.smoke-test-passed == 'true' || needs.verify-service.result == 'skipped')
+    
+    outputs:
+      artifact-name: ${{ steps.artifact.outputs.name }}
+      production-ready: ${{ steps.artifact.outputs.ready }}
+    
+    steps:
+      - name: Download Synthesized Templates
+        uses: actions/download-artifact@v4
+        with:
+          name: cdk-out-staging-${{ needs.setup-and-synthesize.outputs.commit-short-sha }}
+          path: cdk.out
+
+      - name: Prepare Production Artifact
+        id: artifact
+        run: |
+          ARTIFACT_NAME="cdk-out-production-ready-${{ needs.setup-and-synthesize.outputs.commit-short-sha }}"
+          
+          # Add production deployment metadata
+          cat > cdk.out/production-readiness.json << EOF
+          {
+            "stagingDeploymentSuccessful": true,
+            "stagingVerificationPassed": true,
+            "originalCommitSha": "${{ needs.setup-and-synthesize.outputs.commit-sha }}",
+            "stagingSynthesisTimestamp": "${{ needs.setup-and-synthesize.outputs.synthesis-timestamp }}",
+            "stagingWorkflowRunId": "${{ github.run_id }}",
+            "stagingWorkflowRunNumber": "${{ github.run_number }}",
+            "productionReadyAt": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
+            "approvedForProduction": true
+          }
+          EOF
+          
+          echo "name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+          echo "ready=true" >> $GITHUB_OUTPUT
+          echo "Production artifact prepared: $ARTIFACT_NAME"
+
+      - name: Upload Production-Ready Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: cdk.out/
+          retention-days: 90
+          if-no-files-found: error
+
+  # ===========================================================================
+  # Deployment Summary
+  # ===========================================================================
+  deployment-summary:
+    name: Deployment Summary
+    needs:
+      [
+        setup-and-synthesize,
+        iac-security-scan,
+        deploy-networking,
+        verify-networking,
+        deploy-efs,
+        verify-efs,
+        deploy-infra,
+        verify-infra,
+        deploy-service,
+        verify-service,
+        create-production-artifact,
+      ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+
+    steps:
+      - name: Generate Deployment Summary
+        run: |
+          TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          COMMIT_SHA="${{ needs.setup-and-synthesize.outputs.commit-sha }}"
+          SHORT_SHA="${{ needs.setup-and-synthesize.outputs.commit-short-sha }}"
+          
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          ## Monitoring Infrastructure Deployment - Staging
+
+          **Environment**: staging
+          **Region**: ${{ env.AWS_REGION }}
+          **Commit**: ${SHORT_SHA}
+          **Timestamp**: ${TIMESTAMP}
+          **Workflow Run**: #${{ github.run_number }}
+
+          ### Security Scan
+
+          | Check | Result |
+          |-------|--------|
+          | IaC Security Scan | ${{ needs.iac-security-scan.result }} |
+
+          ### Deployment Status
+
+          | Stack | Deploy | Verify |
+          |-------|--------|--------|
+          | Networking | ${{ needs.deploy-networking.result }} | ${{ needs.verify-networking.result }} |
+          | EFS | ${{ needs.deploy-efs.result }} | ${{ needs.verify-efs.result }} |
+          | Infrastructure | ${{ needs.deploy-infra.result }} | ${{ needs.verify-infra.result }} |
+          | Service | ${{ needs.deploy-service.result }} | ${{ needs.verify-service.result }} |
+
+          ### Production Readiness
+
+          | Check | Status |
+          |-------|--------|
+          | All Stacks Deployed | ${{ needs.deploy-service.result == 'success' && needs.deploy-infra.result == 'success' && needs.deploy-efs.result == 'success' && needs.deploy-networking.result == 'success' && 'PASSED' || 'FAILED' }} |
+          | Verifications Passed | ${{ (needs.verify-service.result == 'success' || needs.verify-service.result == 'skipped') && 'PASSED' || 'FAILED' }} |
+          | Production Artifact Created | ${{ needs.create-production-artifact.result == 'success' && 'READY' || 'NOT READY' }} |
+
+          EOF
+          
+          if [ -n "${{ needs.verify-service.outputs.alb-dns }}" ]; then
+            ALB_DNS="${{ needs.verify-service.outputs.alb-dns }}"
+            cat >> $GITHUB_STEP_SUMMARY << EOF
+          ### Staging Access Points
+
+          - **Grafana Dashboard**: http://${ALB_DNS}/grafana
+          - **Prometheus Metrics**: http://${ALB_DNS}/prometheus
+
+          EOF
+          fi
+          
+          if [ "${{ needs.create-production-artifact.result }}" == "success" ]; then
+            cat >> $GITHUB_STEP_SUMMARY << EOF
+          ### Production Deployment
+
+          This staging deployment has been verified and an immutable artifact has been created.
+          
+          **Artifact**: cdk-out-production-ready-${SHORT_SHA}
+          **Retention**: 90 days
+          
+          To deploy to production:
+          1. Merge staging branch to main
+          2. The production workflow will use this verified artifact
+          3. Manual approval will be required before deployment
+
+          EOF
+          else
+            cat >> $GITHUB_STEP_SUMMARY << EOF
+          ### Production Deployment
+
+          **WARNING**: Production artifact was NOT created because staging deployment or verification failed.
+          
+          Production deployment is blocked until staging succeeds.
+
+          EOF
+          fi
+          
+          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+          ### Rollback Instructions
+
+          If deployment fails, rollback in reverse order:
+          ```bash
+          # 1. Rollback Service Stack
+          make rollback ENVIRONMENT=staging STACK_NAME=staging-MonitoringService
+
+          # 2. Rollback Infrastructure Stack
+          make rollback ENVIRONMENT=staging STACK_NAME=staging-MonitoringInfra
+
+          # 3. Rollback EFS Stack
+          make rollback ENVIRONMENT=staging STACK_NAME=staging-MonitoringEfs
+
+          # 4. Rollback Networking Stack (if needed)
+          make rollback ENVIRONMENT=staging STACK_NAME=staging-Networking
+          ```
+
+          EOF
+
+      - name: Check Deployment Status
+        run: |
+          echo "Checking overall deployment status..."
+          
+          FAILED=false
+          
+          # Check deployment results
+          if [[ "${{ needs.deploy-networking.result }}" == "failure" ]]; then
+            echo "ERROR: Networking deployment failed"
+            FAILED=true
+          fi
+          
+          if [[ "${{ needs.deploy-efs.result }}" == "failure" ]]; then
+            echo "ERROR: EFS deployment failed"
+            FAILED=true
+          fi
+          
+          if [[ "${{ needs.deploy-infra.result }}" == "failure" ]]; then
+            echo "ERROR: Infrastructure deployment failed"
+            FAILED=true
+          fi
+          
+          if [[ "${{ needs.deploy-service.result }}" == "failure" ]]; then
+            echo "ERROR: Service deployment failed"
+            FAILED=true
+          fi
+          
+          # Check verification results (only if not skipped)
+          if [[ "${{ inputs.skip_verification }}" != "true" ]]; then
+            if [[ "${{ needs.verify-networking.result }}" == "failure" ]]; then
+              echo "ERROR: Networking verification failed"
+              FAILED=true
+            fi
+            
+            if [[ "${{ needs.verify-efs.result }}" == "failure" ]]; then
+              echo "ERROR: EFS verification failed"
+              FAILED=true
+            fi
+            
+            if [[ "${{ needs.verify-infra.result }}" == "failure" ]]; then
+              echo "ERROR: Infrastructure verification failed"
+              FAILED=true
+            fi
+            
+            if [[ "${{ needs.verify-service.result }}" == "failure" ]]; then
+              echo "ERROR: Service verification failed"
+              FAILED=true
+            fi
+          fi
+          
+          # Check production artifact creation
+          if [[ "${{ needs.create-production-artifact.result }}" == "failure" ]]; then
+            echo "WARNING: Production artifact creation failed"
+          fi
+          
+          if [[ "$FAILED" == "true" ]]; then
+            echo ""
+            echo "Deployment pipeline failed - check individual job logs"
+            exit 1
+          fi
+          
+          echo ""
+          echo "All deployments and verifications passed successfully"
+          echo "Production artifact is ready for deployment"

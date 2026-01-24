@@ -1,0 +1,81 @@
+# CODEOWNERS - Defines code ownership for automatic PR review requests
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything in the repo
+* @nelsonlamounier
+
+# ============================================================================
+# Infrastructure as Code
+# ============================================================================
+
+# CDK Stacks - require infrastructure review
+/lib/stacks/ @nelsonlamounier
+
+# CDK Constructs - require infrastructure review
+/lib/constructs/ @nelsonlamounier
+
+# Shared utilities and types
+/lib/shared/ @nelsonlamounier
+
+# CDK entry point and configuration
+/bin/ @nelsonlamounier
+/config/ @nelsonlamounier
+
+# ============================================================================
+# Lambda Functions
+# ============================================================================
+
+# Lambda handlers
+/lambda/ @nelsonlamounier
+
+# ============================================================================
+# CI/CD and GitHub Configuration
+# ============================================================================
+
+# GitHub Actions workflows - require careful review
+/.github/workflows/ @nelsonlamounier
+
+# GitHub Actions composite actions
+/.github/actions/ @nelsonlamounier
+
+# GitHub configuration files
+/.github/CODEOWNERS @nelsonlamounier
+/.github/dependabot.yml @nelsonlamounier
+
+# ============================================================================
+# Scripts and Automation
+# ============================================================================
+
+# Deployment and verification scripts
+/scripts/ @nelsonlamounier
+
+# ============================================================================
+# Documentation
+# ============================================================================
+
+# Documentation files
+/docs/ @nelsonlamounier
+*.md @nelsonlamounier
+
+# ============================================================================
+# Configuration Files
+# ============================================================================
+
+# Package configuration
+package.json @nelsonlamounier
+yarn.lock @nelsonlamounier
+tsconfig*.json @nelsonlamounier
+
+# CDK configuration
+cdk.json @nelsonlamounier
+
+# Linting and formatting
+.eslintrc* @nelsonlamounier
+.prettierrc* @nelsonlamounier
+
+# ============================================================================
+# Tests
+# ============================================================================
+
+# All tests
+/tests/ @nelsonlamounier

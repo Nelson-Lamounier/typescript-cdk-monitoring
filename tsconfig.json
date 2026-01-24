@@ -3,6 +3,7 @@
     "target": "ES2022",
     "module": "commonjs",
     "lib": ["ES2022"],
+    "types": ["node", "jest"],
     "declaration": true,
     "strict": true,
     "noImplicitAny": true,
@@ -18,13 +19,32 @@
     "experimentalDecorators": true,
     "strictPropertyInitialization": true,
     "typeRoots": ["./node_modules/@types"],
-    "outDir": "lib",
+    "moduleResolution": "node",
+    "baseUrl": ".",
+    "outDir": "dist",
     "rootDir": ".",
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true
   },
-  "include": ["**/*.ts"],
-  "exclude": ["node_modules", "cdk.out"]
+  "include": [
+    "bin/**/*.ts",
+    "config/**/*.ts",
+    "handlers/**/*.ts",
+    "lambda/**/*.ts",
+    "lib/**/*.ts",
+    "scripts/**/*.ts",
+    "tests/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "cdk.out",
+    "**/*.js",
+    "**/*.d.ts",
+    "scripts/integration/deployment/monitoring/verify-efs-mount-depregated.ts",
+    "scripts/integration/deployment/monitoring/verify-efs-mount.ts",
+    "scripts/integration/deployment/monitoring/verify-infra-stack.ts",
+    "scripts/integration/deprecated/**/*.ts"
+  ]
 }

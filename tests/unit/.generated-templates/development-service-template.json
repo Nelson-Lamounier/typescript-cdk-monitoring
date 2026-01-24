@@ -1,0 +1,2103 @@
+{
+  "Resources": {
+    "PrometheusLogGroupC85EFB3C": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/ecs/development-prometheus",
+        "RetentionInDays": 7,
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Service"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringService"
+          }
+        ]
+      },
+      "UpdateReplacePolicy": "Delete",
+      "DeletionPolicy": "Delete"
+    },
+    "PrometheusTaskDefinitionTaskDefTaskRole14E24FE2": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Service"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringService"
+          }
+        ]
+      },
+      "Metadata": {
+        "cdk_nag": {
+          "rules_to_suppress": [
+            {
+              "reason": "CloudWatch Logs permissions use wildcard for log streams within log groups. This allows ECS to create log streams dynamically for containers.",
+              "id": "AwsSolutions-IAM5",
+              "applies_to": [
+                "Resource::arn:aws:logs:*:*:log-group:*:*",
+                "Resource::arn:aws:logs:*:*:log-group:<*>:*"
+              ]
+            },
+            {
+              "reason": "EC2 service discovery requires wildcard permissions to describe instances across the account. This is a read-only operation and is required for Prometheus to discover and scrape targets dynamically.",
+              "id": "AwsSolutions-IAM5",
+              "applies_to": [
+                "Resource::*"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "PrometheusTaskDefinitionTaskDefTaskRoleDefaultPolicy82F53203": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "ssmmessages:CreateControlChannel",
+                "ssmmessages:CreateDataChannel",
+                "ssmmessages:OpenControlChannel",
+                "ssmmessages:OpenDataChannel"
+              ],
+              "Effect": "Allow",
+              "Resource": "*"
+            },
+            {
+              "Action": "logs:DescribeLogGroups",
+              "Effect": "Allow",
+              "Resource": "*"
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:DescribeLogStreams",
+                "logs:PutLogEvents"
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition"
+                    },
+                    ":logs:eu-west-1:123456789012:log-group:",
+                    {
+                      "Fn::ImportValue": "TestInfraStack:ExportsOutputRefEcsClusterClusterLogGroupF10E9DBD3B0F8D26"
+                    },
+                    ":*"
+                  ]
+                ]
+              }
+            },
+            {
+              "Action": [
+                "ec2:DescribeInstances",
+                "ec2:DescribeInstanceStatus",
+                "ec2:DescribeTags"
+              ],
+              "Effect": "Allow",
+              "Resource": "*"
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "PolicyName": "PrometheusTaskDefinitionTaskDefTaskRoleDefaultPolicy82F53203",
+        "Roles": [
+          {
+            "Ref": "PrometheusTaskDefinitionTaskDefTaskRole14E24FE2"
+          }
+        ]
+      },
+      "Metadata": {
+        "cdk_nag": {
+          "rules_to_suppress": [
+            {
+              "reason": "EC2 service discovery requires wildcard permissions to describe instances across the account. This is a read-only operation and is required for Prometheus to discover and scrape targets dynamically.",
+              "id": "AwsSolutions-IAM5",
+              "applies_to": [
+                "Resource::*"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "PrometheusTaskDefinitionTaskDefBF77A607": {
+      "Type": "AWS::ECS::TaskDefinition",
+      "Properties": {
+        "ContainerDefinitions": [
+          {
+            "Command": [
+              "--config.file=/etc/prometheus/prometheus.yml",
+              "--storage.tsdb.path=/prometheus",
+              "--storage.tsdb.retention.time=7d",
+              "--web.console.libraries=/usr/share/prometheus/console_libraries",
+              "--web.console.templates=/usr/share/prometheus/consoles",
+              {
+                "Fn::Join": [
+                  "",
+                  [
+                    "--web.external-url=http://",
+                    {
+                      "Fn::ImportValue": "TestInfraStack:ExportsOutputFnGetAttLoadBalancerALBDF7822E0DNSNameBFFB8EDC"
+                    },
+                    "/prometheus"
+                  ]
+                ]
+              }
+            ],
+            "Environment": [
+              {
+                "Name": "ENVIRONMENT",
+                "Value": "development"
+              }
+            ],
+            "Essential": true,
+            "Image": "prom/prometheus:latest",
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "PrometheusLogGroupC85EFB3C"
+                },
+                "awslogs-stream-prefix": "prometheus",
+                "awslogs-region": "eu-west-1"
+              }
+            },
+            "Memory": 1024,
+            "MemoryReservation": 1024,
+            "MountPoints": [
+              {
+                "ContainerPath": "/prometheus",
+                "ReadOnly": false,
+                "SourceVolume": "prometheus-data"
+              },
+              {
+                "ContainerPath": "/etc/prometheus",
+                "ReadOnly": true,
+                "SourceVolume": "prometheus-config"
+              }
+            ],
+            "Name": "prometheus",
+            "PortMappings": [
+              {
+                "ContainerPort": 9090,
+                "HostPort": 0,
+                "Protocol": "tcp"
+              }
+            ]
+          }
+        ],
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "PrometheusTaskDefinitionTaskDefExecutionRoleCCEF99A7",
+            "Arn"
+          ]
+        },
+        "Family": "TestServiceStackPrometheusTaskDefinitionTaskDefFE545CF3",
+        "NetworkMode": "bridge",
+        "RequiresCompatibilities": [
+          "EC2"
+        ],
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Service"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringService"
+          }
+        ],
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "PrometheusTaskDefinitionTaskDefTaskRole14E24FE2",
+            "Arn"
+          ]
+        },
+        "Volumes": [
+          {
+            "Host": {
+              "SourcePath": "/mnt/efs/prometheus-data"
+            },
+            "Name": "prometheus-data"
+          },
+          {
+            "Host": {
+              "SourcePath": "/mnt/efs/config/prometheus"
+            },
+            "Name": "prometheus-config"
+          }
+        ]
+      }
+    },
+    "PrometheusTaskDefinitionTaskDefExecutionRoleCCEF99A7": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Service"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringService"
+          }
+        ]
+      }
+    },
+    "PrometheusTaskDefinitionTaskDefExecutionRoleDefaultPolicy7AC349EC": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "PrometheusLogGroupC85EFB3C",
+                  "Arn"
+                ]
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "PolicyName": "PrometheusTaskDefinitionTaskDefExecutionRoleDefaultPolicy7AC349EC",
+        "Roles": [
+          {
+            "Ref": "PrometheusTaskDefinitionTaskDefExecutionRoleCCEF99A7"
+          }
+        ]
+      }
+    },
+    "PrometheusServiceE1678AB4": {
+      "Type": "AWS::ECS::Service",
+      "Properties": {
+        "Cluster": {
+          "Fn::ImportValue": "TestInfraStack:ExportsOutputRefEcsClusterFB9B21B57CC29CC9"
+        },
+        "DeploymentConfiguration": {
+          "Alarms": {
+            "AlarmNames": [],
+            "Enable": false,
+            "Rollback": false
+          },
+          "DeploymentCircuitBreaker": {
+            "Enable": false,
+            "Rollback": false
+          },
+          "MaximumPercent": 200,
+          "MinimumHealthyPercent": 50
+        },
+        "DeploymentController": {
+          "Type": "ECS"
+        },
+        "DesiredCount": 1,
+        "EnableECSManagedTags": false,
+        "EnableExecuteCommand": true,
+        "HealthCheckGracePeriodSeconds": 180,
+        "LaunchType": "EC2",
+        "LoadBalancers": [
+          {
+            "ContainerName": "prometheus",
+            "ContainerPort": 9090,
+            "TargetGroupArn": {
+              "Ref": "PrometheusTargetGroupC9DD7B03"
+            }
+          }
+        ],
+        "SchedulingStrategy": "REPLICA",
+        "ServiceName": "development-prometheus",
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Service"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "Service",
+            "Value": "ECS"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringService"
+          }
+        ],
+        "TaskDefinition": {
+          "Ref": "PrometheusTaskDefinitionTaskDefBF77A607"
+        }
+      },
+      "DependsOn": [
+        "PrometheusTaskDefinitionTaskDefTaskRoleDefaultPolicy82F53203",
+        "PrometheusTaskDefinitionTaskDefTaskRole14E24FE2",
+        "PrometheusRule1831A3A7"
+      ]
+    },
+    "GrafanaAdminPasswordCA0947EC": {
+      "Type": "AWS::SecretsManager::Secret",
+      "Properties": {
+        "Description": "Grafana admin password for development monitoring stack",
+        "GenerateSecretString": {
+          "ExcludePunctuation": true,
+          "GenerateStringKey": "password",
+          "PasswordLength": 32,
+          "SecretStringTemplate": "{\"username\":\"admin\"}"
+        },
+        "Name": "development-grafana-admin-password",
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Service"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringService"
+          }
+        ]
+      },
+      "UpdateReplacePolicy": "Delete",
+      "DeletionPolicy": "Delete"
+    },
+    "GrafanaLogGroup0A7E58DB": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/ecs/development-grafana",
+        "RetentionInDays": 7,
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Service"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringService"
+          }
+        ]
+      },
+      "UpdateReplacePolicy": "Delete",
+      "DeletionPolicy": "Delete"
+    },
+    "GrafanaTaskDefinitionExecutionRole8516B8AF": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "Description": "ECS Task Execution Role for development",
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Service"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "Purpose",
+            "Value": "ECSTaskExecution"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringService"
+          }
+        ]
+      },
+      "Metadata": {
+        "cdk_nag": {
+          "rules_to_suppress": [
+            {
+              "reason": "ECR GetAuthorizationToken action does not support resource-level permissions and requires wildcard (*). This is an AWS service limitation documented in AWS IAM documentation.",
+              "id": "AwsSolutions-IAM5",
+              "applies_to": [
+                "Resource::*"
+              ]
+            },
+            {
+              "reason": "ECR repository permissions use wildcard to allow pulling from any repository in the account. This is scoped to the account and region, providing reasonable security while allowing flexibility for multiple repositories.",
+              "id": "AwsSolutions-IAM5",
+              "applies_to": [
+                {
+                  "regex": "/^Resource::arn:aws:ecr:.*:.*:repository/\\*$/"
+                }
+              ]
+            },
+            {
+              "reason": "CloudWatch Logs permissions use wildcard for log streams within the environment-specific log group. This allows services to create log streams dynamically while restricting access to the specific environment. The wildcard is scoped to /ecs/{envName}* pattern.",
+              "id": "AwsSolutions-IAM5",
+              "applies_to": [
+                {
+                  "regex": "/^Resource::arn:aws:logs:.*:.*:log-group:/ecs/development\\*:\\*$/"
+                }
+              ]
+            },
+            {
+              "reason": "CloudWatch Logs permissions use wildcard for log streams within the ECS cluster log group. This allows ECS tasks to create log streams dynamically. The wildcard is scoped to the specific log group ARN.",
+              "id": "AwsSolutions-IAM5",
+              "applies_to": [
+                "Resource::arn:aws:logs:eu-west-1:123456789012:log-group:<EcsClusterClusterLogGroupF10E9DBD>:*"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "GrafanaTaskDefinitionExecutionRoleDefaultPolicyB0E954AD": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ecr:GetAuthorizationToken",
+              "Effect": "Allow",
+              "Resource": "*"
+            },
+            {
+              "Action": [
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage"
+              ],
+              "Effect": "Allow",
+              "Resource": "arn:aws:ecr:eu-west-1:123456789012:repository/*"
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "GrafanaLogGroup0A7E58DB",
+                        "Arn"
+                      ]
+                    },
+                    ":*"
+                  ]
+                ]
+              }
+            },
+            {
+              "Action": "secretsmanager:GetSecretValue",
+              "Effect": "Allow",
+              "Resource": "arn:aws:secretsmanager:eu-west-1:123456789012:secret:*"
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "GrafanaLogGroup0A7E58DB",
+                  "Arn"
+                ]
+              }
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret"
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition"
+                    },
+                    ":secretsmanager:eu-west-1:123456789012:secret:",
+                    {
+                      "Fn::Join": [
+                        "-",
+                        [
+                          {
+                            "Fn::Select": [
+                              0,
+                              {
+                                "Fn::Split": [
+                                  "-",
+                                  {
+                                    "Fn::Select": [
+                                      6,
+                                      {
+                                        "Fn::Split": [
+                                          ":",
+                                          {
+                                            "Ref": "GrafanaAdminPasswordCA0947EC"
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "Fn::Select": [
+                              1,
+                              {
+                                "Fn::Split": [
+                                  "-",
+                                  {
+                                    "Fn::Select": [
+                                      6,
+                                      {
+                                        "Fn::Split": [
+                                          ":",
+                                          {
+                                            "Ref": "GrafanaAdminPasswordCA0947EC"
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "Fn::Select": [
+                              2,
+                              {
+                                "Fn::Split": [
+                                  "-",
+                                  {
+                                    "Fn::Select": [
+                                      6,
+                                      {
+                                        "Fn::Split": [
+                                          ":",
+                                          {
+                                            "Ref": "GrafanaAdminPasswordCA0947EC"
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "Fn::Select": [
+                              3,
+                              {
+                                "Fn::Split": [
+                                  "-",
+                                  {
+                                    "Fn::Select": [
+                                      6,
+                                      {
+                                        "Fn::Split": [
+                                          ":",
+                                          {
+                                            "Ref": "GrafanaAdminPasswordCA0947EC"
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      ]
+                    },
+                    "-??????"
+                  ]
+                ]
+              }
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret"
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "GrafanaAdminPasswordCA0947EC"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "PolicyName": "GrafanaTaskDefinitionExecutionRoleDefaultPolicyB0E954AD",
+        "Roles": [
+          {
+            "Ref": "GrafanaTaskDefinitionExecutionRole8516B8AF"
+          }
+        ]
+      },
+      "Metadata": {
+        "cdk_nag": {
+          "rules_to_suppress": [
+            {
+              "reason": "ECR GetAuthorizationToken action does not support resource-level permissions and requires wildcard (*). This is an AWS service limitation documented in AWS IAM documentation.",
+              "id": "AwsSolutions-IAM5",
+              "applies_to": [
+                "Resource::*"
+              ]
+            },
+            {
+              "reason": "ECR repository permissions use wildcard to allow pulling from any repository in the account. This is scoped to the account and region, providing reasonable security while allowing flexibility for multiple repositories.",
+              "id": "AwsSolutions-IAM5",
+              "applies_to": [
+                {
+                  "regex": "/^Resource::arn:aws:ecr:.*:.*:repository/\\*$/"
+                }
+              ]
+            },
+            {
+              "reason": "CloudWatch Logs permissions use wildcard for log streams within the environment-specific log group. This allows services to create log streams dynamically while restricting access to the specific environment. The wildcard is scoped to /ecs/{envName}* pattern.",
+              "id": "AwsSolutions-IAM5",
+              "applies_to": [
+                {
+                  "regex": "/^Resource::arn:aws:logs:.*:.*:log-group:/ecs/development\\*:\\*$/"
+                }
+              ]
+            },
+            {
+              "reason": "CloudWatch Logs permissions use wildcard for log streams within the ECS cluster log group. This allows ECS tasks to create log streams dynamically. The wildcard is scoped to the specific log group ARN.",
+              "id": "AwsSolutions-IAM5",
+              "applies_to": [
+                "Resource::arn:aws:logs:eu-west-1:123456789012:log-group:<EcsClusterClusterLogGroupF10E9DBD>:*"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "GrafanaTaskDefinitionTaskDefTaskRole56F35DFD": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Service"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringService"
+          }
+        ]
+      },
+      "Metadata": {
+        "cdk_nag": {
+          "rules_to_suppress": [
+            {
+              "reason": "CloudWatch Logs permissions use wildcard for log streams within log groups. This allows ECS to create log streams dynamically for containers.",
+              "id": "AwsSolutions-IAM5",
+              "applies_to": [
+                "Resource::arn:aws:logs:*:*:log-group:*:*",
+                "Resource::arn:aws:logs:*:*:log-group:<*>:*"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "GrafanaTaskDefinitionTaskDefTaskRoleDefaultPolicy289CAE12": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "ssmmessages:CreateControlChannel",
+                "ssmmessages:CreateDataChannel",
+                "ssmmessages:OpenControlChannel",
+                "ssmmessages:OpenDataChannel"
+              ],
+              "Effect": "Allow",
+              "Resource": "*"
+            },
+            {
+              "Action": "logs:DescribeLogGroups",
+              "Effect": "Allow",
+              "Resource": "*"
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:DescribeLogStreams",
+                "logs:PutLogEvents"
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition"
+                    },
+                    ":logs:eu-west-1:123456789012:log-group:",
+                    {
+                      "Fn::ImportValue": "TestInfraStack:ExportsOutputRefEcsClusterClusterLogGroupF10E9DBD3B0F8D26"
+                    },
+                    ":*"
+                  ]
+                ]
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "PolicyName": "GrafanaTaskDefinitionTaskDefTaskRoleDefaultPolicy289CAE12",
+        "Roles": [
+          {
+            "Ref": "GrafanaTaskDefinitionTaskDefTaskRole56F35DFD"
+          }
+        ]
+      }
+    },
+    "GrafanaTaskDefinitionTaskDefDCC78973": {
+      "Type": "AWS::ECS::TaskDefinition",
+      "Properties": {
+        "ContainerDefinitions": [
+          {
+            "Environment": [
+              {
+                "Name": "GF_SECURITY_ADMIN_USER",
+                "Value": "admin"
+              },
+              {
+                "Name": "GF_SERVER_ROOT_URL",
+                "Value": "/grafana"
+              },
+              {
+                "Name": "GF_SERVER_SERVE_FROM_SUB_PATH",
+                "Value": "true"
+              },
+              {
+                "Name": "GF_USERS_ALLOW_SIGN_UP",
+                "Value": "false"
+              },
+              {
+                "Name": "GF_PATHS_PROVISIONING",
+                "Value": "/etc/grafana/provisioning"
+              },
+              {
+                "Name": "GF_PATHS_DATA",
+                "Value": "/var/lib/grafana"
+              },
+              {
+                "Name": "GF_PATHS_PLUGINS",
+                "Value": "/var/lib/grafana/plugins"
+              },
+              {
+                "Name": "GF_PATHS_LOGS",
+                "Value": "/var/lib/grafana/logs"
+              },
+              {
+                "Name": "GF_LOG_MODE",
+                "Value": "console"
+              },
+              {
+                "Name": "GF_LOG_LEVEL",
+                "Value": "info"
+              },
+              {
+                "Name": "GF_INSTALL_PLUGINS",
+                "Value": ""
+              }
+            ],
+            "Essential": true,
+            "Image": "grafana/grafana:latest",
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "GrafanaLogGroup0A7E58DB"
+                },
+                "awslogs-stream-prefix": "grafana",
+                "awslogs-region": "eu-west-1"
+              }
+            },
+            "Memory": 1024,
+            "MemoryReservation": 1024,
+            "MountPoints": [
+              {
+                "ContainerPath": "/var/lib/grafana",
+                "ReadOnly": false,
+                "SourceVolume": "grafana-data"
+              },
+              {
+                "ContainerPath": "/etc/grafana/provisioning",
+                "ReadOnly": false,
+                "SourceVolume": "grafana-provisioning"
+              },
+              {
+                "ContainerPath": "/var/lib/grafana/dashboards",
+                "ReadOnly": false,
+                "SourceVolume": "grafana-dashboards"
+              }
+            ],
+            "Name": "grafana",
+            "PortMappings": [
+              {
+                "ContainerPort": 3000,
+                "HostPort": 0,
+                "Protocol": "tcp"
+              }
+            ],
+            "Secrets": [
+              {
+                "Name": "GF_SECURITY_ADMIN_PASSWORD",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition"
+                      },
+                      ":secretsmanager:eu-west-1:123456789012:secret:",
+                      {
+                        "Fn::Join": [
+                          "-",
+                          [
+                            {
+                              "Fn::Select": [
+                                0,
+                                {
+                                  "Fn::Split": [
+                                    "-",
+                                    {
+                                      "Fn::Select": [
+                                        6,
+                                        {
+                                          "Fn::Split": [
+                                            ":",
+                                            {
+                                              "Ref": "GrafanaAdminPasswordCA0947EC"
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "Fn::Select": [
+                                1,
+                                {
+                                  "Fn::Split": [
+                                    "-",
+                                    {
+                                      "Fn::Select": [
+                                        6,
+                                        {
+                                          "Fn::Split": [
+                                            ":",
+                                            {
+                                              "Ref": "GrafanaAdminPasswordCA0947EC"
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "Fn::Select": [
+                                2,
+                                {
+                                  "Fn::Split": [
+                                    "-",
+                                    {
+                                      "Fn::Select": [
+                                        6,
+                                        {
+                                          "Fn::Split": [
+                                            ":",
+                                            {
+                                              "Ref": "GrafanaAdminPasswordCA0947EC"
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "Fn::Select": [
+                                3,
+                                {
+                                  "Fn::Split": [
+                                    "-",
+                                    {
+                                      "Fn::Select": [
+                                        6,
+                                        {
+                                          "Fn::Split": [
+                                            ":",
+                                            {
+                                              "Ref": "GrafanaAdminPasswordCA0947EC"
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        ]
+                      },
+                      ":password::"
+                    ]
+                  ]
+                }
+              }
+            ]
+          }
+        ],
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "GrafanaTaskDefinitionExecutionRole8516B8AF",
+            "Arn"
+          ]
+        },
+        "Family": "TestServiceStackGrafanaTaskDefinitionTaskDef86A1D1C1",
+        "NetworkMode": "bridge",
+        "RequiresCompatibilities": [
+          "EC2"
+        ],
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Service"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringService"
+          }
+        ],
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "GrafanaTaskDefinitionTaskDefTaskRole56F35DFD",
+            "Arn"
+          ]
+        },
+        "Volumes": [
+          {
+            "Host": {
+              "SourcePath": "/mnt/efs/grafana-data"
+            },
+            "Name": "grafana-data"
+          },
+          {
+            "Host": {
+              "SourcePath": "/mnt/efs/config/grafana/provisioning"
+            },
+            "Name": "grafana-provisioning"
+          },
+          {
+            "Host": {
+              "SourcePath": "/mnt/efs/grafana-dashboards"
+            },
+            "Name": "grafana-dashboards"
+          }
+        ]
+      }
+    },
+    "GrafanaServiceCEA7DBAC": {
+      "Type": "AWS::ECS::Service",
+      "Properties": {
+        "Cluster": {
+          "Fn::ImportValue": "TestInfraStack:ExportsOutputRefEcsClusterFB9B21B57CC29CC9"
+        },
+        "DeploymentConfiguration": {
+          "Alarms": {
+            "AlarmNames": [],
+            "Enable": false,
+            "Rollback": false
+          },
+          "DeploymentCircuitBreaker": {
+            "Enable": false,
+            "Rollback": false
+          },
+          "MaximumPercent": 200,
+          "MinimumHealthyPercent": 50
+        },
+        "DeploymentController": {
+          "Type": "ECS"
+        },
+        "DesiredCount": 1,
+        "EnableECSManagedTags": false,
+        "EnableExecuteCommand": true,
+        "HealthCheckGracePeriodSeconds": 180,
+        "LaunchType": "EC2",
+        "LoadBalancers": [
+          {
+            "ContainerName": "grafana",
+            "ContainerPort": 3000,
+            "TargetGroupArn": {
+              "Ref": "GrafanaTargetGroup52250F6F"
+            }
+          }
+        ],
+        "SchedulingStrategy": "REPLICA",
+        "ServiceName": "development-grafana",
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Service"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "Service",
+            "Value": "ECS"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringService"
+          }
+        ],
+        "TaskDefinition": {
+          "Ref": "GrafanaTaskDefinitionTaskDefDCC78973"
+        }
+      },
+      "DependsOn": [
+        "GrafanaTaskDefinitionTaskDefTaskRoleDefaultPolicy289CAE12",
+        "GrafanaTaskDefinitionTaskDefTaskRole56F35DFD",
+        "GrafanaRule877B639D"
+      ]
+    },
+    "NodeExporterLogGroup87EF8E53": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/ecs/development-monitoring-node-exporter",
+        "RetentionInDays": 7,
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Service"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringService"
+          }
+        ]
+      },
+      "UpdateReplacePolicy": "Delete",
+      "DeletionPolicy": "Delete"
+    },
+    "NodeExporterExecutionRoleB3E468D7": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "Description": "ECS Task Execution Role for development-monitoring",
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development-monitoring"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Service"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "Purpose",
+            "Value": "ECSTaskExecution"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringService"
+          }
+        ]
+      },
+      "Metadata": {
+        "cdk_nag": {
+          "rules_to_suppress": [
+            {
+              "reason": "ECR GetAuthorizationToken action does not support resource-level permissions and requires wildcard (*). This is an AWS service limitation documented in AWS IAM documentation.",
+              "id": "AwsSolutions-IAM5",
+              "applies_to": [
+                "Resource::*"
+              ]
+            },
+            {
+              "reason": "ECR repository permissions use wildcard to allow pulling from any repository in the account. This is scoped to the account and region, providing reasonable security while allowing flexibility for multiple repositories.",
+              "id": "AwsSolutions-IAM5",
+              "applies_to": [
+                {
+                  "regex": "/^Resource::arn:aws:ecr:.*:.*:repository/\\*$/"
+                }
+              ]
+            },
+            {
+              "reason": "CloudWatch Logs permissions use wildcard for log streams within the environment-specific log group. This allows services to create log streams dynamically while restricting access to the specific environment. The wildcard is scoped to /ecs/{envName}* pattern.",
+              "id": "AwsSolutions-IAM5",
+              "applies_to": [
+                {
+                  "regex": "/^Resource::arn:aws:logs:.*:.*:log-group:/ecs/development-monitoring\\*:\\*$/"
+                }
+              ]
+            },
+            {
+              "reason": "CloudWatch Logs permissions use wildcard for log streams within the ECS cluster log group. This allows ECS tasks to create log streams dynamically. The wildcard is scoped to the specific log group ARN.",
+              "id": "AwsSolutions-IAM5",
+              "applies_to": [
+                "Resource::arn:aws:logs:eu-west-1:123456789012:log-group:<EcsClusterClusterLogGroupF10E9DBD>:*"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "NodeExporterExecutionRoleDefaultPolicy21422737": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "ecr-public:GetAuthorizationToken",
+                "ecr-public:BatchCheckLayerAvailability",
+                "ecr-public:GetDownloadUrlForLayer",
+                "ecr-public:BatchGetImage"
+              ],
+              "Effect": "Allow",
+              "Resource": "*"
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "NodeExporterLogGroup87EF8E53",
+                        "Arn"
+                      ]
+                    },
+                    ":*"
+                  ]
+                ]
+              }
+            },
+            {
+              "Action": "secretsmanager:GetSecretValue",
+              "Effect": "Allow",
+              "Resource": "arn:aws:secretsmanager:eu-west-1:123456789012:secret:*"
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "NodeExporterLogGroup87EF8E53",
+                  "Arn"
+                ]
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "PolicyName": "NodeExporterExecutionRoleDefaultPolicy21422737",
+        "Roles": [
+          {
+            "Ref": "NodeExporterExecutionRoleB3E468D7"
+          }
+        ]
+      },
+      "Metadata": {
+        "cdk_nag": {
+          "rules_to_suppress": [
+            {
+              "reason": "ECR GetAuthorizationToken action does not support resource-level permissions and requires wildcard (*). This is an AWS service limitation documented in AWS IAM documentation.",
+              "id": "AwsSolutions-IAM5",
+              "applies_to": [
+                "Resource::*"
+              ]
+            },
+            {
+              "reason": "ECR repository permissions use wildcard to allow pulling from any repository in the account. This is scoped to the account and region, providing reasonable security while allowing flexibility for multiple repositories.",
+              "id": "AwsSolutions-IAM5",
+              "applies_to": [
+                {
+                  "regex": "/^Resource::arn:aws:ecr:.*:.*:repository/\\*$/"
+                }
+              ]
+            },
+            {
+              "reason": "CloudWatch Logs permissions use wildcard for log streams within the environment-specific log group. This allows services to create log streams dynamically while restricting access to the specific environment. The wildcard is scoped to /ecs/{envName}* pattern.",
+              "id": "AwsSolutions-IAM5",
+              "applies_to": [
+                {
+                  "regex": "/^Resource::arn:aws:logs:.*:.*:log-group:/ecs/development-monitoring\\*:\\*$/"
+                }
+              ]
+            },
+            {
+              "reason": "CloudWatch Logs permissions use wildcard for log streams within the ECS cluster log group. This allows ECS tasks to create log streams dynamically. The wildcard is scoped to the specific log group ARN.",
+              "id": "AwsSolutions-IAM5",
+              "applies_to": [
+                "Resource::arn:aws:logs:eu-west-1:123456789012:log-group:<EcsClusterClusterLogGroupF10E9DBD>:*"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "NodeExporterTaskDefTaskRoleE2BA598D": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development-monitoring"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Service"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringService"
+          }
+        ]
+      }
+    },
+    "NodeExporterTaskDefTaskRoleDefaultPolicy6C0B3E4E": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "ssmmessages:CreateControlChannel",
+                "ssmmessages:CreateDataChannel",
+                "ssmmessages:OpenControlChannel",
+                "ssmmessages:OpenDataChannel"
+              ],
+              "Effect": "Allow",
+              "Resource": "*"
+            },
+            {
+              "Action": "logs:DescribeLogGroups",
+              "Effect": "Allow",
+              "Resource": "*"
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:DescribeLogStreams",
+                "logs:PutLogEvents"
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition"
+                    },
+                    ":logs:eu-west-1:123456789012:log-group:",
+                    {
+                      "Fn::ImportValue": "TestInfraStack:ExportsOutputRefEcsClusterClusterLogGroupF10E9DBD3B0F8D26"
+                    },
+                    ":*"
+                  ]
+                ]
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "PolicyName": "NodeExporterTaskDefTaskRoleDefaultPolicy6C0B3E4E",
+        "Roles": [
+          {
+            "Ref": "NodeExporterTaskDefTaskRoleE2BA598D"
+          }
+        ]
+      }
+    },
+    "NodeExporterTaskDefC17ED60B": {
+      "Type": "AWS::ECS::TaskDefinition",
+      "Properties": {
+        "ContainerDefinitions": [
+          {
+            "Command": [
+              "--path.procfs=/host/proc",
+              "--path.sysfs=/host/sys",
+              "--path.rootfs=/rootfs",
+              "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($|/)"
+            ],
+            "Environment": [
+              {
+                "Name": "DEPLOYMENT_TIMESTAMP",
+                "Value": "1768491320372"
+              }
+            ],
+            "Essential": true,
+            "Image": "prom/node-exporter:latest",
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "NodeExporterLogGroup87EF8E53"
+                },
+                "awslogs-stream-prefix": "node-exporter",
+                "awslogs-region": "eu-west-1"
+              }
+            },
+            "MemoryReservation": 64,
+            "MountPoints": [
+              {
+                "ContainerPath": "/host/proc",
+                "ReadOnly": true,
+                "SourceVolume": "proc"
+              },
+              {
+                "ContainerPath": "/host/sys",
+                "ReadOnly": true,
+                "SourceVolume": "sys"
+              },
+              {
+                "ContainerPath": "/rootfs",
+                "ReadOnly": true,
+                "SourceVolume": "rootfs"
+              }
+            ],
+            "Name": "node-exporter",
+            "PortMappings": [
+              {
+                "ContainerPort": 9100,
+                "HostPort": 9100,
+                "Protocol": "tcp"
+              }
+            ]
+          }
+        ],
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "NodeExporterExecutionRoleB3E468D7",
+            "Arn"
+          ]
+        },
+        "Family": "TestServiceStackNodeExporterTaskDefC9885A7D",
+        "NetworkMode": "host",
+        "RequiresCompatibilities": [
+          "EC2"
+        ],
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development-monitoring"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Service"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringService"
+          }
+        ],
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "NodeExporterTaskDefTaskRoleE2BA598D",
+            "Arn"
+          ]
+        },
+        "Volumes": [
+          {
+            "Host": {
+              "SourcePath": "/proc"
+            },
+            "Name": "proc"
+          },
+          {
+            "Host": {
+              "SourcePath": "/sys"
+            },
+            "Name": "sys"
+          },
+          {
+            "Host": {
+              "SourcePath": "/"
+            },
+            "Name": "rootfs"
+          }
+        ]
+      }
+    },
+    "NodeExporterServiceD9597F1F": {
+      "Type": "AWS::ECS::Service",
+      "Properties": {
+        "Cluster": {
+          "Fn::ImportValue": "TestInfraStack:ExportsOutputRefEcsClusterFB9B21B57CC29CC9"
+        },
+        "DeploymentConfiguration": {
+          "Alarms": {
+            "AlarmNames": [],
+            "Enable": false,
+            "Rollback": false
+          },
+          "MaximumPercent": 100,
+          "MinimumHealthyPercent": 0
+        },
+        "EnableECSManagedTags": false,
+        "EnableExecuteCommand": true,
+        "LaunchType": "EC2",
+        "SchedulingStrategy": "DAEMON",
+        "ServiceName": "development-monitoring-node-exporter",
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development-monitoring"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Service"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "Service",
+            "Value": "NodeExporter"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringService"
+          }
+        ],
+        "TaskDefinition": {
+          "Ref": "NodeExporterTaskDefC17ED60B"
+        }
+      },
+      "DependsOn": [
+        "NodeExporterTaskDefTaskRoleDefaultPolicy6C0B3E4E",
+        "NodeExporterTaskDefTaskRoleE2BA598D"
+      ]
+    },
+    "GrafanaTargetGroup52250F6F": {
+      "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+      "Properties": {
+        "HealthCheckIntervalSeconds": 60,
+        "HealthCheckPath": "/api/health",
+        "HealthCheckPort": "traffic-port",
+        "HealthCheckTimeoutSeconds": 30,
+        "HealthyThresholdCount": 2,
+        "Matcher": {
+          "HttpCode": "200,301,302"
+        },
+        "Name": "development-monitoring-grafana",
+        "Port": 3000,
+        "Protocol": "HTTP",
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Service"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringService"
+          }
+        ],
+        "TargetGroupAttributes": [
+          {
+            "Key": "deregistration_delay.timeout_seconds",
+            "Value": "30"
+          },
+          {
+            "Key": "stickiness.enabled",
+            "Value": "false"
+          }
+        ],
+        "TargetType": "instance",
+        "UnhealthyThresholdCount": 3,
+        "VpcId": {
+          "Fn::ImportValue": "TestNetworkingStack:ExportsOutputRefVpcC302751171D26A23"
+        }
+      }
+    },
+    "PrometheusTargetGroupC9DD7B03": {
+      "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+      "Properties": {
+        "HealthCheckIntervalSeconds": 60,
+        "HealthCheckPath": "/prometheus/-/healthy",
+        "HealthCheckPort": "traffic-port",
+        "HealthCheckTimeoutSeconds": 30,
+        "HealthyThresholdCount": 2,
+        "Matcher": {
+          "HttpCode": "200,301,302"
+        },
+        "Name": "development-monitoring-prom",
+        "Port": 9090,
+        "Protocol": "HTTP",
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "development"
+          },
+          {
+            "Key": "Layer",
+            "Value": "Service"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          },
+          {
+            "Key": "Project",
+            "Value": "monitoring"
+          },
+          {
+            "Key": "StackName",
+            "Value": "MonitoringService"
+          }
+        ],
+        "TargetGroupAttributes": [
+          {
+            "Key": "deregistration_delay.timeout_seconds",
+            "Value": "30"
+          },
+          {
+            "Key": "stickiness.enabled",
+            "Value": "false"
+          }
+        ],
+        "TargetType": "instance",
+        "UnhealthyThresholdCount": 3,
+        "VpcId": {
+          "Fn::ImportValue": "TestNetworkingStack:ExportsOutputRefVpcC302751171D26A23"
+        }
+      }
+    },
+    "GrafanaRule877B639D": {
+      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+      "Properties": {
+        "Actions": [
+          {
+            "TargetGroupArn": {
+              "Ref": "GrafanaTargetGroup52250F6F"
+            },
+            "Type": "forward"
+          }
+        ],
+        "Conditions": [
+          {
+            "Field": "path-pattern",
+            "PathPatternConfig": {
+              "Values": [
+                "/grafana*"
+              ]
+            }
+          }
+        ],
+        "ListenerArn": {
+          "Fn::ImportValue": "TestInfraStack:ExportsOutputRefLoadBalancerALBHttpListenerCFA96AD3B481498E"
+        },
+        "Priority": 100
+      }
+    },
+    "PrometheusRule1831A3A7": {
+      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+      "Properties": {
+        "Actions": [
+          {
+            "TargetGroupArn": {
+              "Ref": "PrometheusTargetGroupC9DD7B03"
+            },
+            "Type": "forward"
+          }
+        ],
+        "Conditions": [
+          {
+            "Field": "path-pattern",
+            "PathPatternConfig": {
+              "Values": [
+                "/prometheus*"
+              ]
+            }
+          }
+        ],
+        "ListenerArn": {
+          "Fn::ImportValue": "TestInfraStack:ExportsOutputRefLoadBalancerALBHttpListenerCFA96AD3B481498E"
+        },
+        "Priority": 200
+      }
+    },
+    "ParametersCustomParam070CFF361": {
+      "Type": "AWS::SSM::Parameter",
+      "Properties": {
+        "Description": "Prometheus ECS service ARN for development",
+        "Name": "/monitoring/development/config/prometheus-service-arn",
+        "Tags": {
+          "Component": "SSMParameters",
+          "Environment": "development",
+          "Layer": "Service",
+          "ManagedBy": "CDK",
+          "Project": "monitoring",
+          "StackName": "MonitoringService"
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": {
+          "Ref": "PrometheusServiceE1678AB4"
+        }
+      }
+    },
+    "ParametersCustomParam16BB6DF6F": {
+      "Type": "AWS::SSM::Parameter",
+      "Properties": {
+        "Description": "Grafana ECS service ARN for development",
+        "Name": "/monitoring/development/config/grafana-service-arn",
+        "Tags": {
+          "Component": "SSMParameters",
+          "Environment": "development",
+          "Layer": "Service",
+          "ManagedBy": "CDK",
+          "Project": "monitoring",
+          "StackName": "MonitoringService"
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": {
+          "Ref": "GrafanaServiceCEA7DBAC"
+        }
+      }
+    },
+    "ParametersCustomParam298A454C6": {
+      "Type": "AWS::SSM::Parameter",
+      "Properties": {
+        "Description": "Node Exporter ECS service ARN for development",
+        "Name": "/monitoring/development/config/node-exporter-service-arn",
+        "Tags": {
+          "Component": "SSMParameters",
+          "Environment": "development",
+          "Layer": "Service",
+          "ManagedBy": "CDK",
+          "Project": "monitoring",
+          "StackName": "MonitoringService"
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": {
+          "Ref": "NodeExporterServiceD9597F1F"
+        }
+      }
+    },
+    "ParametersCustomParam337C26767": {
+      "Type": "AWS::SSM::Parameter",
+      "Properties": {
+        "Description": "Prometheus ALB target group ARN for development",
+        "Name": "/monitoring/development/config/prometheus-target-group-arn",
+        "Tags": {
+          "Component": "SSMParameters",
+          "Environment": "development",
+          "Layer": "Service",
+          "ManagedBy": "CDK",
+          "Project": "monitoring",
+          "StackName": "MonitoringService"
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": {
+          "Ref": "PrometheusTargetGroupC9DD7B03"
+        }
+      }
+    },
+    "ParametersCustomParam4B633FEDA": {
+      "Type": "AWS::SSM::Parameter",
+      "Properties": {
+        "Description": "Grafana ALB target group ARN for development",
+        "Name": "/monitoring/development/config/grafana-target-group-arn",
+        "Tags": {
+          "Component": "SSMParameters",
+          "Environment": "development",
+          "Layer": "Service",
+          "ManagedBy": "CDK",
+          "Project": "monitoring",
+          "StackName": "MonitoringService"
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": {
+          "Ref": "GrafanaTargetGroup52250F6F"
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "GrafanaAdminSecretArn": {
+      "Description": "Grafana admin password secret ARN (retrieve via AWS Console or CLI)",
+      "Value": {
+        "Ref": "GrafanaAdminPasswordCA0947EC"
+      }
+    },
+    "ParametersParameterCount6DC4838A": {
+      "Description": "Number of SSM parameters created for development",
+      "Value": "5"
+    },
+    "ParametersParameterPathPrefix4435E05D": {
+      "Description": "SSM parameter path prefix for development",
+      "Value": "/monitoring/development",
+      "Export": {
+        "Name": "TestServiceStack-ssm-path-prefix"
+      }
+    },
+    "PrometheusServiceArn": {
+      "Description": "Prometheus ECS service ARN for development",
+      "Value": {
+        "Ref": "PrometheusServiceE1678AB4"
+      }
+    },
+    "GrafanaServiceArn": {
+      "Description": "Grafana ECS service ARN for development",
+      "Value": {
+        "Ref": "GrafanaServiceCEA7DBAC"
+      }
+    },
+    "NodeExporterServiceArn": {
+      "Description": "Node Exporter ECS service ARN for development",
+      "Value": {
+        "Ref": "NodeExporterServiceD9597F1F"
+      }
+    },
+    "PrometheusTargetGroupArn": {
+      "Description": "Prometheus ALB target group ARN",
+      "Value": {
+        "Ref": "PrometheusTargetGroupC9DD7B03"
+      }
+    },
+    "GrafanaTargetGroupArn": {
+      "Description": "Grafana ALB target group ARN",
+      "Value": {
+        "Ref": "GrafanaTargetGroup52250F6F"
+      }
+    },
+    "SsmParameterPrefix": {
+      "Description": "SSM Parameter Store path prefix for monitoring services",
+      "Value": "/monitoring/development"
+    }
+  },
+  "Parameters": {
+    "BootstrapVersion": {
+      "Type": "AWS::SSM::Parameter::Value<String>",
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]"
+    }
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5"
+                  ],
+                  {
+                    "Ref": "BootstrapVersion"
+                  }
+                ]
+              }
+            ]
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI."
+        }
+      ]
+    }
+  }
+}

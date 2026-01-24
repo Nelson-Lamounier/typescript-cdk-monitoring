@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/nelsonlamounier/monitoring-iac/tree/main/docs
+    about: Check the documentation before opening an issue
+  - name: AWS CDK Documentation
+    url: https://docs.aws.amazon.com/cdk/
+    about: AWS CDK official documentation

@@ -1,0 +1,581 @@
+# @format
+# @description Deploy Webapp to Development
+
+name: Deploy Webapp to Development
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - "lib/stacks/webapp/**"
+      - "lib/constructs/**"
+      - "lib/shared/**"
+      - "bin/stacks/webapp-stack.ts"
+      - "config/**"
+      - "lambda/handlers/api/articles/**"
+      - "lambda/shared/**"
+      - ".github/workflows/deploy-webapp-dev.yml"
+      - ".github/actions/**"
+  workflow_dispatch:
+    inputs:
+      skip_verification:
+        description: "Skip post-deployment verification (use for hotfixes only)"
+        type: boolean
+        default: false
+
+env:
+  NODE_VERSION: "22"
+  AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-1' }}
+  ENVIRONMENT: "development"
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-webapp-development-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ===========================================================================
+  # Setup & Build
+  # ===========================================================================
+  setup:
+    name: Setup & Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: development
+    outputs:
+      aws-account-id: ${{ steps.account-id.outputs.account_id }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Get AWS Account ID
+        id: account-id
+        run: |
+          ACCOUNT_ID="${{ vars.AWS_ACCOUNT_ID_DEV }}"
+          if [ -z "$ACCOUNT_ID" ]; then
+            echo "ERROR: AWS_ACCOUNT_ID_DEV not configured in environment variables"
+            echo "Configure in: Settings → Environments → development → Environment variables"
+            echo ""
+            echo "Required environment variables:"
+            echo "  - AWS_ACCOUNT_ID_DEV: Your AWS account ID (12 digits)"
+            echo ""
+            exit 1
+          fi
+          
+          # Validate format
+          if ! [[ "$ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+            echo "ERROR: Invalid AWS account ID format: $ACCOUNT_ID"
+            echo "Expected format: 12-digit number (e.g., 123456789012)"
+            exit 1
+          fi
+          
+          echo "account_id=$ACCOUNT_ID" >> $GITHUB_OUTPUT
+          echo "Deploying to account: ***${ACCOUNT_ID: -4}"
+
+      - name: Build TypeScript
+        run: yarn build
+
+  # ===========================================================================
+  # Deploy Networking Stack (Prerequisite)
+  # ===========================================================================
+  deploy-networking:
+    name: Deploy Networking
+    needs: setup
+    uses: ./.github/workflows/_deploy-stack.yml
+    with:
+      stack-name: "development-Networking"
+      environment: "development"
+      aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
+      aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
+      require-approval: "never"
+      verify-bootstrap: false
+      outputs-directory: "deployment-outputs"
+    secrets:
+      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_DEV }}
+
+  # ===========================================================================
+  # Verify Networking Stack
+  # ===========================================================================
+  verify-networking:
+    name: Verify Networking
+    needs: [setup, deploy-networking]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: development
+    if: inputs.skip_verification != true
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download Stack Outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: development-Networking-outputs
+          path: deployment-outputs
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_DEV }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Verify Networking Stack
+        run: |
+          echo "Verifying Networking Stack deployment..."
+          
+          npx tsx scripts/integration/deployment/monitoring/verify-networking-stack.ts \
+            --environment ${{ env.ENVIRONMENT }} \
+            --aws-region ${{ env.AWS_REGION }} \
+            --outputs-file deployment-outputs/development-Networking-outputs.json \
+            --report-file verification-reports/development-networking-verification.json
+      
+      - name: Upload Verification Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: networking-verification-report
+          path: verification-reports/development-networking-verification.json
+          retention-days: 30
+          if-no-files-found: warn
+
+  # ===========================================================================
+  # Deploy ECR Stack (Container Registry)
+  # ===========================================================================
+  deploy-ecr:
+    name: Deploy ECR
+    needs: [setup, deploy-networking, verify-networking]
+    if: always() && needs.deploy-networking.result == 'success' && (needs.verify-networking.result == 'success' || needs.verify-networking.result == 'skipped')
+    uses: ./.github/workflows/_deploy-stack.yml
+    with:
+      stack-name: "development-WebappEcr"
+      environment: "development"
+      aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
+      aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
+      require-approval: "never"
+      outputs-directory: "deployment-outputs"
+    secrets:
+      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_DEV }}
+
+  # ===========================================================================
+  # Verify ECR Stack
+  # ===========================================================================
+  verify-ecr:
+    name: Verify ECR
+    needs: [setup, deploy-ecr]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: development
+    if: always() && needs.deploy-ecr.result == 'success' && inputs.skip_verification != true
+    outputs:
+      repository-uri: ${{ steps.ecr-info.outputs.repository_uri }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_DEV }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Verify ECR Stack
+        run: |
+          echo "Verifying ECR Stack deployment..."
+          make verify-webapp-ecr \
+            ENVIRONMENT=${{ env.ENVIRONMENT }} \
+            AWS_REGION=${{ env.AWS_REGION }}
+
+      - name: Get ECR Repository Info
+        id: ecr-info
+        run: |
+          STACK_NAME="${{ env.ENVIRONMENT }}-WebappEcr"
+          
+          REPO_URI=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query 'Stacks[0].Outputs[?OutputKey==`RepositoryUri`].OutputValue' \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -n "$REPO_URI" ] && [ "$REPO_URI" != "None" ]; then
+            echo "repository_uri=$REPO_URI" >> $GITHUB_OUTPUT
+            echo "ECR Repository URI: $REPO_URI"
+          fi
+
+  # ===========================================================================
+  # Deploy DynamoDB Stack (Database Layer)
+  # ===========================================================================
+  deploy-dynamodb:
+    name: Deploy DynamoDB
+    needs: [setup, deploy-networking, verify-networking]
+    if: always() && needs.deploy-networking.result == 'success' && (needs.verify-networking.result == 'success' || needs.verify-networking.result == 'skipped')
+    uses: ./.github/workflows/_deploy-stack.yml
+    with:
+      stack-name: "development-WebappDynamoDb"
+      environment: "development"
+      aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
+      aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
+      require-approval: "never"
+      outputs-directory: "deployment-outputs"
+    secrets:
+      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_DEV }}
+
+  # ===========================================================================
+  # Verify DynamoDB Stack
+  # ===========================================================================
+  verify-dynamodb:
+    name: Verify DynamoDB
+    needs: [setup, deploy-dynamodb]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: development
+    if: always() && needs.deploy-dynamodb.result == 'success' && inputs.skip_verification != true
+    outputs:
+      articles-table-name: ${{ steps.dynamodb-info.outputs.articles_table_name }}
+      assets-bucket-name: ${{ steps.dynamodb-info.outputs.assets_bucket_name }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_DEV }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Verify DynamoDB Stack
+        run: |
+          echo "Verifying DynamoDB Stack deployment..."
+          make verify-webapp-dynamodb \
+            ENVIRONMENT=${{ env.ENVIRONMENT }} \
+            AWS_REGION=${{ env.AWS_REGION }}
+
+      - name: Get DynamoDB Resources Info
+        id: dynamodb-info
+        run: |
+          STACK_NAME="${{ env.ENVIRONMENT }}-WebappDynamoDb"
+          
+          TABLE_NAME=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query 'Stacks[0].Outputs[?OutputKey==`ArticlesTableName`].OutputValue' \
+            --output text 2>/dev/null || echo "")
+          
+          BUCKET_NAME=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query 'Stacks[0].Outputs[?OutputKey==`AssetsS3BucketName`].OutputValue' \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -n "$TABLE_NAME" ] && [ "$TABLE_NAME" != "None" ]; then
+            echo "articles_table_name=$TABLE_NAME" >> $GITHUB_OUTPUT
+          fi
+          
+          if [ -n "$BUCKET_NAME" ] && [ "$BUCKET_NAME" != "None" ]; then
+            echo "assets_bucket_name=$BUCKET_NAME" >> $GITHUB_OUTPUT
+          fi
+
+  # ===========================================================================
+  # Deploy API Stack (API Gateway + Lambda)
+  # ===========================================================================
+  deploy-api:
+    name: Deploy API
+    needs: [setup, deploy-dynamodb, verify-dynamodb]
+    if: always() && needs.deploy-dynamodb.result == 'success' && (needs.verify-dynamodb.result == 'success' || needs.verify-dynamodb.result == 'skipped')
+    uses: ./.github/workflows/_deploy-stack.yml
+    with:
+      stack-name: "development-WebappApi"
+      environment: "development"
+      aws-account-id: ${{ needs.setup.outputs.aws-account-id }}
+      aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
+      require-approval: "never"
+      outputs-directory: "deployment-outputs"
+    secrets:
+      AWS_OIDC_ROLE: ${{ secrets.AWS_OIDC_ROLE_DEV }}
+
+  # ===========================================================================
+  # Verify API Stack
+  # ===========================================================================
+  verify-api:
+    name: Verify API
+    needs: [setup, deploy-api]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: development
+    if: always() && needs.deploy-api.result == 'success' && inputs.skip_verification != true
+    outputs:
+      api-endpoint: ${{ steps.api-info.outputs.api_endpoint }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_DEV }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Verify API Stack
+        run: |
+          echo "Verifying API Stack deployment..."
+          make verify-webapp-api \
+            ENVIRONMENT=${{ env.ENVIRONMENT }} \
+            AWS_REGION=${{ env.AWS_REGION }}
+
+      - name: Get API Endpoint
+        id: api-info
+        run: |
+          STACK_NAME="${{ env.ENVIRONMENT }}-WebappApi"
+          
+          API_ENDPOINT=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query 'Stacks[0].Outputs[?OutputKey==`ApiEndpoint`].OutputValue' \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -n "$API_ENDPOINT" ] && [ "$API_ENDPOINT" != "None" ]; then
+            echo "api_endpoint=$API_ENDPOINT" >> $GITHUB_OUTPUT
+            echo "API Endpoint: $API_ENDPOINT"
+          fi
+
+      - name: API Smoke Tests
+        if: steps.api-info.outputs.api_endpoint != ''
+        continue-on-error: true
+        run: |
+          API_ENDPOINT="${{ steps.api-info.outputs.api_endpoint }}"
+          
+          echo "Running API smoke tests..."
+          echo "API Endpoint: ${API_ENDPOINT}"
+          echo ""
+          
+          # Smoke tests are now integrated into the verification script
+          # This section provides additional logging and summary
+          
+          # Test health endpoint (if exists)
+          echo "Testing health endpoint..."
+          HEALTH_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${API_ENDPOINT}/health" || echo "000")
+          echo "Health endpoint: HTTP $HEALTH_RESPONSE"
+          
+          # Test articles list endpoint
+          echo ""
+          echo "Testing articles list endpoint..."
+          ARTICLES_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${API_ENDPOINT}/articles" || echo "000")
+          echo "Articles list: HTTP $ARTICLES_RESPONSE"
+          
+          if [ "$ARTICLES_RESPONSE" = "200" ] || [ "$HEALTH_RESPONSE" = "200" ]; then
+            echo ""
+            echo "✓ API is responding"
+          else
+            echo ""
+            echo "⚠ API returned non-200 status (may be expected if no data exists)"
+          fi
+          
+          echo ""
+          echo "API smoke tests completed"
+
+  # ===========================================================================
+  # Deployment Summary
+  # ===========================================================================
+  deployment-summary:
+    name: Deployment Summary
+    needs:
+      [
+        setup,
+        deploy-networking,
+        verify-networking,
+        deploy-ecr,
+        verify-ecr,
+        deploy-dynamodb,
+        verify-dynamodb,
+        deploy-api,
+        verify-api,
+      ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+
+    steps:
+      - name: Generate Deployment Summary
+        run: |
+          ACCOUNT_LAST4="${{ needs.setup.outputs.aws-account-id }}"
+          TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          ## Webapp Infrastructure Deployment - Development
+
+          **Environment**: development
+          **Region**: ${{ env.AWS_REGION }}
+          **Account**: ***${ACCOUNT_LAST4: -4}
+          **Timestamp**: ${TIMESTAMP}
+
+          ### Deployment Status
+
+          | Stack | Deploy | Verify |
+          |-------|--------|--------|
+          | Networking | ${{ needs.deploy-networking.result }} | ${{ needs.verify-networking.result }} |
+          | ECR | ${{ needs.deploy-ecr.result }} | ${{ needs.verify-ecr.result }} |
+          | DynamoDB | ${{ needs.deploy-dynamodb.result }} | ${{ needs.verify-dynamodb.result }} |
+          | API | ${{ needs.deploy-api.result }} | ${{ needs.verify-api.result }} |
+
+          EOF
+          
+          if [ -n "${{ needs.verify-api.outputs.api-endpoint }}" ]; then
+            API_ENDPOINT="${{ needs.verify-api.outputs.api-endpoint }}"
+            cat >> $GITHUB_STEP_SUMMARY << EOF
+          ### API Endpoint
+
+          - **API Gateway**: ${API_ENDPOINT}
+          - **Articles Endpoint**: ${API_ENDPOINT}/articles
+          - **Health Check**: ${API_ENDPOINT}/health
+
+          EOF
+          fi
+          
+          if [ -n "${{ needs.verify-ecr.outputs.repository-uri }}" ]; then
+            REPO_URI="${{ needs.verify-ecr.outputs.repository-uri }}"
+            cat >> $GITHUB_STEP_SUMMARY << EOF
+          ### Container Registry
+
+          - **ECR Repository**: ${REPO_URI}
+
+          **Push Docker Image**:
+          \`\`\`bash
+          docker tag webapp:latest ${REPO_URI}:latest
+          docker push ${REPO_URI}:latest
+          \`\`\`
+
+          EOF
+          fi
+          
+          if [ -n "${{ needs.verify-dynamodb.outputs.articles-table-name }}" ]; then
+            TABLE_NAME="${{ needs.verify-dynamodb.outputs.articles-table-name }}"
+            cat >> $GITHUB_STEP_SUMMARY << EOF
+          ### Database Resources
+
+          - **Articles Table**: ${TABLE_NAME}
+          EOF
+          fi
+          
+          if [ -n "${{ needs.verify-dynamodb.outputs.assets-bucket-name }}" ]; then
+            BUCKET_NAME="${{ needs.verify-dynamodb.outputs.assets-bucket-name }}"
+            cat >> $GITHUB_STEP_SUMMARY << EOF
+          - **Assets Bucket**: ${BUCKET_NAME}
+          EOF
+          fi
+          
+          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+
+          ### Next Steps
+
+          1. Test API endpoints using the provided URLs
+          2. Build and push webapp Docker image to ECR
+          3. Seed DynamoDB tables with initial data (if needed)
+          4. Configure custom domain for API Gateway (optional)
+          5. Monitor CloudWatch logs for any errors
+
+          ### Rollback Instructions
+
+          If deployment fails, rollback using:
+          ```bash
+          make rollback ENVIRONMENT=development STACK_NAME=<failed-stack>
+          ```
+
+          Available stacks:
+          - development-Networking
+          - development-WebappEcr
+          - development-WebappDynamoDb
+          - development-WebappApi
+
+          EOF
+
+      - name: Check Deployment Status
+        run: |
+          echo "Checking overall deployment status..."
+          
+          FAILED=false
+          
+          # Check deployment results
+          if [[ "${{ needs.deploy-networking.result }}" == "failure" ]]; then
+            echo "ERROR: Networking deployment failed"
+            FAILED=true
+          fi
+          
+          if [[ "${{ needs.deploy-ecr.result }}" == "failure" ]]; then
+            echo "ERROR: ECR deployment failed"
+            FAILED=true
+          fi
+          
+          if [[ "${{ needs.deploy-dynamodb.result }}" == "failure" ]]; then
+            echo "ERROR: DynamoDB deployment failed"
+            FAILED=true
+          fi
+          
+          if [[ "${{ needs.deploy-api.result }}" == "failure" ]]; then
+            echo "ERROR: API deployment failed"
+            FAILED=true
+          fi
+          
+          # Check verification results (only if not skipped)
+          if [[ "${{ inputs.skip_verification }}" != "true" ]]; then
+            if [[ "${{ needs.verify-networking.result }}" == "failure" ]]; then
+              echo "ERROR: Networking verification failed"
+              FAILED=true
+            fi
+            
+            if [[ "${{ needs.verify-ecr.result }}" == "failure" ]]; then
+              echo "ERROR: ECR verification failed"
+              FAILED=true
+            fi
+            
+            if [[ "${{ needs.verify-dynamodb.result }}" == "failure" ]]; then
+              echo "ERROR: DynamoDB verification failed"
+              FAILED=true
+            fi
+            
+            if [[ "${{ needs.verify-api.result }}" == "failure" ]]; then
+              echo "ERROR: API verification failed"
+              FAILED=true
+            fi
+          fi
+          
+          if [[ "$FAILED" == "true" ]]; then
+            echo ""
+            echo "Deployment pipeline failed - check individual job logs"
+            exit 1
+          fi
+          
+          echo ""
+          echo "All deployments and verifications passed successfully"

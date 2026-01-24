@@ -1,6 +1,9 @@
 # CDK asset staging directory
 cdk.out
 
+# Compiled output directory
+dist/
+
 # Compiled JavaScript
 *.js
 *.js.map
@@ -23,6 +26,7 @@ cdk.out
 node_modules
 
 # IDE
+.cursorrules
 .idea
 .vscode
 *.swp
@@ -39,6 +43,40 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+.cursor/*
+
 # Environment variables
 .env
 .env.local
+
+# Test coverage reports
+coverage/
+.nyc_output
+
+# Integration test generated templates
+tests/integration/.generated-templates/
+
+# Deployment outputs (contains sensitive information)
+deployment-outputs/
+
+# Verification reports (generated during CI/CD)
+verification-reports/
+
+*prompts/*
+prompts/*
+.prompts.txt
+
+*.txt
+
+*docs/*
+
+iam/*
+
+scripts/helper/*
+scripts/bootstrap/*    
+scripts/integration/deployment/docs-integration-scripts/*
+scripts/integration/deprecated/*
+
+lib/stacks/docs/*
+
+tests/docs/*

@@ -1,0 +1,150 @@
+# @format
+
+name: Deploy CDK Stack (Reusable)
+description: "Reusable workflow for deploying a single CDK stack"
+
+on:
+  workflow_call:
+    inputs:
+      stack-name:
+        description: "Full CDK stack name (e.g., NetworkingStack-monitoring-development)"
+        required: true
+        type: string
+      environment:
+        description: "Target environment (development, staging, production)"
+        required: true
+        type: string
+      aws-account-id:
+        description: "Target AWS account ID"
+        required: true
+        type: string
+      aws-region:
+        description: "AWS region"
+        required: false
+        type: string
+        default: "eu-west-1"
+      additional-context:
+        description: "Additional CDK context as JSON"
+        required: false
+        type: string
+        default: "{}"
+      require-approval:
+        description: "CDK approval requirement (never, any-change, broadening)"
+        required: false
+        type: string
+        default: "never"
+      verify-bootstrap:
+        description: "Verify CDK bootstrap before deployment"
+        required: false
+        type: boolean
+        default: false
+      outputs-directory:
+        description: "Directory to save stack outputs"
+        required: false
+        type: string
+        default: ""
+    secrets:
+      AWS_OIDC_ROLE:
+        description: "AWS OIDC role ARN for authentication"
+        required: true
+    outputs:
+      deployment-status:
+        description: "Deployment status (success/failure)"
+        value: ${{ jobs.deploy.outputs.status }}
+      stack-outputs:
+        description: "CloudFormation stack outputs (JSON)"
+        value: ${{ jobs.deploy.outputs.outputs }}
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.stack-name }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    outputs:
+      status: ${{ steps.deploy-stack.outputs.deployment-status }}
+      outputs: ${{ steps.deploy-stack.outputs.stack-outputs }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Yarn
+        uses: ./.github/actions/setup-node-yarn
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE }}
+          aws-region: ${{ inputs.aws-region }}
+          audience: sts.amazonaws.com
+
+      - name: Deploy CDK Stack
+        id: deploy-stack
+        uses: ./.github/actions/deploy-cdk-stack
+        with:
+          stack-name: ${{ inputs.stack-name }}
+          environment: ${{ inputs.environment }}
+          aws-account-id: ${{ inputs.aws-account-id }}
+          aws-region: ${{ inputs.aws-region }}
+          additional-context: ${{ inputs.additional-context }}
+          require-approval: ${{ inputs.require-approval }}
+          verify-bootstrap: ${{ inputs.verify-bootstrap }}
+          outputs-directory: ${{ inputs.outputs-directory }}
+
+      - name: Debug Outputs Before Upload
+        if: always() && inputs.outputs-directory != ''
+        shell: bash
+        run: |
+          echo "=== Debugging Outputs Directory Before Upload ==="
+          echo "Workspace: ${{ github.workspace }}"
+          echo "Outputs directory input: ${{ inputs.outputs-directory }}"
+          echo "Full path: ${{ github.workspace }}/${{ inputs.outputs-directory }}"
+          echo ""
+          echo "Checking if directory exists..."
+          if [ -d "${{ github.workspace }}/${{ inputs.outputs-directory }}" ]; then
+            echo "✓ Directory exists"
+            echo "Contents:"
+            ls -laR "${{ github.workspace }}/${{ inputs.outputs-directory }}"
+          else
+            echo "✗ Directory does not exist"
+            echo ""
+            echo "Workspace root contents:"
+            ls -la "${{ github.workspace }}"
+            echo ""
+            echo "Looking for .deployment-outputs anywhere..."
+            find "${{ github.workspace }}" -type d -name ".deployment-outputs" 2>/dev/null || echo "Not found"
+            echo ""
+            echo "Looking for *-outputs.json files..."
+            find "${{ github.workspace }}" -name "*-outputs.json" 2>/dev/null || echo "Not found"
+          fi
+
+      - name: Upload Stack Outputs
+        if: always() && inputs.outputs-directory != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.stack-name }}-outputs
+          path: ${{ github.workspace }}/${{ inputs.outputs-directory }}
+          retention-days: 30
+          if-no-files-found: warn
+      
+      - name: Debug Outputs Directory
+        if: failure() && inputs.outputs-directory != ''
+        shell: bash
+        run: |
+          echo "Debugging outputs directory issue..."
+          echo "Expected path: ${{ github.workspace }}/${{ inputs.outputs-directory }}"
+          echo ""
+          if [ -d "${{ github.workspace }}/${{ inputs.outputs-directory }}" ]; then
+            echo "Directory exists. Contents:"
+            ls -la "${{ github.workspace }}/${{ inputs.outputs-directory }}"
+          else
+            echo "Directory does not exist"
+          fi
+          echo ""
+          echo "Workspace contents:"
+          ls -la "${{ github.workspace }}"

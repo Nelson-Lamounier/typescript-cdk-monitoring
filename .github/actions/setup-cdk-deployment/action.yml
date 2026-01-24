@@ -1,0 +1,60 @@
+# @format
+
+# .github/actions/setup-cdk-deployment/action.yml
+name: "Setup CDK Deployment Environment"
+description: "Sets up complete environment for CDK deployment including AWS credentials and build cache"
+
+inputs:
+  node-version:
+    description: "Node.js version to use"
+    required: false
+    default: "22"
+  aws-role:
+    description: "AWS IAM role ARN for OIDC authentication"
+    required: true
+  aws-region:
+    description: "AWS region for deployment"
+    required: true
+  build-cache-key:
+    description: "Build cache key from build job"
+    required: true
+  environment-name:
+    description: "Environment name for deployment"
+    required: false
+    default: "pipeline"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js and Yarn
+      uses: ./.github/actions/setup-node-yarn
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Restore Build Cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          dist
+          node_modules
+          .turbo
+          cdk.out
+        key: ${{ inputs.build-cache-key }}
+        restore-keys: build-${{ runner.os }}-
+        fail-on-cache-miss: false
+
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ inputs.aws-role }}
+        aws-region: ${{ inputs.aws-region }}
+
+    - name: Verify CDK Deployment Environment
+      shell: bash
+      run: |
+        make verify-environment \
+          ENVIRONMENT="${{ inputs.environment-name }}" \
+          AWS_REGION="${{ inputs.aws-region }}"

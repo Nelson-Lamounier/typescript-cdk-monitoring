@@ -1,0 +1,1959 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`NetworkingStack - Stack Creation Stack Creation matches snapshot for minimal configuration 1`] = `
+{
+  "Metadata": {
+    "cdk_nag": {
+      "rules_to_suppress": [
+        {
+          "applies_to": [
+            "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+          ],
+          "id": "AwsSolutions-IAM4",
+          "reason": "AWS managed policies are used for Lambda functions created by CDK for custom resources (Auto Scaling lifecycle hooks, VPC default security group restriction, EventBridge targets). These are standard CloudFormation custom resource Lambda functions managed by CDK.",
+        },
+        {
+          "applies_to": [
+            "Resource::*",
+          ],
+          "id": "AwsSolutions-IAM5",
+          "reason": "Wildcard permissions are used by CDK-managed custom resource Lambdas for EventBridge to CloudWatch Logs integration and other CDK framework operations. This is required by the CDK framework to manage resource policies and cannot be scoped further. This is standard CDK behavior.",
+        },
+        {
+          "applies_to": [
+            "Action::ecs:Submit*",
+          ],
+          "id": "AwsSolutions-IAM5",
+          "reason": "ECS Container Instance IAM role requires wildcard action permissions (ecs:Submit*) to communicate with ECS control plane. This is a standard permission for ECS EC2 instances as documented in AWS ECS best practices and is created by CDK's Auto Scaling Group construct.",
+        },
+        {
+          "applies_to": [
+            {
+              "regex": "/^Resource::arn:(aws|<AWS::Partition>):autoscaling:.*:.*:autoScalingGroup:\\*:autoScalingGroupName\\/<.*>$/",
+            },
+          ],
+          "id": "AwsSolutions-IAM5",
+          "reason": "Auto Scaling Group lifecycle hook Lambda (DrainECSHook) requires permissions to manage Auto Scaling lifecycle actions. The wildcard is scoped to the specific Auto Scaling Group name pattern and is necessary for proper instance lifecycle management during ECS task draining. This is a CDK-managed resource.",
+        },
+        {
+          "id": "AwsSolutions-L1",
+          "reason": "Lambda runtime versions are managed by CDK for custom resources. CDK automatically updates these with new releases. Upgrading CDK version will update these runtimes.",
+        },
+        {
+          "id": "AwsSolutions-VPC7",
+          "reason": "VPC Flow Logs are disabled to reduce costs in development environments. For production, enable VPC Flow Logs to CloudWatch Logs or S3 for network troubleshooting and security analysis.",
+        },
+        {
+          "applies_to": [
+            {
+              "regex": "/^Resource::arn:aws:logs:.*:.*:log-group:/aws/vpc/flowlogs/.*:\\*$/",
+            },
+            {
+              "regex": "/^Resource::<.*FlowLogs.*LogGroup.*\\.Arn>:\\*$/",
+            },
+          ],
+          "id": "AwsSolutions-IAM5",
+          "reason": "VPC Flow Logs IAM role requires wildcard permissions for log streams within the flow logs log group. The wildcard (logGroupArn:*) is necessary because VPC Flow Logs creates log streams dynamically with AWS-generated names. This is scoped to the specific log group ARN and is a standard pattern for CloudWatch Logs integration as documented in AWS VPC Flow Logs documentation: https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs-cwl.html",
+        },
+      ],
+    },
+  },
+  "Outputs": {
+    "AvailabilityZones": {
+      "Description": "Availability zones (comma-separated)",
+      "Value": "dummy1a,dummy1b",
+    },
+    "FlowLogsLogGroup": {
+      "Description": "VPC Flow Logs CloudWatch Log Group",
+      "Value": {
+        "Ref": "FlowLogsFlowLogsLogGroup12871958",
+      },
+    },
+    "ParametersParameterCount6DC4838A": {
+      "Description": "Number of SSM parameters created for development",
+      "Value": "5",
+    },
+    "ParametersParameterPathPrefix4435E05D": {
+      "Description": "SSM parameter path prefix for development",
+      "Export": {
+        "Name": "SnapshotStack-ssm-path-prefix",
+      },
+      "Value": "/networking/development",
+    },
+    "PrivateSubnetIds": {
+      "Description": "Private subnet IDs (comma-separated)",
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            {
+              "Ref": "VpcPrivateSubnet1Subnet67A4DBCB",
+            },
+            ",",
+            {
+              "Ref": "VpcPrivateSubnet2SubnetC8EB537D",
+            },
+          ],
+        ],
+      },
+    },
+    "PublicSubnetIds": {
+      "Description": "Public subnet IDs (comma-separated)",
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            {
+              "Ref": "VpcPublicSubnet1Subnet8E8DEDC0",
+            },
+            ",",
+            {
+              "Ref": "VpcPublicSubnet2SubnetA811849C",
+            },
+          ],
+        ],
+      },
+    },
+    "SsmParameterPrefix": {
+      "Description": "SSM Parameter Store path prefix for VPC resources",
+      "Value": "/networking/development",
+    },
+    "VpcCidr": {
+      "Description": "VPC CIDR block",
+      "Value": {
+        "Fn::GetAtt": [
+          "VpcC3027511",
+          "CidrBlock",
+        ],
+      },
+    },
+    "VpcId": {
+      "Description": "VPC ID for development environment",
+      "Value": {
+        "Ref": "VpcC3027511",
+      },
+    },
+  },
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+  },
+  "Resources": {
+    "CustomVpcRestrictDefaultSGCustomResourceProviderHandlerDC833E5E": {
+      "DependsOn": [
+        "CustomVpcRestrictDefaultSGCustomResourceProviderRole26592FE0",
+      ],
+      "Properties": {
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-eu-west-1",
+          "S3Key": "7fa1e366ee8a9ded01fc355f704cff92bfd179574e6f9cfee800a3541df1b200.zip",
+        },
+        "Description": "Lambda function for removing all inbound/outbound rules from the VPC default security group",
+        "Handler": "__entrypoint__.handler",
+        "MemorySize": 128,
+        "Role": {
+          "Fn::GetAtt": [
+            "CustomVpcRestrictDefaultSGCustomResourceProviderRole26592FE0",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 900,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "CustomVpcRestrictDefaultSGCustomResourceProviderRole26592FE0": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Sub": "arn:\${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+          },
+        ],
+        "Policies": [
+          {
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": [
+                    "ec2:AuthorizeSecurityGroupIngress",
+                    "ec2:AuthorizeSecurityGroupEgress",
+                    "ec2:RevokeSecurityGroupIngress",
+                    "ec2:RevokeSecurityGroupEgress",
+                  ],
+                  "Effect": "Allow",
+                  "Resource": [
+                    {
+                      "Fn::Join": [
+                        "",
+                        [
+                          "arn:",
+                          {
+                            "Ref": "AWS::Partition",
+                          },
+                          ":ec2:eu-west-1:123456789012:security-group/",
+                          {
+                            "Fn::GetAtt": [
+                              "VpcC3027511",
+                              "DefaultSecurityGroup",
+                            ],
+                          },
+                        ],
+                      ],
+                    },
+                  ],
+                },
+              ],
+              "Version": "2012-10-17",
+            },
+            "PolicyName": "Inline",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "FlowLogsFlowLogsLogGroup12871958": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "LogGroupName": "/aws/vpc/flowlogs/development",
+        "RetentionInDays": 30,
+        "Tags": [
+          {
+            "Key": "Component",
+            "Value": "VpcFlowLogs",
+          },
+          {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "FlowLogsFlowLogsRole3CE60D31": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "vpc-flow-logs.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "VPC Flow Logs role for development environment",
+        "Tags": [
+          {
+            "Key": "Component",
+            "Value": "VpcFlowLogs",
+          },
+          {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "FlowLogsFlowLogsRoleDefaultPolicy5E761F53": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+                "logs:DescribeLogStreams",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "FlowLogsFlowLogsLogGroup12871958",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "FlowLogsFlowLogsLogGroup12871958",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+                "logs:DescribeLogStreams",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "FlowLogsFlowLogsLogGroup12871958",
+                  "Arn",
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "FlowLogsFlowLogsRoleDefaultPolicy5E761F53",
+        "Roles": [
+          {
+            "Ref": "FlowLogsFlowLogsRole3CE60D31",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "FlowLogsVpcFlowLog3716F815": {
+      "Properties": {
+        "DeliverLogsPermissionArn": {
+          "Fn::GetAtt": [
+            "FlowLogsFlowLogsRole3CE60D31",
+            "Arn",
+          ],
+        },
+        "LogDestinationType": "cloud-watch-logs",
+        "LogGroupName": {
+          "Ref": "FlowLogsFlowLogsLogGroup12871958",
+        },
+        "ResourceId": {
+          "Ref": "VpcC3027511",
+        },
+        "ResourceType": "VPC",
+        "Tags": [
+          {
+            "Key": "Component",
+            "Value": "VpcFlowLogs",
+          },
+          {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "SnapshotStack/FlowLogs/VpcFlowLog",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+        ],
+        "TrafficType": "ALL",
+      },
+      "Type": "AWS::EC2::FlowLog",
+    },
+    "ParametersCustomParam070CFF361": {
+      "Properties": {
+        "Description": "VPC ID for development environment",
+        "Name": "/networking/development/config/vpc-id",
+        "Tags": {
+          "Component": "SSMParameters",
+          "CostCentre": "DEV-001",
+          "DataClassification": "internal",
+          "Environment": "development",
+          "Layer": "Foundation",
+          "ManagedBy": "CDK",
+          "NetworkType": "SharedVpc",
+          "Repository": "monitoring-iac",
+          "StackName": "Networking",
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": {
+          "Ref": "VpcC3027511",
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "ParametersCustomParam16BB6DF6F": {
+      "Properties": {
+        "Description": "VPC CIDR block for development environment",
+        "Name": "/networking/development/config/vpc-cidr",
+        "Tags": {
+          "Component": "SSMParameters",
+          "CostCentre": "DEV-001",
+          "DataClassification": "internal",
+          "Environment": "development",
+          "Layer": "Foundation",
+          "ManagedBy": "CDK",
+          "NetworkType": "SharedVpc",
+          "Repository": "monitoring-iac",
+          "StackName": "Networking",
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "VpcC3027511",
+            "CidrBlock",
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "ParametersCustomParam298A454C6": {
+      "Properties": {
+        "Description": "Availability zones for development environment",
+        "Name": "/networking/development/config/vpc-azs",
+        "Tags": {
+          "Component": "SSMParameters",
+          "CostCentre": "DEV-001",
+          "DataClassification": "internal",
+          "Environment": "development",
+          "Layer": "Foundation",
+          "ManagedBy": "CDK",
+          "NetworkType": "SharedVpc",
+          "Repository": "monitoring-iac",
+          "StackName": "Networking",
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": "dummy1a,dummy1b",
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "ParametersCustomParam337C26767": {
+      "Properties": {
+        "Description": "Public subnet IDs for development environment",
+        "Name": "/networking/development/config/public-subnet-ids",
+        "Tags": {
+          "Component": "SSMParameters",
+          "CostCentre": "DEV-001",
+          "DataClassification": "internal",
+          "Environment": "development",
+          "Layer": "Foundation",
+          "ManagedBy": "CDK",
+          "NetworkType": "SharedVpc",
+          "Repository": "monitoring-iac",
+          "StackName": "Networking",
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": {
+          "Fn::Join": [
+            "",
+            [
+              {
+                "Ref": "VpcPublicSubnet1Subnet8E8DEDC0",
+              },
+              ",",
+              {
+                "Ref": "VpcPublicSubnet2SubnetA811849C",
+              },
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "ParametersCustomParam4B633FEDA": {
+      "Properties": {
+        "Description": "Private subnet IDs for development environment",
+        "Name": "/networking/development/config/private-subnet-ids",
+        "Tags": {
+          "Component": "SSMParameters",
+          "CostCentre": "DEV-001",
+          "DataClassification": "internal",
+          "Environment": "development",
+          "Layer": "Foundation",
+          "ManagedBy": "CDK",
+          "NetworkType": "SharedVpc",
+          "Repository": "monitoring-iac",
+          "StackName": "Networking",
+        },
+        "Tier": "Standard",
+        "Type": "String",
+        "Value": {
+          "Fn::Join": [
+            "",
+            [
+              {
+                "Ref": "VpcPrivateSubnet1Subnet67A4DBCB",
+              },
+              ",",
+              {
+                "Ref": "VpcPrivateSubnet2SubnetC8EB537D",
+              },
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "VpcC3027511": {
+      "Properties": {
+        "CidrBlock": "10.0.0.0/16",
+        "EnableDnsHostnames": true,
+        "EnableDnsSupport": true,
+        "InstanceTenancy": "default",
+        "Tags": [
+          {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "development-vpc",
+          },
+          {
+            "Key": "Network-Tier",
+            "Value": "Private",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+          {
+            "Key": "Type",
+            "Value": "Private",
+          },
+        ],
+      },
+      "Type": "AWS::EC2::VPC",
+    },
+    "VpcDynamoDbEndpointDE074E93": {
+      "Properties": {
+        "RouteTableIds": [
+          {
+            "Ref": "VpcPrivateSubnet1RouteTable901BAEEE",
+          },
+          {
+            "Ref": "VpcPrivateSubnet2RouteTable1EA00C9D",
+          },
+          {
+            "Ref": "VpcPublicSubnet1RouteTable431DD755",
+          },
+          {
+            "Ref": "VpcPublicSubnet2RouteTable77FB35FC",
+          },
+        ],
+        "ServiceName": {
+          "Fn::Join": [
+            "",
+            [
+              "com.amazonaws.",
+              {
+                "Ref": "AWS::Region",
+              },
+              ".dynamodb",
+            ],
+          ],
+        },
+        "Tags": [
+          {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "development-vpc",
+          },
+          {
+            "Key": "Network-Tier",
+            "Value": "Private",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+          {
+            "Key": "Type",
+            "Value": "Private",
+          },
+        ],
+        "VpcEndpointType": "Gateway",
+        "VpcId": {
+          "Ref": "VpcC3027511",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "VpcEc2MessagesEndpoint2E93FCA8": {
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "VpcEc2MessagesEndpointSecurityGroup3786E59A",
+              "GroupId",
+            ],
+          },
+        ],
+        "ServiceName": "com.amazonaws.eu-west-1.ec2messages",
+        "SubnetIds": [
+          {
+            "Ref": "VpcPrivateSubnet1Subnet67A4DBCB",
+          },
+          {
+            "Ref": "VpcPrivateSubnet2SubnetC8EB537D",
+          },
+        ],
+        "Tags": [
+          {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "development-vpc",
+          },
+          {
+            "Key": "Network-Tier",
+            "Value": "Private",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+          {
+            "Key": "Type",
+            "Value": "Private",
+          },
+        ],
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "VpcC3027511",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "VpcEc2MessagesEndpointSecurityGroup3786E59A": {
+      "Properties": {
+        "GroupDescription": "SnapshotStack/Vpc/Vpc/Ec2MessagesEndpoint/SecurityGroup",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic by default",
+            "IpProtocol": "-1",
+          },
+        ],
+        "SecurityGroupIngress": [
+          {
+            "CidrIp": {
+              "Fn::GetAtt": [
+                "VpcC3027511",
+                "CidrBlock",
+              ],
+            },
+            "Description": {
+              "Fn::Join": [
+                "",
+                [
+                  "from ",
+                  {
+                    "Fn::GetAtt": [
+                      "VpcC3027511",
+                      "CidrBlock",
+                    ],
+                  },
+                  ":443",
+                ],
+              ],
+            },
+            "FromPort": 443,
+            "IpProtocol": "tcp",
+            "ToPort": 443,
+          },
+        ],
+        "Tags": [
+          {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "development-vpc",
+          },
+          {
+            "Key": "Network-Tier",
+            "Value": "Private",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+          {
+            "Key": "Type",
+            "Value": "Private",
+          },
+        ],
+        "VpcId": {
+          "Ref": "VpcC3027511",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+    "VpcIGW488B0FEB": {
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "development-vpc",
+          },
+          {
+            "Key": "Network-Tier",
+            "Value": "Private",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+          {
+            "Key": "Type",
+            "Value": "Private",
+          },
+        ],
+      },
+      "Type": "AWS::EC2::InternetGateway",
+    },
+    "VpcPrivateSubnet1RouteTable901BAEEE": {
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "SnapshotStack/Vpc/Vpc/PrivateSubnet1",
+          },
+          {
+            "Key": "Network-Tier",
+            "Value": "Private",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+          {
+            "Key": "Type",
+            "Value": "Private",
+          },
+        ],
+        "VpcId": {
+          "Ref": "VpcC3027511",
+        },
+      },
+      "Type": "AWS::EC2::RouteTable",
+    },
+    "VpcPrivateSubnet1RouteTableAssociation2BC202CB": {
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "VpcPrivateSubnet1RouteTable901BAEEE",
+        },
+        "SubnetId": {
+          "Ref": "VpcPrivateSubnet1Subnet67A4DBCB",
+        },
+      },
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+    },
+    "VpcPrivateSubnet1Subnet67A4DBCB": {
+      "Properties": {
+        "AvailabilityZone": "dummy1a",
+        "CidrBlock": "10.0.2.0/24",
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "aws-cdk:subnet-name",
+            "Value": "Private",
+          },
+          {
+            "Key": "aws-cdk:subnet-type",
+            "Value": "Private",
+          },
+          {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "SnapshotStack/Vpc/Vpc/PrivateSubnet1",
+          },
+          {
+            "Key": "Network-Tier",
+            "Value": "Private",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+          {
+            "Key": "Type",
+            "Value": "Private",
+          },
+        ],
+        "VpcId": {
+          "Ref": "VpcC3027511",
+        },
+      },
+      "Type": "AWS::EC2::Subnet",
+    },
+    "VpcPrivateSubnet2RouteTable1EA00C9D": {
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "SnapshotStack/Vpc/Vpc/PrivateSubnet2",
+          },
+          {
+            "Key": "Network-Tier",
+            "Value": "Private",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+          {
+            "Key": "Type",
+            "Value": "Private",
+          },
+        ],
+        "VpcId": {
+          "Ref": "VpcC3027511",
+        },
+      },
+      "Type": "AWS::EC2::RouteTable",
+    },
+    "VpcPrivateSubnet2RouteTableAssociationFA51927B": {
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "VpcPrivateSubnet2RouteTable1EA00C9D",
+        },
+        "SubnetId": {
+          "Ref": "VpcPrivateSubnet2SubnetC8EB537D",
+        },
+      },
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+    },
+    "VpcPrivateSubnet2SubnetC8EB537D": {
+      "Properties": {
+        "AvailabilityZone": "dummy1b",
+        "CidrBlock": "10.0.3.0/24",
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "aws-cdk:subnet-name",
+            "Value": "Private",
+          },
+          {
+            "Key": "aws-cdk:subnet-type",
+            "Value": "Private",
+          },
+          {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "SnapshotStack/Vpc/Vpc/PrivateSubnet2",
+          },
+          {
+            "Key": "Network-Tier",
+            "Value": "Private",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+          {
+            "Key": "Type",
+            "Value": "Private",
+          },
+        ],
+        "VpcId": {
+          "Ref": "VpcC3027511",
+        },
+      },
+      "Type": "AWS::EC2::Subnet",
+    },
+    "VpcPublicSubnet1DefaultRoute0F5C6C43": {
+      "DependsOn": [
+        "VpcVPCGW42EC8516",
+      ],
+      "Properties": {
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "GatewayId": {
+          "Ref": "VpcIGW488B0FEB",
+        },
+        "RouteTableId": {
+          "Ref": "VpcPublicSubnet1RouteTable431DD755",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "VpcPublicSubnet1RouteTable431DD755": {
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "SnapshotStack/Vpc/Vpc/PublicSubnet1",
+          },
+          {
+            "Key": "Network-Tier",
+            "Value": "Private",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+          {
+            "Key": "Type",
+            "Value": "Private",
+          },
+        ],
+        "VpcId": {
+          "Ref": "VpcC3027511",
+        },
+      },
+      "Type": "AWS::EC2::RouteTable",
+    },
+    "VpcPublicSubnet1RouteTableAssociationBBCB7AA1": {
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "VpcPublicSubnet1RouteTable431DD755",
+        },
+        "SubnetId": {
+          "Ref": "VpcPublicSubnet1Subnet8E8DEDC0",
+        },
+      },
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+    },
+    "VpcPublicSubnet1Subnet8E8DEDC0": {
+      "Properties": {
+        "AvailabilityZone": "dummy1a",
+        "CidrBlock": "10.0.0.0/24",
+        "MapPublicIpOnLaunch": true,
+        "Tags": [
+          {
+            "Key": "aws-cdk:subnet-name",
+            "Value": "Public",
+          },
+          {
+            "Key": "aws-cdk:subnet-type",
+            "Value": "Public",
+          },
+          {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "SnapshotStack/Vpc/Vpc/PublicSubnet1",
+          },
+          {
+            "Key": "Network-Tier",
+            "Value": "Private",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+          {
+            "Key": "Type",
+            "Value": "Private",
+          },
+        ],
+        "VpcId": {
+          "Ref": "VpcC3027511",
+        },
+      },
+      "Type": "AWS::EC2::Subnet",
+    },
+    "VpcPublicSubnet2DefaultRouteD629179A": {
+      "DependsOn": [
+        "VpcVPCGW42EC8516",
+      ],
+      "Properties": {
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "GatewayId": {
+          "Ref": "VpcIGW488B0FEB",
+        },
+        "RouteTableId": {
+          "Ref": "VpcPublicSubnet2RouteTable77FB35FC",
+        },
+      },
+      "Type": "AWS::EC2::Route",
+    },
+    "VpcPublicSubnet2RouteTable77FB35FC": {
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "SnapshotStack/Vpc/Vpc/PublicSubnet2",
+          },
+          {
+            "Key": "Network-Tier",
+            "Value": "Private",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+          {
+            "Key": "Type",
+            "Value": "Private",
+          },
+        ],
+        "VpcId": {
+          "Ref": "VpcC3027511",
+        },
+      },
+      "Type": "AWS::EC2::RouteTable",
+    },
+    "VpcPublicSubnet2RouteTableAssociation3AFE92E6": {
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "VpcPublicSubnet2RouteTable77FB35FC",
+        },
+        "SubnetId": {
+          "Ref": "VpcPublicSubnet2SubnetA811849C",
+        },
+      },
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+    },
+    "VpcPublicSubnet2SubnetA811849C": {
+      "Properties": {
+        "AvailabilityZone": "dummy1b",
+        "CidrBlock": "10.0.1.0/24",
+        "MapPublicIpOnLaunch": true,
+        "Tags": [
+          {
+            "Key": "aws-cdk:subnet-name",
+            "Value": "Public",
+          },
+          {
+            "Key": "aws-cdk:subnet-type",
+            "Value": "Public",
+          },
+          {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "SnapshotStack/Vpc/Vpc/PublicSubnet2",
+          },
+          {
+            "Key": "Network-Tier",
+            "Value": "Private",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+          {
+            "Key": "Type",
+            "Value": "Private",
+          },
+        ],
+        "VpcId": {
+          "Ref": "VpcC3027511",
+        },
+      },
+      "Type": "AWS::EC2::Subnet",
+    },
+    "VpcRestrictDefaultSecurityGroupCustomResource1EDFC75B": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "Account": "123456789012",
+        "DefaultSecurityGroupId": {
+          "Fn::GetAtt": [
+            "VpcC3027511",
+            "DefaultSecurityGroup",
+          ],
+        },
+        "ServiceToken": {
+          "Fn::GetAtt": [
+            "CustomVpcRestrictDefaultSGCustomResourceProviderHandlerDC833E5E",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "Custom::VpcRestrictDefaultSG",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "VpcS3Endpoint4A6BE1FA": {
+      "Properties": {
+        "RouteTableIds": [
+          {
+            "Ref": "VpcPrivateSubnet1RouteTable901BAEEE",
+          },
+          {
+            "Ref": "VpcPrivateSubnet2RouteTable1EA00C9D",
+          },
+          {
+            "Ref": "VpcPublicSubnet1RouteTable431DD755",
+          },
+          {
+            "Ref": "VpcPublicSubnet2RouteTable77FB35FC",
+          },
+        ],
+        "ServiceName": {
+          "Fn::Join": [
+            "",
+            [
+              "com.amazonaws.",
+              {
+                "Ref": "AWS::Region",
+              },
+              ".s3",
+            ],
+          ],
+        },
+        "Tags": [
+          {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "development-vpc",
+          },
+          {
+            "Key": "Network-Tier",
+            "Value": "Private",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+          {
+            "Key": "Type",
+            "Value": "Private",
+          },
+        ],
+        "VpcEndpointType": "Gateway",
+        "VpcId": {
+          "Ref": "VpcC3027511",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "VpcSsmEndpoint7F6DDE26": {
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "VpcSsmEndpointSecurityGroupB20D6959",
+              "GroupId",
+            ],
+          },
+        ],
+        "ServiceName": "com.amazonaws.eu-west-1.ssm",
+        "SubnetIds": [
+          {
+            "Ref": "VpcPrivateSubnet1Subnet67A4DBCB",
+          },
+          {
+            "Ref": "VpcPrivateSubnet2SubnetC8EB537D",
+          },
+        ],
+        "Tags": [
+          {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "development-vpc",
+          },
+          {
+            "Key": "Network-Tier",
+            "Value": "Private",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+          {
+            "Key": "Type",
+            "Value": "Private",
+          },
+        ],
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "VpcC3027511",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "VpcSsmEndpointSecurityGroupB20D6959": {
+      "Properties": {
+        "GroupDescription": "SnapshotStack/Vpc/Vpc/SsmEndpoint/SecurityGroup",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic by default",
+            "IpProtocol": "-1",
+          },
+        ],
+        "SecurityGroupIngress": [
+          {
+            "CidrIp": {
+              "Fn::GetAtt": [
+                "VpcC3027511",
+                "CidrBlock",
+              ],
+            },
+            "Description": {
+              "Fn::Join": [
+                "",
+                [
+                  "from ",
+                  {
+                    "Fn::GetAtt": [
+                      "VpcC3027511",
+                      "CidrBlock",
+                    ],
+                  },
+                  ":443",
+                ],
+              ],
+            },
+            "FromPort": 443,
+            "IpProtocol": "tcp",
+            "ToPort": 443,
+          },
+        ],
+        "Tags": [
+          {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "development-vpc",
+          },
+          {
+            "Key": "Network-Tier",
+            "Value": "Private",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+          {
+            "Key": "Type",
+            "Value": "Private",
+          },
+        ],
+        "VpcId": {
+          "Ref": "VpcC3027511",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+    "VpcSsmMessagesEndpoint056A753C": {
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "VpcSsmMessagesEndpointSecurityGroup35FA73E6",
+              "GroupId",
+            ],
+          },
+        ],
+        "ServiceName": "com.amazonaws.eu-west-1.ssmmessages",
+        "SubnetIds": [
+          {
+            "Ref": "VpcPrivateSubnet1Subnet67A4DBCB",
+          },
+          {
+            "Ref": "VpcPrivateSubnet2SubnetC8EB537D",
+          },
+        ],
+        "Tags": [
+          {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "development-vpc",
+          },
+          {
+            "Key": "Network-Tier",
+            "Value": "Private",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+          {
+            "Key": "Type",
+            "Value": "Private",
+          },
+        ],
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "VpcC3027511",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "VpcSsmMessagesEndpointSecurityGroup35FA73E6": {
+      "Properties": {
+        "GroupDescription": "SnapshotStack/Vpc/Vpc/SsmMessagesEndpoint/SecurityGroup",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic by default",
+            "IpProtocol": "-1",
+          },
+        ],
+        "SecurityGroupIngress": [
+          {
+            "CidrIp": {
+              "Fn::GetAtt": [
+                "VpcC3027511",
+                "CidrBlock",
+              ],
+            },
+            "Description": {
+              "Fn::Join": [
+                "",
+                [
+                  "from ",
+                  {
+                    "Fn::GetAtt": [
+                      "VpcC3027511",
+                      "CidrBlock",
+                    ],
+                  },
+                  ":443",
+                ],
+              ],
+            },
+            "FromPort": 443,
+            "IpProtocol": "tcp",
+            "ToPort": 443,
+          },
+        ],
+        "Tags": [
+          {
+            "Key": "CostCentre",
+            "Value": "DEV-001",
+          },
+          {
+            "Key": "DataClassification",
+            "Value": "internal",
+          },
+          {
+            "Key": "Environment",
+            "Value": "development",
+          },
+          {
+            "Key": "Layer",
+            "Value": "Foundation",
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK",
+          },
+          {
+            "Key": "Name",
+            "Value": "development-vpc",
+          },
+          {
+            "Key": "Network-Tier",
+            "Value": "Private",
+          },
+          {
+            "Key": "NetworkType",
+            "Value": "SharedVpc",
+          },
+          {
+            "Key": "Repository",
+            "Value": "monitoring-iac",
+          },
+          {
+            "Key": "StackName",
+            "Value": "Networking",
+          },
+          {
+            "Key": "Type",
+            "Value": "Private",
+          },
+        ],
+        "VpcId": {
+          "Ref": "VpcC3027511",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+    "VpcVPCGW42EC8516": {
+      "Properties": {
+        "InternetGatewayId": {
+          "Ref": "VpcIGW488B0FEB",
+        },
+        "VpcId": {
+          "Ref": "VpcC3027511",
+        },
+      },
+      "Type": "AWS::EC2::VPCGatewayAttachment",
+    },
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                  ],
+                  {
+                    "Ref": "BootstrapVersion",
+                  },
+                ],
+              },
+            ],
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI.",
+        },
+      ],
+    },
+  },
+}
+`;
