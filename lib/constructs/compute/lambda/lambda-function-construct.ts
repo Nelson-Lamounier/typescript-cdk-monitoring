@@ -4,6 +4,8 @@ import * as cdk from "aws-cdk-lib";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as iam from "aws-cdk-lib/aws-iam";
+import * as sqs from "aws-cdk-lib/aws-sqs";
+import * as sns from "aws-cdk-lib/aws-sns";
 import { Construct } from "constructs";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import { NagSuppressions } from "cdk-nag";
@@ -86,6 +88,25 @@ export interface LambdaFunctionConstructProps {
    * If provided, creates explicit IAM policy with S3 read permissions
    */
   s3BucketArn?: string;
+
+  /**
+   * Dead Letter Queue for failed function invocations
+   * @default undefined (no DLQ)
+   */
+  deadLetterQueue?: sqs.IQueue;
+
+  /**
+   * Dead Letter Topic for failed function invocations
+   * @default undefined (no DLQ)
+   */
+  deadLetterTopic?: sns.ITopic;
+
+  /**
+   * Reserved concurrent executions
+   * Prevents runaway costs and limits function scaling
+   * @default undefined (no limit)
+   */
+  reservedConcurrentExecutions?: number;
 }
 
 /**
@@ -183,6 +204,11 @@ export class LambdaFunctionConstruct extends Construct {
         mainFields: ["module", "main"],
       },
       initialPolicy: props.initialPolicy,
+      // CKV_AWS_116 fix - add DLQ support
+      deadLetterQueue: props.deadLetterQueue,
+      deadLetterTopic: props.deadLetterTopic,
+      // CKV_AWS_115 fix - add reserved concurrency support
+      reservedConcurrentExecutions: props.reservedConcurrentExecutions,
     });
 
     this.role = this.function.role as iam.Role;

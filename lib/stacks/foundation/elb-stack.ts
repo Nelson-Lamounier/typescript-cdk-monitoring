@@ -67,6 +67,7 @@ export class AlbConstruct extends Construct {
           encryption: s3.BucketEncryption.S3_MANAGED,
           blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
           enforceSSL: true, // Require SSL/TLS for all requests
+          versioned: true, // CKV_AWS_21 fix - enable versioning
           removalPolicy: cdk.RemovalPolicy.RETAIN,
           autoDeleteObjects: false,
           lifecycleRules: [
@@ -74,6 +75,7 @@ export class AlbConstruct extends Construct {
               id: "DeleteOldLogs",
               enabled: true,
               expiration: cdk.Duration.days(90),
+              noncurrentVersionExpiration: cdk.Duration.days(30), // Clean up old versions
               transitions: [
                 {
                   storageClass: s3.StorageClass.INFREQUENT_ACCESS,
@@ -82,7 +84,6 @@ export class AlbConstruct extends Construct {
               ],
             },
           ],
-          serverAccessLogsPrefix: "bucket-access-logs/",
         });
 
       // Add bucket policy to allow ALB to write logs

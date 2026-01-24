@@ -292,10 +292,11 @@ export class WebappDynamoDbStack extends cdk.Stack {
         // Portfolio sites typically have unpredictable traffic patterns
         billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
 
-        // Point-in-time recovery - enabled in production only
+        // Point-in-time recovery - enabled by default (CKV_AWS_28)
         // Cost: ~20% of table storage costs
         // Benefit: Restore to any point within last 35 days
-        pointInTimeRecovery: isProduction,
+        // Can be disabled in development for cost savings if needed
+        pointInTimeRecovery: true,
 
         // AWS managed encryption (default) - no additional cost
         // For compliance requirements, use CUSTOMER_MANAGED with KMS key

@@ -6,6 +6,7 @@ import * as cdk from "aws-cdk-lib";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as logs from "aws-cdk-lib/aws-logs";
+import * as sqs from "aws-cdk-lib/aws-sqs";
 import { Construct } from "constructs";
 
 import { EnvironmentConfig } from "../../../config/environments";
@@ -102,6 +103,7 @@ export class WebappApiStack extends cdk.Stack {
   public readonly getArticleFunction: LambdaFunctionConstruct;
   public readonly listArticlesFunction: LambdaFunctionConstruct;
   public readonly listArticlesByTagFunction: LambdaFunctionConstruct;
+  public readonly lambdaDlq?: sqs.Queue; // CKV_AWS_116 - DLQ for production
 
   constructor(scope: Construct, id: string, props: WebappApiStackProps) {
     super(scope, id, {
@@ -122,6 +124,21 @@ export class WebappApiStack extends cdk.Stack {
 
     // Determine CORS origins
     const allowedOrigins = corsOrigins || (isProduction ? [] : ["*"]);
+
+    // ========================================================================
+    // DEAD LETTER QUEUE (CKV_AWS_116 - Production only)
+    // ========================================================================
+    if (isProduction) {
+      this.lambdaDlq = new sqs.Queue(this, "LambdaDlq", {
+        queueName: `${projectName}-lambda-dlq-${envName}`,
+        encryption: sqs.QueueEncryption.KMS_MANAGED,
+        retentionPeriod: cdk.Duration.days(14), // Keep failed messages for 2 weeks
+        removalPolicy: cdk.RemovalPolicy.RETAIN,
+      });
+    }
+
+    // Reserved concurrency for production (CKV_AWS_115)
+    const reservedConcurrency = isProduction ? 10 : undefined;
 
     // ========================================================================
     // API GATEWAY
@@ -196,6 +213,10 @@ export class WebappApiStack extends cdk.Stack {
         // Explicit IAM permissions via separate policy resources
         dynamoDbTableArn: articlesTable.tableArn,
         s3BucketArn: assetsS3Bucket.bucketArn,
+        // CKV_AWS_116 - DLQ for production
+        deadLetterQueue: this.lambdaDlq,
+        // CKV_AWS_115 - Reserved concurrency for production
+        reservedConcurrentExecutions: reservedConcurrency,
       },
     );
 
@@ -226,6 +247,10 @@ export class WebappApiStack extends cdk.Stack {
           : logs.RetentionDays.ONE_WEEK,
         // Explicit IAM permissions via separate policy resources
         dynamoDbTableArn: articlesTable.tableArn,
+        // CKV_AWS_116 - DLQ for production
+        deadLetterQueue: this.lambdaDlq,
+        // CKV_AWS_115 - Reserved concurrency for production
+        reservedConcurrentExecutions: reservedConcurrency,
       },
     );
 
@@ -256,6 +281,10 @@ export class WebappApiStack extends cdk.Stack {
           : logs.RetentionDays.ONE_WEEK,
         // Explicit IAM permissions via separate policy resources
         dynamoDbTableArn: articlesTable.tableArn,
+        // CKV_AWS_116 - DLQ for production
+        deadLetterQueue: this.lambdaDlq,
+        // CKV_AWS_115 - Reserved concurrency for production
+        reservedConcurrentExecutions: reservedConcurrency,
       },
     );
 

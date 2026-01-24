@@ -61,7 +61,7 @@ export class EcrConstruct extends Construct {
     const imageScanOnPush =
       props.imageScanOnPush ?? DEFAULT_ECR_IMAGE_SCAN_ON_PUSH;
     const imageTagMutability =
-      props.imageTagMutability ?? DEFAULT_ECR_IMAGE_TAG_MUTABILITY;
+      props.imageTagMutability ?? (isProd ? ecr.TagMutability.IMMUTABLE : DEFAULT_ECR_IMAGE_TAG_MUTABILITY); // CKV_AWS_51 fix
 
     this.repository = new ecr.Repository(this, "Repository", {
       repositoryName: props.repositoryName,

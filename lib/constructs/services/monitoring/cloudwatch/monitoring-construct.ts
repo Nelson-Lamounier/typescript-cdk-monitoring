@@ -4,6 +4,7 @@ import * as cdk from "aws-cdk-lib";
 import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as sns from "aws-cdk-lib/aws-sns";
+import * as kms from "aws-cdk-lib/aws-kms";
 import * as subscriptions from "aws-cdk-lib/aws-sns-subscriptions";
 import { Construct } from "constructs";
 
@@ -14,6 +15,8 @@ export interface MonitoringConstructProps {
   alertEmail?: string;
   enableDashboard?: boolean;
   logRetentionDays?: logs.RetentionDays;
+  /** KMS key for SNS topic encryption (CKV_AWS_26) */
+  encryptionKey?: kms.IKey;
 }
 
 export class MonitoringConstruct extends Construct {
@@ -27,6 +30,7 @@ export class MonitoringConstruct extends Construct {
     this.alarmTopic = new sns.Topic(this, "AlarmTopic", {
       displayName: `${props.envName} Infrastructure Alerts`,
       topicName: `infrastructure-alerts-${props.envName}`,
+      masterKey: props.encryptionKey, // CKV_AWS_26 fix - encrypt SNS topic
     });
 
     // Enforce SSL/TLS for SNS topic publishers (CDK Nag: AwsSolutions-SNS3)

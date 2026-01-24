@@ -260,6 +260,7 @@ export class AlbConstruct extends Construct {
         encryptionKey: accessLogBucketEncryptionKey,
         blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
         enforceSSL: true,
+        versioned: true, // CKV_AWS_21 fix - enable versioning
         removalPolicy: cdk.RemovalPolicy.RETAIN,
         autoDeleteObjects: false,
         lifecycleRules,

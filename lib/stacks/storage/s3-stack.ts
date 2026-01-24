@@ -178,7 +178,7 @@ export class MonitoringS3Stack extends cdk.Stack {
         bucketName: `monitoring-dashboards-${envName}-${this.account}`,
         purpose: "Grafana Dashboard Storage",
         encryption: s3.BucketEncryption.S3_MANAGED,
-        versioned: props.enableVersioning ?? false,
+        versioned: props.enableVersioning ?? this.isProduction, // CKV_AWS_21 fix - enable in production by default
         removalPolicy,
         autoDeleteObjects:
           removalPolicy === cdk.RemovalPolicy.DESTROY && !this.isProduction,
@@ -189,7 +189,7 @@ export class MonitoringS3Stack extends cdk.Stack {
             expiration: cdk.Duration.days(retentionDays),
           },
         ],
-        enableAccessLogs: props.enableAccessLogs,
+        enableAccessLogs: props.enableAccessLogs ?? false, // CKV_AWS_18 - make explicit
         accessLogsBucket: props.accessLogsBucket,
       },
     });

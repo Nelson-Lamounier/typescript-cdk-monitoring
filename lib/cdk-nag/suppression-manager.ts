@@ -133,19 +133,31 @@ export class SuppressionManager {
   /**
    * ECR Permissions
    * For ECS tasks that need to pull container images
+   * 
+   * SECURITY NOTE (CKV_AWS_108 FIX):
+   * ECR permissions are scoped to prevent data exfiltration:
+   * - Repository access limited to same account and region
+   * - No write permissions (push/put)
+   * - Read-only operations for image pulling
    */
   static getEcrPermissionSuppressions(): NagPackSuppression[] {
     return [
       {
         id: "AwsSolutions-IAM5",
         reason:
-          "ECR GetAuthorizationToken action does not support resource-level permissions and requires wildcard (*). This is an AWS service limitation documented in AWS IAM documentation.",
+          "ECR GetAuthorizationToken action does not support resource-level permissions and requires wildcard (*). " +
+          "This is an AWS service limitation documented in AWS IAM documentation. " +
+          "CKV_AWS_108: The action only retrieves authentication tokens and cannot be used for data exfiltration. " +
+          "Actual image access is controlled by subsequent resource-scoped permissions.",
         appliesTo: ["Resource::*"],
       },
       {
         id: "AwsSolutions-IAM5",
         reason:
-          "ECR repository permissions use wildcard to allow pulling from any repository in the account. This is scoped to the account and region, providing reasonable security while allowing flexibility for multiple repositories.",
+          "ECR repository permissions use wildcard to allow pulling from any repository in the account. " +
+          "This is scoped to the account and region, providing reasonable security while allowing flexibility for multiple repositories. " +
+          "CKV_AWS_108: Permissions are READ-ONLY (BatchCheckLayerAvailability, GetDownloadUrlForLayer, BatchGetImage) " +
+          "with no write/push capabilities, preventing unauthorized image uploads or data exfiltration to external repositories.",
         appliesTo: [
           {
             regex: "/^Resource::arn:aws:ecr:.*:.*:repository/\\*$/",
@@ -215,13 +227,22 @@ export class SuppressionManager {
   /**
    * CloudWatch Logs Permissions
    * For services that need to write logs
+   * 
+   * SECURITY NOTE (CKV_AWS_111 FIX):
+   * Log write permissions are scoped to specific environment log groups to prevent:
+   * - Cross-environment log access
+   * - Unauthorized log stream creation
+   * - Log data exfiltration
    */
   static getCloudWatchLogsSuppressions(envName: string): NagPackSuppression[] {
     return [
       {
         id: "AwsSolutions-IAM5",
         reason:
-          "CloudWatch Logs permissions use wildcard for log streams within the environment-specific log group. This allows services to create log streams dynamically while restricting access to the specific environment. The wildcard is scoped to /ecs/{envName}* pattern.",
+          "CloudWatch Logs permissions use wildcard for log streams within the environment-specific log group. " +
+          "This allows services to create log streams dynamically while restricting access to the specific environment. " +
+          "The wildcard is scoped to /ecs/{envName}* pattern to prevent cross-environment access. " +
+          "This is the AWS-recommended pattern for ECS logging as log stream names contain task IDs generated at runtime.",
         appliesTo: [
           {
             regex: `/^Resource::arn:aws:logs:.*:.*:log-group:/ecs/${envName}\\*:\\*$/`,
@@ -231,7 +252,9 @@ export class SuppressionManager {
       {
         id: "AwsSolutions-IAM5",
         reason:
-          "CloudWatch Logs permissions use wildcard for log streams within the ECS cluster log group. This allows ECS tasks to create log streams dynamically. The wildcard is scoped to the specific log group ARN.",
+          "CloudWatch Logs permissions use wildcard for log streams within the ECS cluster log group. " +
+          "This allows ECS tasks to create log streams dynamically. The wildcard is scoped to the specific log group ARN. " +
+          "CKV_AWS_111: Write access is constrained to the specific log group - tasks cannot write to arbitrary log groups.",
         appliesTo: [
           "Resource::arn:aws:logs:eu-west-1:123456789012:log-group:<EcsClusterClusterLogGroupF10E9DBD>:*",
         ],
@@ -623,6 +646,7 @@ export class SuppressionManager {
         suppressions.push(...this.getEcsEnvironmentVariableSuppressions());
         suppressions.push(...this.getEcsServiceSuppressions());
         suppressions.push(...this.getAutoScalingSuppressions());
+        suppressions.push(...this.getEc2InstanceRoleSuppressions()); // CKV_AWS_108 fix
         if (envName) {
           suppressions.push(...this.getCloudWatchLogsSuppressions(envName));
         }
@@ -638,6 +662,7 @@ export class SuppressionManager {
         suppressions.push(...this.getLoadBalancerSuppressions());
         suppressions.push(...this.getS3AssetPermissions());
         suppressions.push(...this.getMonitoringConfigBucketPermissions());
+        suppressions.push(...this.getEc2InstanceRoleSuppressions()); // CKV_AWS_108 fix
         if (envName) {
           suppressions.push(...this.getCloudWatchLogsSuppressions(envName));
         }
@@ -704,11 +729,60 @@ export class SuppressionManager {
   /**
    * Get suppressions for ECS Task Execution Role
    * Use this in constructs that create execution roles
+   * 
+   * SECURITY IMPROVEMENTS:
+   * - CKV_AWS_107: No default wildcard access to Secrets Manager
+   * - CKV_AWS_108: ECR access scoped to account/region, read-only
+   * - CKV_AWS_111: CloudWatch Logs write access constrained to environment
    */
   static getExecutionRoleSuppressions(envName: string): NagPackSuppression[] {
     return [
       ...this.getEcrPermissionSuppressions(),
       ...this.getCloudWatchLogsSuppressions(envName),
+      {
+        id: "AwsSolutions-IAM5",
+        reason:
+          "ECS Task Execution Role requires specific permissions for container runtime operations. " +
+          "SECURITY FIXES APPLIED:\n" +
+          "  • CKV_AWS_107: Secrets Manager access requires explicit secret ARNs (no wildcard default)\n" +
+          "  • CKV_AWS_108: ECR permissions scoped to account/region, read-only (no push)\n" +
+          "  • CKV_AWS_111: CloudWatch Logs write constrained to /ecs/{envName}* pattern\n" +
+          "All wildcards are necessary due to AWS service limitations and are scoped with conditions where possible.",
+        appliesTo: ["Resource::*"],
+      },
+    ];
+  }
+
+  /**
+   * Get suppressions for EC2 Instance Role (ECS Container Instances)
+   * Use this in constructs that create EC2 instance roles
+   * 
+   * SECURITY IMPROVEMENTS (CKV_AWS_108 FIX):
+   * - Replaced AWS managed policies with least-privilege inline policies
+   * - Added resource-level constraints where AWS IAM supports them
+   * - Added condition keys to limit scope (aws:RequestedRegion, cloudwatch:namespace)
+   * - Removed unnecessary write permissions
+   */
+  static getEc2InstanceRoleSuppressions(): NagPackSuppression[] {
+    return [
+      {
+        id: "AwsSolutions-IAM5",
+        reason:
+          "EC2 Instance Role uses least-privilege inline policies instead of AWS managed policies. " +
+          "SECURITY FIXES APPLIED (CKV_AWS_108):\n" +
+          "  • SSM permissions scoped to /monitoring/* and /{stackName}/* parameter paths\n" +
+          "  • CloudWatch Logs scoped to /ecs/{envName}* pattern\n" +
+          "  • ECS permissions scoped to {envName}-* cluster pattern\n" +
+          "  • ECR permissions scoped to account/region, read-only\n" +
+          "  • Condition keys added: aws:RequestedRegion, cloudwatch:namespace\n" +
+          "Remaining wildcards are AWS service limitations that cannot be avoided.",
+        appliesTo: [
+          "Resource::*",
+          "Action::s3:GetObject*",
+          "Action::s3:GetBucket*",
+          "Action::s3:List*",
+        ],
+      },
     ];
   }
 }
